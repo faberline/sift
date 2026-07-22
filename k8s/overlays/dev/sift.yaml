@@ -1,3 +1,4 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-dev-instance" tracker="1606" reason="Declare the supported one-shard, one-replica GKE development acceptance topology."
 apiVersion: sift.axiom.dev/v1alpha1
 kind: Sift
 metadata:
@@ -9,3 +10,4 @@ spec:
   voterCount: 1
   dataSize: 10Gi
   auth: "off"
+# HANDWRITE-END
