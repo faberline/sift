@@ -1,4 +1,4 @@
-// HANDWRITE-BEGIN gap="sift-operational-event-v2-model" tracker="1657" reason="Define OperationalEventV2, typed attributes, eight signals, v1 wire shape, incoming compatibility decode, and deterministic upcast."
+// HANDWRITE-BEGIN gap="sift-operational-event-v2-model" tracker="1657" reason="Define the phase-one operational-event model and validated wire decode."
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
@@ -9,40 +9,34 @@ use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-pub const EVENT_SCHEMA_VERSION_V1: u16 = 1;
 pub const EVENT_SCHEMA_VERSION: u16 = 2;
 pub const EVENT_SCHEMA_URL: &str = "https://cclab.dev/sift/schemas/operational-event/v2";
 
-/// Canonical signal kinds. GenAI generation/tool/RAG observations are span
-/// specializations; sessions are correlation groups rather than a signal.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, ToSchema, ValueEnum)]
+/// Phase-one signal kinds. Other SRE data is added only through a later
+/// versioned public contract.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    ToSchema,
+    ValueEnum,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalKind {
     Log,
     Span,
     Metric,
-    Exception,
-    AuditEvent,
-    ChangeEvent,
-    Profile,
-    Evaluation,
 }
 
 impl SignalKind {
-    pub const ALL: [Self; 8] = [
-        Self::Log,
-        Self::Span,
-        Self::Metric,
-        Self::Exception,
-        Self::AuditEvent,
-        Self::ChangeEvent,
-        Self::Profile,
-        Self::Evaluation,
-    ];
-
-    fn existed_in_v1(self) -> bool {
-        !matches!(self, Self::Profile | Self::Evaluation)
-    }
+    pub const ALL: [Self; 3] = [Self::Log, Self::Metric, Self::Span];
 }
 
 impl std::fmt::Display for SignalKind {
@@ -51,11 +45,6 @@ impl std::fmt::Display for SignalKind {
             Self::Log => "log",
             Self::Span => "span",
             Self::Metric => "metric",
-            Self::Exception => "exception",
-            Self::AuditEvent => "audit_event",
-            Self::ChangeEvent => "change_event",
-            Self::Profile => "profile",
-            Self::Evaluation => "evaluation",
         })
     }
 }
@@ -150,6 +139,11 @@ pub struct MetricExemplar {
 pub struct MetricPoint {
     pub name: String,
     pub value: f64,
+    /// Prometheus Remote Write uses a reserved NaN bit pattern to mark a
+    /// series stale. Sift stores that state explicitly so durable JSON never
+    /// contains a non-finite number.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stale: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
     pub temporality: MetricTemporality,
@@ -316,6 +310,9 @@ fn validate_metric(metric: &MetricPoint) -> Result<()> {
     if metric.name.trim().is_empty() || !metric.value.is_finite() {
         bail!("metric name must be non-empty and value must be finite");
     }
+    if metric.stale && metric.value != 0.0 {
+        bail!("stale metric points must use a zero storage value");
+    }
     for exemplar in &metric.exemplars {
         if !exemplar.value.is_finite()
             || exemplar.trace_id.trim().is_empty()
@@ -327,97 +324,11 @@ fn validate_metric(metric: &MetricPoint) -> Result<()> {
     Ok(())
 }
 
-/// Exact bootstrap wire shape retained only for journal/snapshot/raft upcast.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct EventEnvelopeV1 {
-    pub schema_version: u16,
-    pub event_id: String,
-    pub occurred_at: String,
-    pub signal: SignalKind,
-    #[serde(default)]
-    pub resource: BTreeMap<String, String>,
-    #[serde(default)]
-    pub attributes: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub severity: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metric: Option<MetricPoint>,
-    pub payload: Value,
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
-impl TryFrom<EventEnvelopeV1> for OperationalEventV2 {
-    type Error = anyhow::Error;
-
-    fn try_from(event: EventEnvelopeV1) -> Result<Self> {
-        if event.schema_version != EVENT_SCHEMA_VERSION_V1 {
-            bail!(
-                "unsupported legacy schema_version {}; expected {}",
-                event.schema_version,
-                EVENT_SCHEMA_VERSION_V1
-            );
-        }
-        if !event.signal.existed_in_v1() {
-            bail!("legacy schema v1 did not support signal {}", event.signal);
-        }
-        let project = first_resource(
-            &event.resource,
-            &["gcp.project_id", "project.id", "cloud.account.id"],
-        )
-        .unwrap_or("legacy")
-        .to_string();
-        let environment = first_resource(
-            &event.resource,
-            &["deployment.environment.name", "environment"],
-        )
-        .unwrap_or("unknown")
-        .to_string();
-        let occurred_at = event.occurred_at;
-        let mut attributes = event
-            .attributes
-            .into_iter()
-            .map(|(key, value)| (key, AttributeValue::String(value)))
-            .collect::<BTreeMap<_, _>>();
-        attributes.insert(
-            "sift.original_schema_version".to_string(),
-            AttributeValue::Int(EVENT_SCHEMA_VERSION_V1.into()),
-        );
-        let canonical = Self {
-            schema_version: EVENT_SCHEMA_VERSION,
-            schema_url: EVENT_SCHEMA_URL.to_string(),
-            event_id: event.event_id,
-            project,
-            environment,
-            occurred_at: occurred_at.clone(),
-            observed_at: occurred_at,
-            signal: event.signal,
-            resource: event.resource,
-            instrumentation_scope: None,
-            attributes,
-            trace_id: event.trace_id,
-            span_id: event.span_id,
-            request_id: None,
-            session_id: None,
-            severity: event.severity,
-            metric: event.metric,
-            blob_refs: Vec::new(),
-            payload: event.payload,
-        };
-        canonical.validate()?;
-        Ok(canonical)
-    }
-}
-
-fn first_resource<'a>(resource: &'a BTreeMap<String, String>, keys: &[&str]) -> Option<&'a str> {
-    keys.iter()
-        .find_map(|key| resource.get(*key).map(String::as_str))
-}
-
-/// Deserializes either the retained v1 wire shape or canonical V2 and always
-/// exposes V2 to the service core.
+/// Deserializes the current event shape and validates it before use.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct IncomingEvent(pub OperationalEventV2);
@@ -442,8 +353,8 @@ impl<'de> Deserialize<'de> for IncomingEvent {
 
 pub fn decode_event_json(bytes: &[u8]) -> Result<OperationalEventV2> {
     serde_json::from_slice::<IncomingEvent>(bytes)
-        .context("decode operational event")
         .map(IncomingEvent::into_inner)
+        .map_err(|error| anyhow::anyhow!("decode operational event: {error}"))
 }
 
 fn decode_event_value(value: Value) -> Result<OperationalEventV2> {
@@ -451,17 +362,13 @@ fn decode_event_value(value: Value) -> Result<OperationalEventV2> {
         .get("schema_version")
         .and_then(Value::as_u64)
         .context("operational event requires integer schema_version")?;
-    match u16::try_from(version).context("schema_version exceeds u16")? {
-        EVENT_SCHEMA_VERSION_V1 => {
-            OperationalEventV2::try_from(serde_json::from_value::<EventEnvelopeV1>(value)?)
-        }
-        EVENT_SCHEMA_VERSION => {
-            let event = serde_json::from_value::<OperationalEventV2>(value)?;
-            event.validate()?;
-            Ok(event)
-        }
-        version => bail!("unsupported schema_version {version}"),
+    let version = u16::try_from(version).context("schema_version exceeds u16")?;
+    if version != EVENT_SCHEMA_VERSION {
+        bail!("unsupported schema_version {version}");
     }
+    let event = serde_json::from_value::<OperationalEventV2>(value)?;
+    event.validate()?;
+    Ok(event)
 }
 
 // HANDWRITE-END

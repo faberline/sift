@@ -1,18 +1,14 @@
 // HANDWRITE-BEGIN gap="sift-logging-projection" tracker="1664" reason="Define the log record/query/page schema, fixed-field embedded Lumen index, retention, snapshot, restore, and typed query behavior."
 use std::{
-    any::Any,
     collections::{BTreeMap, HashSet},
     sync::RwLock,
 };
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
-use lumen::{
-    storage::{Engine, SnapshotV1},
-    types::{
-        Analyzer, CreateCollectionRequest, FieldSpec, FieldType, FieldValue, IndexItem,
-        IndexRequest, MatchOp, MatchQuery, QueryNode, SearchRequest,
-    },
+use index_text::{
+    Analyzer, FieldSpec, MatchOperator, MemoryTextIndex, TextDocument, TextIndex,
+    TextIndexSnapshot, TextQuery, TextSchema,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -24,10 +20,9 @@ use super::{model::ProjectionDescriptor, runtime::Projection};
 
 pub const PROJECTION_LOGGING_STORE: &str = "logging-store";
 pub const LOGGING_SCHEMA_VERSION: u32 = 1;
-pub const DEFAULT_RETAINED_LOG_RECORDS: usize = 1_000_000;
+pub const DEFAULT_RETAINED_LOG_RECORDS: usize = 100_000;
 pub const MAX_LOG_QUERY_LIMIT: usize = 1_000;
 
-const COLLECTION: &str = "sift_logs_v1";
 const RESOURCE_TYPE: &str = "gcp.resource.type";
 const SERVICE_NAME: &str = "service.name";
 
@@ -148,7 +143,8 @@ struct LoggingState {
 
 #[derive(Deserialize, Serialize)]
 struct LoggingSnapshot {
-    lumen: SnapshotV1,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text_index: Option<TextIndexSnapshot>,
     records: BTreeMap<u64, LogRecordV1>,
     cursor_by_event_id: BTreeMap<String, u64>,
     max_records: usize,
@@ -167,7 +163,7 @@ struct QueryBounds {
 }
 
 pub struct LoggingProjection {
-    engine: Engine,
+    text_index: MemoryTextIndex,
     state: RwLock<LoggingState>,
     max_records: usize,
 }
@@ -181,17 +177,10 @@ impl LoggingProjection {
         if max_records == 0 {
             bail!("logging retention must keep at least one record");
         }
-        let engine = Engine::new();
-        engine
-            .create_collection(
-                COLLECTION,
-                CreateCollectionRequest {
-                    fields: fixed_schema(),
-                },
-            )
-            .context("create embedded logging Lumen collection")?;
+        let text_index =
+            MemoryTextIndex::new(fixed_schema()?).context("create shared logging text index")?;
         Ok(Self {
-            engine,
+            text_index,
             state: RwLock::new(LoggingState::default()),
             max_records,
         })
@@ -201,25 +190,11 @@ impl LoggingProjection {
         let bounds = query.validate()?;
         let candidates = match query.text.as_deref().map(str::trim) {
             Some(text) if !text.is_empty() => Some(
-                self.engine
+                self.text_index
                     .search(
-                        COLLECTION,
-                        SearchRequest {
-                            query: QueryNode::Match(MatchQuery {
-                                field: "body".into(),
-                                text: text.into(),
-                                op: MatchOp::And,
-                            }),
-                            limit: self.max_records.min(u32::MAX as usize) as u32,
-                            offset: 0,
-                            cursor: None,
-                            routing_key: None,
-                            sort: None,
-                            track_total: true,
-                            collapse: None,
-                        },
+                        &TextQuery::match_text("body", text, MatchOperator::All),
+                        self.max_records,
                     )?
-                    .hits
                     .into_iter()
                     .map(|hit| hit.external_id)
                     .collect::<HashSet<_>>(),
@@ -254,62 +229,7 @@ impl LoggingProjection {
     }
 
     fn index(&self, record: &LogRecordV1) -> Result<()> {
-        let mut items = Vec::with_capacity(13);
-        let mut push_string = |field: &str, value: &str| {
-            if !value.is_empty() {
-                items.push(IndexItem {
-                    external_id: record.event_id.clone(),
-                    field: field.into(),
-                    value: FieldValue::String(value.into()),
-                    version: Some(record.cursor),
-                });
-            }
-        };
-        push_string("body", &record.body_text);
-        push_string("project", &record.project);
-        push_string("environment", &record.environment);
-        push_string("severity", record.severity.as_deref().unwrap_or_default());
-        push_string(
-            "resource_type",
-            record
-                .resource
-                .get(RESOURCE_TYPE)
-                .map(String::as_str)
-                .unwrap_or_default(),
-        );
-        push_string(
-            "service_name",
-            record
-                .resource
-                .get(SERVICE_NAME)
-                .map(String::as_str)
-                .unwrap_or_default(),
-        );
-        push_string("trace_id", record.trace_id.as_deref().unwrap_or_default());
-        push_string("span_id", record.span_id.as_deref().unwrap_or_default());
-        push_string(
-            "request_id",
-            record.request_id.as_deref().unwrap_or_default(),
-        );
-        push_string(
-            "session_id",
-            record.session_id.as_deref().unwrap_or_default(),
-        );
-        push_string("occurred_at", &record.occurred_at);
-        push_string("coexistence_key", &record.coexistence_key);
-        items.push(IndexItem {
-            external_id: record.event_id.clone(),
-            field: "cursor".into(),
-            value: FieldValue::Number(record.cursor as f64),
-            version: Some(record.cursor),
-        });
-        self.engine.index(
-            COLLECTION,
-            IndexRequest {
-                items,
-                request_id: Some(format!("sift-log:{}:{}", record.event_id, record.cursor)),
-            },
-        )?;
+        self.text_index.upsert(index_document(record))?;
         Ok(())
     }
 }
@@ -357,6 +277,12 @@ impl Projection for LoggingProjection {
             let Some(oldest) = state.records.keys().next().copied() else {
                 break;
             };
+            let event_id = state
+                .records
+                .get(&oldest)
+                .map(|record| record.event_id.clone())
+                .context("oldest retained log disappeared")?;
+            self.text_index.delete(&event_id, None)?;
             if let Some(removed) = state.records.remove(&oldest) {
                 state.cursor_by_event_id.remove(&removed.event_id);
             }
@@ -370,7 +296,7 @@ impl Projection for LoggingProjection {
             .read()
             .expect("logging projection state lock poisoned");
         canonical_json(&LoggingSnapshot {
-            lumen: self.engine.snapshot()?,
+            text_index: Some(self.text_index.snapshot()?),
             records: state.records.clone(),
             cursor_by_event_id: state.cursor_by_event_id.clone(),
             max_records: self.max_records,
@@ -387,7 +313,13 @@ impl Projection for LoggingProjection {
                 self.max_records
             );
         }
-        self.engine.restore(snapshot.lumen)?;
+        match snapshot.text_index {
+            Some(text_index) if self.text_index.restore(&text_index).is_ok() => {}
+            _ => self
+                .text_index
+                .rebuild(snapshot.records.values().map(index_document).collect())
+                .context("rebuild logging index from retained projection records")?,
+        }
         *self
             .state
             .write()
@@ -411,10 +343,6 @@ impl Projection for LoggingProjection {
             },
         )?)))
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 fn normalize(stored: &StoredEvent) -> LogRecordV1 {
@@ -424,13 +352,20 @@ fn normalize(stored: &StoredEvent) -> LogRecordV1 {
         .get("jsonPayload")
         .cloned()
         .unwrap_or_else(|| event.payload.clone());
-    let body_text = json_payload
-        .get("message")
-        .or_else(|| json_payload.get("body"))
-        .or_else(|| event.payload.get("body"))
-        .or_else(|| event.payload.get("message"))
-        .and_then(serde_json::Value::as_str)
+    let body_text = event
+        .attributes
+        .get("otel.log.body")
+        .and_then(AttributeValue::as_str)
         .map(str::to_owned)
+        .or_else(|| {
+            json_payload
+                .get("message")
+                .or_else(|| json_payload.get("body"))
+                .or_else(|| event.payload.get("body"))
+                .or_else(|| event.payload.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
         .unwrap_or_else(|| json_payload.to_string());
     LogRecordV1 {
         cursor: stored.cursor,
@@ -517,12 +452,9 @@ fn default_query_limit() -> usize {
     100
 }
 
-fn fixed_schema() -> BTreeMap<String, FieldSpec> {
+fn fixed_schema() -> Result<TextSchema> {
     let mut fields = BTreeMap::new();
-    fields.insert(
-        "body".into(),
-        field_spec(FieldType::Text, Some(Analyzer::WhitespaceLower)),
-    );
+    fields.insert("body".into(), FieldSpec::text(Analyzer::WhitespaceLower));
     for name in [
         "project",
         "environment",
@@ -536,22 +468,38 @@ fn fixed_schema() -> BTreeMap<String, FieldSpec> {
         "occurred_at",
         "coexistence_key",
     ] {
-        fields.insert(name.into(), field_spec(FieldType::Keyword, None));
+        fields.insert(name.into(), FieldSpec::keyword());
     }
-    fields.insert("cursor".into(), field_spec(FieldType::Number, None));
-    fields
+    TextSchema::new(fields).map_err(Into::into)
 }
 
-fn field_spec(field_type: FieldType, analyzer: Option<Analyzer>) -> FieldSpec {
-    FieldSpec {
-        field_type,
-        analyzer,
-        multi: None,
-        dim: None,
-        metric: None,
-        backend: None,
-        quantize: None,
+fn index_document(record: &LogRecordV1) -> TextDocument {
+    let mut document = TextDocument::new(&record.event_id, record.cursor)
+        .with_field("body", &record.body_text)
+        .with_field("project", &record.project)
+        .with_field("environment", &record.environment)
+        .with_field("occurred_at", &record.occurred_at)
+        .with_field("coexistence_key", &record.coexistence_key);
+    for (field, value) in [
+        ("severity", record.severity.as_deref()),
+        (
+            "resource_type",
+            record.resource.get(RESOURCE_TYPE).map(String::as_str),
+        ),
+        (
+            "service_name",
+            record.resource.get(SERVICE_NAME).map(String::as_str),
+        ),
+        ("trace_id", record.trace_id.as_deref()),
+        ("span_id", record.span_id.as_deref()),
+        ("request_id", record.request_id.as_deref()),
+        ("session_id", record.session_id.as_deref()),
+    ] {
+        if let Some(value) = value.filter(|value| !value.is_empty()) {
+            document = document.with_field(field, value);
+        }
     }
+    document
 }
 
 fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {

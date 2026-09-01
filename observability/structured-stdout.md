@@ -35,10 +35,10 @@ flowchart LR
 
     runner --> collector["sift collect: file/stdin adapter"]
     collector --> core["Sift collector core: validate, map, batch, retry"]
-    core --> ingest["POST /v1/events:write"]
-    ingest --> journal["durable raw journal"]
+    core --> ingest["POST /v1/logs"]
+    ingest --> journal["durable logs WAL"]
     journal --> projection["logging projection"]
-    projection --> query["POST /v1/logs:query"]
+    projection --> query["POST /api/v1/query"]
 ```
 
 VAT is a test-environment orchestrator in this flow, not an observability
@@ -67,9 +67,9 @@ flowchart LR
 
 The application pod has no Sift sidecar, SDK, endpoint, token, or backpressure
 loop. `sift k8s collector render` emits the node-level DaemonSet. It mounts
-`/var/log/pods` read-only, keeps its device/inode checkpoint under a dedicated
-writable host path, reads endpoint/project metadata from a ConfigMap and the
-token from a Secret, and has no Kubernetes API permissions or token mount.
+`/var/log/pods` read-only and keeps its device/inode checkpoint below
+`/var/lib/sift/agent`. The operator supplies an audience-bound projected
+ServiceAccount token. The collector rereads that token for every request.
 
 ## `axiom.service.log.v1`
 
@@ -96,8 +96,8 @@ new local root so logging never depends on an exporter or collector being up.
 ## Collector guarantees
 
 - File, stdin, and CRI sources implement one source/cursor interface and share
-  the sole strict schema decoder, `OperationalEventV2` mapper, bounded batch,
-  retry client, quarantine writer, and acknowledgment-before-commit runtime.
+  the sole strict schema decoder, internal event mapper, bounded batch, retry
+  client, quarantine writer, and acknowledgment-before-commit runtime.
 - Event ids derive from stable source identity, byte offset, and source bytes,
   so replay is idempotent at Sift ingest.
 - Checkpoints advance only after the valid batch is acknowledged and invalid

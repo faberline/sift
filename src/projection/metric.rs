@@ -1,6 +1,5 @@
 // HANDWRITE-BEGIN gap="sift-metric-projection" tracker="1667" reason="Define series identity, chunks, temporality, histograms, exemplars, overflow, rollups, typed query, snapshot, and rebuild."
 use std::{
-    any::Any,
     collections::{BTreeMap, BTreeSet},
     sync::RwLock,
 };
@@ -18,7 +17,7 @@ use crate::{
 use super::{model::ProjectionDescriptor, runtime::Projection};
 
 pub const PROJECTION_METRIC_STORE: &str = "metric-store";
-pub const METRIC_SCHEMA_VERSION: u32 = 1;
+pub const METRIC_SCHEMA_VERSION: u32 = 2;
 pub const METRIC_CHUNK_POINTS: usize = 256;
 pub const DEFAULT_METRIC_CARDINALITY_LIMIT: usize = 10_000;
 pub const DEFAULT_RETAINED_POINTS_PER_SERIES: usize = 100_000;
@@ -150,6 +149,8 @@ pub struct MetricPointV1 {
     pub occurred_at: String,
     pub time_unix_nano: i64,
     pub value: f64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stale: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub histogram: Option<MetricHistogramV1>,
     #[serde(default)]
@@ -196,6 +197,8 @@ pub enum MetricAggregation {
 pub struct MetricQuery {
     pub project: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_time: Option<String>,
@@ -221,6 +224,7 @@ impl MetricQuery {
     pub fn for_project(project: impl Into<String>) -> Self {
         Self {
             project: project.into(),
+            environment: None,
             name: None,
             start_time: None,
             end_time: None,
@@ -253,6 +257,7 @@ impl MetricQuery {
 pub struct MetricSeriesResultV1 {
     pub series_id: String,
     pub project: String,
+    pub environment: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
@@ -285,6 +290,7 @@ pub struct MetricPage {
 struct StoredMetricSeries {
     series_id: String,
     project: String,
+    environment: String,
     name: String,
     unit: Option<String>,
     temporality: MetricTemporality,
@@ -352,6 +358,10 @@ impl MetricProjection {
         let mut results = Vec::new();
         for series in state.series.values() {
             if series.project != query.project
+                || query
+                    .environment
+                    .as_ref()
+                    .is_some_and(|environment| &series.environment != environment)
                 || query.name.as_ref().is_some_and(|name| &series.name != name)
                 || query
                     .after_series_id
@@ -376,9 +386,22 @@ impl MetricProjection {
             if points.is_empty() {
                 continue;
             }
-            let (semantic_total, reset_count) = semantic_total(series.temporality, &points);
-            let aggregate = aggregate(query.aggregation, semantic_total, &points);
-            let histogram = merge_histograms(&points)?;
+            let numeric_points = points
+                .iter()
+                .filter(|point| !point.stale)
+                .cloned()
+                .collect::<Vec<_>>();
+            let (aggregate, reset_count, histogram) = if numeric_points.is_empty() {
+                (None, 0, None)
+            } else {
+                let (semantic_total, reset_count) =
+                    semantic_total(series.temporality, &numeric_points);
+                (
+                    aggregate(query.aggregation, semantic_total, &numeric_points),
+                    reset_count,
+                    merge_histograms(&numeric_points)?,
+                )
+            };
             let rollups = series
                 .rollups
                 .iter()
@@ -389,6 +412,7 @@ impl MetricProjection {
             results.push(MetricSeriesResultV1 {
                 series_id: series.series_id.clone(),
                 project: series.project.clone(),
+                environment: series.environment.clone(),
                 name: series.name.clone(),
                 unit: series.unit.clone(),
                 temporality: series.temporality,
@@ -457,6 +481,7 @@ impl Projection for MetricProjection {
         let exact_id = sha256(
             identity_material(
                 &event.project,
+                &event.environment,
                 metric,
                 &event.resource,
                 &event.attributes,
@@ -472,6 +497,7 @@ impl Projection for MetricProjection {
         {
             return Ok(());
         }
+        state.cursor_by_event_id.remove(&event.event_id);
         let known = state.series.contains_key(&exact_id);
         let current_count = state
             .exact_identities
@@ -484,6 +510,7 @@ impl Projection for MetricProjection {
             sha256(
                 identity_material(
                     &event.project,
+                    &event.environment,
                     metric,
                     &BTreeMap::new(),
                     &BTreeMap::new(),
@@ -505,51 +532,71 @@ impl Projection for MetricProjection {
             occurred_at: event.occurred_at.clone(),
             time_unix_nano: timestamp,
             value: metric.value,
+            stale: metric.stale,
             histogram: payload.histogram,
             exemplars: metric.exemplars.clone(),
         };
-        let series = state
-            .series
-            .entry(series_id.clone())
-            .or_insert_with(|| StoredMetricSeries {
-                series_id,
-                project: event.project.clone(),
-                name: metric.name.clone(),
-                unit: metric.unit.clone(),
-                temporality: metric.temporality,
-                resource: if overflow {
-                    BTreeMap::from([("sift.metric.overflow".into(), "true".into())])
-                } else {
-                    event.resource.clone()
-                },
-                attributes: if overflow {
-                    BTreeMap::new()
-                } else {
-                    event.attributes.clone()
-                },
-                overflow,
-                chunks: Vec::new(),
-                rollups: Vec::new(),
+        let (removed_event_ids, current_retained) = {
+            let series =
+                state
+                    .series
+                    .entry(series_id.clone())
+                    .or_insert_with(|| StoredMetricSeries {
+                        series_id,
+                        project: event.project.clone(),
+                        environment: event.environment.clone(),
+                        name: metric.name.clone(),
+                        unit: metric.unit.clone(),
+                        temporality: metric.temporality,
+                        resource: if overflow {
+                            BTreeMap::from([("sift.metric.overflow".into(), "true".into())])
+                        } else {
+                            event.resource.clone()
+                        },
+                        attributes: if overflow {
+                            BTreeMap::new()
+                        } else {
+                            event.attributes.clone()
+                        },
+                        overflow,
+                        chunks: Vec::new(),
+                        rollups: Vec::new(),
+                    });
+            if series.temporality != metric.temporality {
+                bail!("metric series temporality changed without changing identity");
+            }
+            let mut points = flatten_points(series);
+            points.retain(|existing| existing.event_id != event.event_id);
+            points.push(point);
+            points.sort_by(|left, right| {
+                left.time_unix_nano
+                    .cmp(&right.time_unix_nano)
+                    .then_with(|| left.cursor.cmp(&right.cursor))
+                    .then_with(|| left.event_id.cmp(&right.event_id))
             });
-        if series.temporality != metric.temporality {
-            bail!("metric series temporality changed without changing identity");
+            let removed = if points.len() > self.retained_points_per_series {
+                points
+                    .drain(..points.len() - self.retained_points_per_series)
+                    .map(|point| point.event_id)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            series.chunks = make_chunks(&points);
+            series.rollups = make_rollups(&points)?;
+            let current_retained = points
+                .iter()
+                .any(|retained| retained.event_id == event.event_id);
+            (removed, current_retained)
+        };
+        for event_id in removed_event_ids {
+            state.cursor_by_event_id.remove(&event_id);
         }
-        let mut points = flatten_points(series);
-        points.push(point);
-        points.sort_by(|left, right| {
-            left.time_unix_nano
-                .cmp(&right.time_unix_nano)
-                .then_with(|| left.cursor.cmp(&right.cursor))
-                .then_with(|| left.event_id.cmp(&right.event_id))
-        });
-        if points.len() > self.retained_points_per_series {
-            points.drain(..points.len() - self.retained_points_per_series);
+        if current_retained {
+            state
+                .cursor_by_event_id
+                .insert(event.event_id.clone(), stored.cursor);
         }
-        series.chunks = make_chunks(&points);
-        series.rollups = make_rollups(&points)?;
-        state
-            .cursor_by_event_id
-            .insert(event.event_id.clone(), stored.cursor);
         Ok(())
     }
 
@@ -581,14 +628,11 @@ impl Projection for MetricProjection {
     fn semantic_digest(&self) -> Result<String> {
         Ok(sha256(&self.snapshot()?))
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 fn identity_material(
     project: &str,
+    environment: &str,
     metric: &MetricPoint,
     resource: &BTreeMap<String, String>,
     attributes: &BTreeMap<String, AttributeValue>,
@@ -596,6 +640,7 @@ fn identity_material(
 ) -> Result<String> {
     serde_json::to_string(&serde_json::json!({
         "project": project,
+        "environment": environment,
         "name": metric.name,
         "unit": metric.unit,
         "temporality": metric.temporality,
@@ -632,7 +677,7 @@ fn make_rollups(points: &[MetricPointV1]) -> Result<Vec<MetricRollupV1>> {
     for window_seconds in ROLLUP_WINDOWS_SECONDS {
         let window_nanos = (window_seconds as i64) * 1_000_000_000;
         let mut groups = BTreeMap::<i64, Vec<&MetricPointV1>>::new();
-        for point in points {
+        for point in points.iter().filter(|point| !point.stale) {
             let start = point.time_unix_nano.div_euclid(window_nanos) * window_nanos;
             groups.entry(start).or_default().push(point);
         }
@@ -779,5 +824,9 @@ fn sha256(bytes: impl AsRef<[u8]>) -> String {
 
 const fn default_query_limit() -> usize {
     100
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 // HANDWRITE-END

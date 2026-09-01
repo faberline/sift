@@ -1,11 +1,8 @@
 // HANDWRITE-BEGIN gap="missing-generator:logic:4643a21b" tracker="1873" reason="Persist collector.checkpoint.v1 by atomic fsynced replace and collector.rejection.v1 by bounded append diagnostics."
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use service_durability::{atomic_write, FsyncPolicy};
 
 pub const CHECKPOINT_SCHEMA: &str = "collector.checkpoint.v1";
 pub const REJECTION_SCHEMA: &str = "collector.rejection.v1";
@@ -40,10 +37,8 @@ impl CollectorCheckpoint {
         if !path.exists() {
             return Ok(Self::new(source_id));
         }
-        let bytes = std::fs::read(path)
-            .with_context(|| format!("read collector checkpoint {}", path.display()))?;
-        let checkpoint: Self = serde_json::from_slice(&bytes)
-            .with_context(|| format!("decode collector checkpoint {}", path.display()))?;
+        let checkpoint: Self = service_collector::load_json_checkpoint(path)?
+            .context("collector checkpoint disappeared while loading")?;
         if checkpoint.schema != CHECKPOINT_SCHEMA {
             bail!(
                 "unsupported collector checkpoint schema {}; expected {}",
@@ -61,9 +56,7 @@ impl CollectorCheckpoint {
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        let bytes = serde_json::to_vec_pretty(self)?;
-        atomic_write(path, &bytes, FsyncPolicy::Always)
-            .with_context(|| format!("commit collector checkpoint {}", path.display()))
+        service_collector::save_json_checkpoint(path, self)
     }
 }
 
@@ -97,33 +90,6 @@ impl QuarantineEntry {
             preview: truncate_utf8(&String::from_utf8_lossy(bytes), MAX_REJECTION_PREVIEW_BYTES),
         }
     }
-}
-
-pub fn append_quarantine(path: &Path, entries: &[QuarantineEntry]) -> Result<()> {
-    if entries.is_empty() {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create quarantine directory {}", parent.display()))?;
-        }
-    }
-    let mut buffer = Vec::new();
-    for entry in entries {
-        serde_json::to_writer(&mut buffer, entry)?;
-        buffer.push(b'\n');
-    }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .with_context(|| format!("open collector quarantine {}", path.display()))?;
-    file.write_all(&buffer)
-        .with_context(|| format!("append collector quarantine {}", path.display()))?;
-    file.sync_all()
-        .with_context(|| format!("fsync collector quarantine {}", path.display()))?;
-    Ok(())
 }
 
 fn truncate_utf8(value: &str, max_bytes: usize) -> String {
@@ -170,7 +136,7 @@ mod tests {
             "e".repeat(MAX_REJECTION_ERROR_BYTES + 10),
             "x".repeat(MAX_REJECTION_PREVIEW_BYTES + 10).as_bytes(),
         );
-        append_quarantine(&path, &[entry]).unwrap();
+        service_collector::append_jsonl(&path, &[entry]).unwrap();
         let line = std::fs::read_to_string(path).unwrap();
         let decoded: QuarantineEntry = serde_json::from_str(line.trim()).unwrap();
         assert_eq!(decoded.message.len(), MAX_REJECTION_ERROR_BYTES);
