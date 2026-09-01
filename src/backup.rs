@@ -6,7 +6,10 @@
 //! process, so snapshot consistency and file ownership remain with
 //! [`DurableJournal`].
 
-use std::time::{Duration, SystemTime};
+use std::{
+    path::Path,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::{bail, Context, Result};
 use service_backup::{
@@ -46,41 +49,41 @@ pub fn backup_journal(
 /// non-200 response, timeout, transport failure, or body-read failure returns
 /// an error and no bytes.
 pub async fn fetch_live_snapshot(base_url: &str, token: Option<&str>) -> Result<Vec<u8>> {
-    let url = format!("{}/admin/backup", base_url.trim_end_matches('/'));
-    let client = reqwest::Client::builder()
-        .timeout(LIVE_BACKUP_TIMEOUT)
-        .build()
-        .context("build live snapshot HTTP client")?;
-    let mut request = client.get(&url);
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
+    fetch_live_snapshot_authenticated(base_url, token, None, "sift.axiom.dev", "*").await
+}
+
+/// Fetch a live snapshot with either a static token or a rotating projected
+/// ServiceAccount token. The project header is the SubjectAccessReview scope.
+pub async fn fetch_live_snapshot_authenticated(
+    base_url: &str,
+    token: Option<&str>,
+    token_file: Option<&Path>,
+    token_audience: &str,
+    project: &str,
+) -> Result<Vec<u8>> {
+    if token.is_some() && token_file.is_some() {
+        bail!("live backup token and token file are mutually exclusive");
     }
-    let mut response = request.send().await.with_context(|| format!("GET {url}"))?;
-    let status = response.status();
-    if status != reqwest::StatusCode::OK {
-        let mut diagnostic = Vec::new();
-        while diagnostic.len() < MAX_ERROR_BODY_BYTES {
-            let Some(chunk) = response
-                .chunk()
-                .await
-                .with_context(|| format!("read bounded error response from {url}"))?
-            else {
-                break;
-            };
-            let remaining = MAX_ERROR_BODY_BYTES - diagnostic.len();
-            diagnostic.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
-            if chunk.len() > remaining {
-                break;
-            }
-        }
-        let diagnostic = String::from_utf8_lossy(&diagnostic);
-        bail!("GET {url} returned {status}: {diagnostic}");
+    let transport = service_backup::AdminSnapshotTransport::with_config(
+        service_backup::AdminSnapshotTransportConfig {
+            operation_timeout: LIVE_BACKUP_TIMEOUT,
+            max_diagnostic_bytes: MAX_ERROR_BODY_BYTES,
+            ..Default::default()
+        },
+    )
+    .context("build live snapshot HTTP transport")?;
+    let mut request = service_backup::AdminSnapshotRequest::new()
+        .with_header("x-sift-project", project)
+        .context("build Sift live snapshot project metadata")?;
+    if let Some(path) = token_file {
+        request = request.with_projected_bearer(path, token_audience);
+    } else if let Some(token) = token {
+        request = request.with_static_bearer(token);
     }
-    response
-        .bytes()
+    transport
+        .fetch(base_url, &request)
         .await
-        .map(|bytes| bytes.to_vec())
-        .with_context(|| format!("read snapshot response body from {url}"))
+        .map_err(anyhow::Error::new)
 }
 
 /// Fetch the live service snapshot and upload those exact bytes through the
@@ -96,12 +99,35 @@ pub async fn backup_live_journal(
     retention_secs: Option<u64>,
 ) -> Result<BackupRunResult> {
     let snapshot = fetch_live_snapshot(base_url, token).await?;
+    upload_snapshot(&snapshot, destination_uri, retention_secs)
+}
+
+pub async fn backup_live_journal_authenticated(
+    base_url: &str,
+    token: Option<&str>,
+    token_file: Option<&Path>,
+    token_audience: &str,
+    project: &str,
+    destination_uri: &str,
+    retention_secs: Option<u64>,
+) -> Result<BackupRunResult> {
+    let snapshot =
+        fetch_live_snapshot_authenticated(base_url, token, token_file, token_audience, project)
+            .await?;
+    upload_snapshot(&snapshot, destination_uri, retention_secs)
+}
+
+fn upload_snapshot(
+    snapshot: &[u8],
+    destination_uri: &str,
+    retention_secs: Option<u64>,
+) -> Result<BackupRunResult> {
     let destination = BackupDestination::from_uri(destination_uri)?;
     let retention = retention_secs
         .map(RetentionPolicy::max_age_seconds)
         .unwrap_or_default();
     let sink = sink_from_destination(&destination)?;
-    run_backup_once(sink.as_ref(), SystemTime::now(), &snapshot, &retention)
+    run_backup_once(sink.as_ref(), SystemTime::now(), snapshot, &retention)
 }
 
 /// Load an exact backup object through the shared source contract and replace

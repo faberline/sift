@@ -50,6 +50,8 @@ pub struct CollectorConfig {
     pub source_id: String,
     pub endpoint: String,
     pub token: Option<String>,
+    pub token_file: Option<PathBuf>,
+    pub token_audience: String,
     pub project: String,
     pub environment: String,
     pub checkpoint_path: PathBuf,
@@ -70,6 +72,7 @@ impl CollectorConfig {
             ("endpoint", self.endpoint.as_str()),
             ("project", self.project.as_str()),
             ("environment", self.environment.as_str()),
+            ("token_audience", self.token_audience.as_str()),
         ] {
             if value.trim().is_empty() {
                 bail!("collector {name} must not be empty");
@@ -77,6 +80,9 @@ impl CollectorConfig {
             if value.len() > 512 {
                 bail!("collector {name} must not exceed 512 bytes");
             }
+        }
+        if self.token.is_some() && self.token_file.is_some() {
+            bail!("collector token and token_file are mutually exclusive");
         }
         if self.batch_size == 0 || self.batch_size > MAX_BATCH_SIZE {
             bail!("collector batch_size must be between 1 and {MAX_BATCH_SIZE}");
@@ -150,6 +156,8 @@ mod tests {
             source_id: "fixture".to_string(),
             endpoint: "http://127.0.0.1:7380".to_string(),
             token: None,
+            token_file: None,
+            token_audience: "sift.axiom.dev".to_string(),
             project: "local".to_string(),
             environment: "test".to_string(),
             checkpoint_path: "checkpoint.json".into(),

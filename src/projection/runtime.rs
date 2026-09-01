@@ -1,230 +1,155 @@
-// HANDWRITE-BEGIN gap="sift-projection-runtime" tracker="1660" reason="Register factories, restore atomic states, catch up asynchronously, wait for cursors, and rebuild from raw."
-use std::{
-    any::Any,
-    collections::BTreeMap,
-    fs,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
+//! Sift adapters for the shared typed projection runtime.
 
-use anyhow::{bail, Context, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use chrono::{SecondsFormat, Utc};
+use std::{path::Path, sync::Arc, time::Duration};
+
+use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
-use tokio::sync::Notify;
 
 use crate::{DurableJournal, EventQuery, StoredEvent};
 
 use super::{
-    audit_change::{AuditChangeProjection, AuditPage, AuditQuery, PROJECTION_AUDIT_CHANGE_STORE},
-    error_report::{
-        ErrorGroupV1, ErrorPage, ErrorQuery, ErrorReportProjection, PROJECTION_ERROR_REPORT_STORE,
-    },
     logging::{LogPage, LogQuery, LoggingProjection, PROJECTION_LOGGING_STORE},
-    lumen::EmbeddedLumenProjection,
     metric::{MetricPage, MetricProjection, MetricQuery, PROJECTION_METRIC_STORE},
-    model::{
-        AuditLegalHoldV1, ProjectionCheckpoint, ProjectionDescriptor, ProjectionLag,
-        ProjectionStateEnvelope, RebuildComparison, PROJECTION_STATE_FORMAT_VERSION,
-    },
-    profile::{ProfilePage, ProfileProjection, ProfileQuery, PROJECTION_PROFILE_STORE},
-    trace::{TraceProjection, TraceResultV1, PROJECTION_TRACE_STORE},
+    model::{ProjectionLag, RebuildComparison},
+    trace::{TracePage, TraceProjection, TraceQuery, TraceResultV1, PROJECTION_TRACE_STORE},
 };
 
-pub const PROJECTION_EVENT_INDEX: &str = "event-index";
 pub const PROJECTION_BATCH_SIZE: usize = 1_000;
 pub const PROJECTION_RETRY_AFTER_SECONDS: u64 = 1;
+pub const PROJECTION_SNAPSHOT_INTERVAL_EVENTS: u64 = 100_000;
 
-pub trait Projection: Send + Sync {
-    fn descriptor(&self) -> ProjectionDescriptor;
+/// Sift's domain projection hook. The shared runtime owns its control flow.
+pub trait Projection: Send + Sync + 'static {
+    fn descriptor(&self) -> service_projection::ProjectionDescriptor;
     fn apply_idempotent(&self, event: &StoredEvent) -> Result<()>;
     fn snapshot(&self) -> Result<Vec<u8>>;
     fn restore(&self, state: &[u8]) -> Result<()>;
-    fn as_any(&self) -> &dyn Any;
 
     fn semantic_digest(&self) -> Result<String> {
-        Ok(sha256(&self.snapshot()?))
+        Ok(hex::encode(Sha256::digest(self.snapshot()?)))
     }
 }
 
-type ProjectionFactory = Arc<dyn Fn() -> Result<Arc<dyn Projection>> + Send + Sync>;
+macro_rules! impl_shared_projection {
+    ($projection:ty) => {
+        impl service_projection::Projection<StoredEvent> for $projection {
+            fn descriptor(&self) -> service_projection::ProjectionDescriptor {
+                Projection::descriptor(self)
+            }
 
-struct LiveProjection {
-    implementation: Arc<dyn Projection>,
-    checkpoint: ProjectionCheckpoint,
+            fn apply_idempotent(&self, event: &StoredEvent) -> Result<()> {
+                Projection::apply_idempotent(self, event)
+            }
+
+            fn snapshot(&self) -> Result<Vec<u8>> {
+                Projection::snapshot(self)
+            }
+
+            fn restore(&self, state: &[u8]) -> Result<()> {
+                Projection::restore(self, state)
+            }
+
+            fn semantic_digest(&self) -> Result<String> {
+                Projection::semantic_digest(self)
+            }
+        }
+    };
 }
 
-struct ProjectionSlot {
-    factory: ProjectionFactory,
-    state_path: PathBuf,
-    live: Mutex<LiveProjection>,
-    published: Notify,
+impl_shared_projection!(LoggingProjection);
+impl_shared_projection!(MetricProjection);
+impl_shared_projection!(TraceProjection);
+
+impl service_projection::ProjectionRecord for StoredEvent {
+    fn projection_cursor(&self) -> u64 {
+        self.cursor
+    }
+
+    fn projection_event_id(&self) -> &str {
+        &self.event.event_id
+    }
+}
+
+struct JournalProjectionSource {
+    journal: Arc<DurableJournal>,
+}
+
+impl service_projection::ProjectionSource<StoredEvent> for JournalProjectionSource {
+    fn current_cursor(&self) -> u64 {
+        self.journal.last_cursor()
+    }
+
+    fn read_after(&self, after: u64, limit: usize) -> Result<Vec<StoredEvent>> {
+        self.journal.query(EventQuery {
+            signal: None,
+            after,
+            limit,
+        })
+    }
 }
 
 pub struct ProjectionRuntime {
-    journal: Arc<DurableJournal>,
-    slots: BTreeMap<String, Arc<ProjectionSlot>>,
+    registry: service_projection::ProjectionRegistry<StoredEvent>,
+    logging: Arc<service_projection::ProjectionHandle<StoredEvent, LoggingProjection>>,
+    metrics: Arc<service_projection::ProjectionHandle<StoredEvent, MetricProjection>>,
+    traces: Arc<service_projection::ProjectionHandle<StoredEvent, TraceProjection>>,
 }
 
 impl ProjectionRuntime {
     pub fn open(data_dir: impl AsRef<Path>, journal: Arc<DurableJournal>) -> Result<Self> {
-        let projection_root = data_dir.as_ref().join("projections");
-        fs::create_dir_all(&projection_root).with_context(|| {
-            format!("create projection state root {}", projection_root.display())
-        })?;
-
-        let mut slots = BTreeMap::new();
-        let profile_journal = journal.clone();
-        for factory in [
-            Arc::new(|| Ok(Arc::new(EmbeddedLumenProjection::new()?) as Arc<dyn Projection>))
-                as ProjectionFactory,
-            Arc::new(|| Ok(Arc::new(LoggingProjection::new()?) as Arc<dyn Projection>))
-                as ProjectionFactory,
-            Arc::new(|| Ok(Arc::new(TraceProjection::new()) as Arc<dyn Projection>))
-                as ProjectionFactory,
-            Arc::new(|| Ok(Arc::new(ErrorReportProjection::new()) as Arc<dyn Projection>))
-                as ProjectionFactory,
-            Arc::new(|| Ok(Arc::new(MetricProjection::new()) as Arc<dyn Projection>))
-                as ProjectionFactory,
-            Arc::new(|| Ok(Arc::new(AuditChangeProjection::new()) as Arc<dyn Projection>))
-                as ProjectionFactory,
-            Arc::new(move || {
-                Ok(Arc::new(ProfileProjection::new(profile_journal.clone()))
-                    as Arc<dyn Projection>)
-            }) as ProjectionFactory,
-        ] {
-            let (name, slot) = open_slot(&projection_root, factory)?;
-            if slots.insert(name.clone(), slot).is_some() {
-                bail!("projection {name} is registered more than once");
-            }
-        }
-
-        Ok(Self { journal, slots })
+        let source: Arc<dyn service_projection::ProjectionSource<StoredEvent>> =
+            Arc::new(JournalProjectionSource { journal });
+        let config = service_projection::ProjectionRuntimeConfig::new(
+            PROJECTION_BATCH_SIZE,
+            PROJECTION_SNAPSHOT_INTERVAL_EVENTS,
+            PROJECTION_RETRY_AFTER_SECONDS,
+        );
+        let mut registry = service_projection::ProjectionRegistry::new(data_dir, source, config)?;
+        let logging = registry.register(|| Ok(Arc::new(LoggingProjection::new()?)))?;
+        let metrics = registry.register(|| Ok(Arc::new(MetricProjection::new())))?;
+        let traces = registry.register(|| Ok(Arc::new(TraceProjection::new())))?;
+        Ok(Self {
+            registry,
+            logging,
+            metrics,
+            traces,
+        })
     }
 
     pub fn projection_names(&self) -> Vec<String> {
-        self.slots.keys().cloned().collect()
+        self.registry.projection_names()
     }
 
     pub fn has_projection(&self, name: &str) -> bool {
-        self.slots.contains_key(name)
+        self.registry.has_projection(name)
     }
 
     pub fn current_cursor(&self, name: &str) -> Result<u64> {
-        let slot = self.slot(name)?;
-        Ok(slot
-            .live
-            .lock()
-            .expect("projection state lock poisoned")
-            .checkpoint
-            .cursor)
+        self.registry.current_cursor(name)
     }
 
     pub fn semantic_digest(&self, name: &str) -> Result<String> {
-        let slot = self.slot(name)?;
-        slot.live
-            .lock()
-            .expect("projection state lock poisoned")
-            .implementation
-            .semantic_digest()
+        self.registry.semantic_digest(name)
     }
 
     pub fn query_logs(&self, query: &LogQuery) -> Result<LogPage> {
-        let slot = self.slot(PROJECTION_LOGGING_STORE)?;
-        let live = slot.live.lock().expect("projection state lock poisoned");
-        let logging = live
-            .implementation
-            .as_any()
-            .downcast_ref::<LoggingProjection>()
-            .context("logging-store projection registration has the wrong implementation")?;
-        logging.query(query)
+        self.logging.projection().query(query)
     }
 
     pub fn get_trace(&self, project: &str, trace_id: &str) -> Result<Option<TraceResultV1>> {
-        let slot = self.slot(PROJECTION_TRACE_STORE)?;
-        let live = slot.live.lock().expect("projection state lock poisoned");
-        let traces = live
-            .implementation
-            .as_any()
-            .downcast_ref::<TraceProjection>()
-            .context("trace-store projection registration has the wrong implementation")?;
-        traces.get_trace(project, trace_id)
+        self.traces.projection().get_trace(project, trace_id)
     }
 
-    pub fn query_errors(&self, query: &ErrorQuery) -> Result<ErrorPage> {
-        let slot = self.slot(PROJECTION_ERROR_REPORT_STORE)?;
-        let live = slot.live.lock().expect("projection state lock poisoned");
-        let errors = live
-            .implementation
-            .as_any()
-            .downcast_ref::<ErrorReportProjection>()
-            .context("error-report-store projection registration has the wrong implementation")?;
-        errors.query(query)
-    }
-
-    pub fn get_error_group(
-        &self,
-        project: &str,
-        fingerprint: &str,
-    ) -> Result<Option<ErrorGroupV1>> {
-        let slot = self.slot(PROJECTION_ERROR_REPORT_STORE)?;
-        let live = slot.live.lock().expect("projection state lock poisoned");
-        let errors = live
-            .implementation
-            .as_any()
-            .downcast_ref::<ErrorReportProjection>()
-            .context("error-report-store projection registration has the wrong implementation")?;
-        errors.get_group(project, fingerprint)
+    pub fn query_traces(&self, query: &TraceQuery) -> Result<TracePage> {
+        self.traces.projection().query(query)
     }
 
     pub fn query_metrics(&self, query: &MetricQuery) -> Result<MetricPage> {
-        let slot = self.slot(PROJECTION_METRIC_STORE)?;
-        let live = slot.live.lock().expect("projection state lock poisoned");
-        let metrics = live
-            .implementation
-            .as_any()
-            .downcast_ref::<MetricProjection>()
-            .context("metric-store projection registration has the wrong implementation")?;
-        metrics.query(query)
-    }
-
-    pub fn query_audit(
-        &self,
-        query: &AuditQuery,
-        holds: &[AuditLegalHoldV1],
-        now: chrono::DateTime<Utc>,
-    ) -> Result<AuditPage> {
-        let slot = self.slot(PROJECTION_AUDIT_CHANGE_STORE)?;
-        let live = slot.live.lock().expect("projection state lock poisoned");
-        let audit = live
-            .implementation
-            .as_any()
-            .downcast_ref::<AuditChangeProjection>()
-            .context("audit-change-store projection registration has the wrong implementation")?;
-        audit.query(query, holds, now)
-    }
-
-    pub fn query_profiles(
-        &self,
-        query: &ProfileQuery,
-        now: chrono::DateTime<Utc>,
-    ) -> Result<ProfilePage> {
-        let slot = self.slot(PROJECTION_PROFILE_STORE)?;
-        let live = slot.live.lock().expect("projection state lock poisoned");
-        let profiles = live
-            .implementation
-            .as_any()
-            .downcast_ref::<ProfileProjection>()
-            .context("profile-store projection registration has the wrong implementation")?;
-        profiles.query(query, now)
+        self.metrics.projection().query(query)
     }
 
     pub fn catch_up(&self, name: &str) -> Result<u64> {
-        let target = self.journal.last_cursor();
-        let slot = self.slot(name)?;
-        let mut live = slot.live.lock().expect("projection state lock poisoned");
-        self.catch_up_locked(slot, &mut live, target)
+        self.registry.catch_up(name)
     }
 
     pub async fn wait_for_min_cursor(
@@ -233,252 +158,38 @@ impl ProjectionRuntime {
         required_cursor: u64,
         timeout: Duration,
     ) -> std::result::Result<u64, ProjectionLag> {
-        let slot = match self.slots.get(name) {
-            Some(slot) => slot,
-            None => {
-                return Err(ProjectionLag::new(
-                    name,
-                    required_cursor,
-                    0,
-                    PROJECTION_RETRY_AFTER_SECONDS,
-                ))
+        match name {
+            PROJECTION_LOGGING_STORE => {
+                self.logging
+                    .wait_for_min_cursor(required_cursor, timeout)
+                    .await
             }
-        };
-        let started = Instant::now();
-        loop {
-            let published = slot.published.notified();
-            let current = slot
-                .live
-                .lock()
-                .expect("projection state lock poisoned")
-                .checkpoint
-                .cursor;
-            if current >= required_cursor {
-                return Ok(current);
+            PROJECTION_METRIC_STORE => {
+                self.metrics
+                    .wait_for_min_cursor(required_cursor, timeout)
+                    .await
             }
-            let Some(remaining) = timeout.checked_sub(started.elapsed()) else {
-                return Err(ProjectionLag::new(
-                    name,
-                    required_cursor,
-                    current,
-                    PROJECTION_RETRY_AFTER_SECONDS,
-                ));
-            };
-            if tokio::time::timeout(remaining, published).await.is_err() {
-                let current = slot
-                    .live
-                    .lock()
-                    .expect("projection state lock poisoned")
-                    .checkpoint
-                    .cursor;
-                return Err(ProjectionLag::new(
-                    name,
-                    required_cursor,
-                    current,
-                    PROJECTION_RETRY_AFTER_SECONDS,
-                ));
+            PROJECTION_TRACE_STORE => {
+                self.traces
+                    .wait_for_min_cursor(required_cursor, timeout)
+                    .await
             }
+            _ => Err(ProjectionLag::new(
+                name,
+                required_cursor,
+                0,
+                PROJECTION_RETRY_AFTER_SECONDS,
+            )),
         }
     }
 
     pub fn rebuild_and_compare(&self, name: &str) -> Result<RebuildComparison> {
-        let source_cursor = self.journal.last_cursor();
-        let slot = self.slot(name)?;
-        let mut live = slot.live.lock().expect("projection state lock poisoned");
-        self.catch_up_locked(slot, &mut live, source_cursor)?;
-        let live_digest = live.implementation.semantic_digest()?;
-
-        let rebuilt = (slot.factory)()?;
-        let mut after = 0;
-        while after < source_cursor {
-            let events = self.journal.query(EventQuery {
-                signal: None,
-                after,
-                limit: PROJECTION_BATCH_SIZE,
-            })?;
-            if events.is_empty() {
-                break;
-            }
-            for event in events.iter().filter(|event| event.cursor <= source_cursor) {
-                rebuilt.apply_idempotent(event)?;
-                after = event.cursor;
-            }
-            if events
-                .last()
-                .is_some_and(|event| event.cursor > source_cursor)
-            {
-                break;
-            }
-        }
-        if after != source_cursor {
-            bail!("projection {name} rebuild stopped at cursor {after}, expected {source_cursor}");
-        }
-        let rebuilt_digest = rebuilt.semantic_digest()?;
-        let equal = live_digest == rebuilt_digest;
-        if equal {
-            let descriptor = rebuilt.descriptor();
-            let state = rebuilt.snapshot()?;
-            let checkpoint = checkpoint(&descriptor, source_cursor, None, &state);
-            persist(&slot.state_path, &checkpoint, &state)?;
-            live.implementation = rebuilt;
-            live.checkpoint = checkpoint;
-            slot.published.notify_waiters();
-        }
-
-        Ok(RebuildComparison {
-            source_cursor,
-            rebuilt_cursor: after,
-            live_digest,
-            rebuilt_digest,
-            equal,
-        })
+        self.registry.rebuild_and_compare(name)
     }
 
-    fn catch_up_locked(
-        &self,
-        slot: &ProjectionSlot,
-        live: &mut LiveProjection,
-        target: u64,
-    ) -> Result<u64> {
-        while live.checkpoint.cursor < target {
-            let events = self.journal.query(EventQuery {
-                signal: None,
-                after: live.checkpoint.cursor,
-                limit: PROJECTION_BATCH_SIZE,
-            })?;
-            if events.is_empty() {
-                break;
-            }
-            let mut last_event_id = None;
-            for event in events.iter().filter(|event| event.cursor <= target) {
-                live.implementation.apply_idempotent(event)?;
-                live.checkpoint.cursor = event.cursor;
-                last_event_id = Some(event.event.event_id.clone());
-            }
-            if last_event_id.is_none() {
-                break;
-            }
-            let state = live.implementation.snapshot()?;
-            live.checkpoint = checkpoint(
-                &live.implementation.descriptor(),
-                live.checkpoint.cursor,
-                last_event_id,
-                &state,
-            );
-            persist(&slot.state_path, &live.checkpoint, &state)?;
-            slot.published.notify_waiters();
-        }
-        Ok(live.checkpoint.cursor)
-    }
-
-    fn slot(&self, name: &str) -> Result<&Arc<ProjectionSlot>> {
-        self.slots
-            .get(name)
-            .with_context(|| format!("unknown projection {name}"))
+    pub fn persist_all(&self) -> Result<()> {
+        self.registry
+            .flush_all()
+            .context("flush typed Sift projections")
     }
 }
-
-fn open_slot(
-    projection_root: &Path,
-    factory: ProjectionFactory,
-) -> Result<(String, Arc<ProjectionSlot>)> {
-    let implementation = factory()?;
-    let descriptor = implementation.descriptor();
-    let state_path = projection_root.join(&descriptor.name).join("state.json");
-    let checkpoint = if state_path.exists() {
-        let envelope: ProjectionStateEnvelope = serde_json::from_slice(
-            &fs::read(&state_path)
-                .with_context(|| format!("read projection state {}", state_path.display()))?,
-        )
-        .with_context(|| format!("decode projection state {}", state_path.display()))?;
-        validate_envelope(&descriptor, &envelope)?;
-        let state = BASE64
-            .decode(&envelope.state_base64)
-            .context("decode projection state_base64")?;
-        if sha256(&state) != envelope.checkpoint.state_sha256 {
-            bail!(
-                "projection {} state checksum does not match its checkpoint",
-                descriptor.name
-            );
-        }
-        implementation.restore(&state)?;
-        envelope.checkpoint
-    } else {
-        ProjectionCheckpoint::empty(&descriptor)
-    };
-    Ok((
-        descriptor.name,
-        Arc::new(ProjectionSlot {
-            factory,
-            state_path,
-            live: Mutex::new(LiveProjection {
-                implementation,
-                checkpoint,
-            }),
-            published: Notify::new(),
-        }),
-    ))
-}
-
-fn checkpoint(
-    descriptor: &ProjectionDescriptor,
-    cursor: u64,
-    event_id: Option<String>,
-    state: &[u8],
-) -> ProjectionCheckpoint {
-    ProjectionCheckpoint {
-        projection: descriptor.name.clone(),
-        schema_version: descriptor.schema_version,
-        cursor,
-        event_id,
-        state_sha256: sha256(state),
-        updated_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-    }
-}
-
-fn persist(path: &Path, checkpoint: &ProjectionCheckpoint, state: &[u8]) -> Result<()> {
-    let parent = path
-        .parent()
-        .with_context(|| format!("projection state path {} has no parent", path.display()))?;
-    fs::create_dir_all(parent)
-        .with_context(|| format!("create projection directory {}", parent.display()))?;
-    let envelope = ProjectionStateEnvelope {
-        format_version: PROJECTION_STATE_FORMAT_VERSION,
-        checkpoint: checkpoint.clone(),
-        state_encoding: "base64".into(),
-        state_base64: BASE64.encode(state),
-    };
-    service_durability::atomic_write(
-        path,
-        &serde_json::to_vec_pretty(&envelope)?,
-        service_durability::FsyncPolicy::Always,
-    )
-    .with_context(|| format!("atomically persist projection state {}", path.display()))
-}
-
-fn validate_envelope(
-    descriptor: &ProjectionDescriptor,
-    envelope: &ProjectionStateEnvelope,
-) -> Result<()> {
-    if envelope.format_version != PROJECTION_STATE_FORMAT_VERSION {
-        bail!(
-            "unsupported projection state format {}",
-            envelope.format_version
-        );
-    }
-    if envelope.checkpoint.projection != descriptor.name
-        || envelope.checkpoint.schema_version != descriptor.schema_version
-    {
-        bail!("projection checkpoint descriptor does not match registered projection");
-    }
-    if envelope.state_encoding != "base64" {
-        bail!("unsupported projection state encoding");
-    }
-    Ok(())
-}
-
-fn sha256(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
-}
-
-// HANDWRITE-END

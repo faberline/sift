@@ -5,7 +5,7 @@ default_runner = "ec-stability"
 
 [workspace]
 base = "../.."
-workdir = "projects/sift"
+workdir = "apps/sift"
 keep = "always"
 
 [env]

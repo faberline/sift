@@ -1,125 +1,388 @@
-// HANDWRITE-BEGIN gap="sift-framed-journal-state-machine" tracker="1605" reason="Implement CRC-framed event journal snapshot/restore and the RaftStateMachine adapter."
-//! Shared durability and Raft state-machine adapter for Sift's raw journal.
+//! Replicated command and snapshot boundary for Sift's phase-one signals.
 
 use std::{
     collections::BTreeMap,
     fs,
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
-use chrono::DateTime;
-use raft_host::{Index, RaftStateMachine};
+use raft_runtime::{Index, RaftStateMachine};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    projection::{
-        AuditExportManifestV1, AuditLegalHoldV1, ErrorLifecycleState, ErrorLifecycleV1, ReplayJob,
-        SiftControlState, SIFT_COMMAND_FORMAT_VERSION,
-    },
-    AppendResult, DurableJournal, EventEnvelope, IncomingEvent, SignalKind, StoredEvent,
-};
+use crate::{AppendResult, DurableJournal, EventEnvelope, EventQuery, StoredEvent};
 
 const CONTROL_STATE_FILE: &str = "sift-control-state.json";
+const CONTROL_STATE_FORMAT_VERSION: u16 = 1;
+pub const RAFT_BATCH_MAX_BYTES: usize = 1_048_576;
+pub const RAFT_BATCH_MAX_ITEMS: usize = 1_000;
+pub const RAFT_BATCH_MAX_DELAY: Duration = Duration::from_millis(10);
+pub const SNAPSHOT_CONTENT_TYPE: &str = "application/vnd.axiom.sift-snapshot";
+
+const SNAPSHOT_MAGIC: &[u8; 8] = b"SIFTSNP2";
+const SNAPSHOT_FORMAT_VERSION: u16 = 2;
+const SNAPSHOT_HEADER_BYTES: usize = 40;
+const SNAPSHOT_FRAME_HEADER_BYTES: usize = 16;
+const SNAPSHOT_PAGE_EVENTS: usize = 10_000;
+const MAX_SNAPSHOT_EVENT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SiftCommandV1 {
-    AppendEvent { event: Box<EventEnvelope> },
-    UpsertReplayJob { job: Box<ReplayJob> },
-    TransitionErrorGroup { lifecycle: Box<ErrorLifecycleV1> },
-    UpsertAuditLegalHold { hold: Box<AuditLegalHoldV1> },
-    RecordAuditExport { export: Box<AuditExportManifestV1> },
+    AppendEvents { events: Vec<EventEnvelope> },
+}
+
+impl SiftCommandV1 {
+    pub(crate) fn encoded(&self) -> Result<Vec<u8>> {
+        let bytes = serde_json::to_vec(self).context("encode Sift state-machine command")?;
+        if bytes.len() > RAFT_BATCH_MAX_BYTES {
+            bail!(
+                "Sift Raft batch exceeds the 1 MiB limit: {} bytes",
+                bytes.len()
+            );
+        }
+        Ok(bytes)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SnapshotMetadata {
+    pub applied_index: u64,
+    pub last_cursor: u64,
+    pub event_count: u64,
+}
+
+/// Write one stable journal prefix as framed binary data.
+///
+/// The writer receives one event at a time. A concurrent append can extend the
+/// journal, but it cannot change the prefix captured in the header.
+pub(crate) fn write_snapshot(
+    journal: &DurableJournal,
+    applied_index: u64,
+    writer: &mut dyn Write,
+) -> Result<SnapshotMetadata> {
+    let (last_cursor, event_count) = journal.snapshot_bounds();
+    let metadata = SnapshotMetadata {
+        applied_index,
+        last_cursor,
+        event_count,
+    };
+    write_snapshot_header(writer, metadata)?;
+
+    let mut after = 0_u64;
+    let mut written = 0_u64;
+    let mut expected_cursor = 1_u64;
+    while written < event_count {
+        let page = journal
+            .query(EventQuery {
+                signal: None,
+                after,
+                limit: SNAPSHOT_PAGE_EVENTS,
+            })
+            .context("read canonical journal page for snapshot")?;
+        let mut progressed = false;
+        for stored in page {
+            if stored.cursor > last_cursor || written == event_count {
+                break;
+            }
+            if stored.cursor != expected_cursor {
+                bail!(
+                    "snapshot journal cursor {} is out of order; expected {expected_cursor}",
+                    stored.cursor
+                );
+            }
+            write_snapshot_event(writer, &stored)?;
+            after = stored.cursor;
+            expected_cursor = expected_cursor
+                .checked_add(1)
+                .context("snapshot journal cursor exhausted u64")?;
+            written = written
+                .checked_add(1)
+                .context("snapshot event count exhausted u64")?;
+            progressed = true;
+        }
+        if !progressed {
+            bail!(
+                "snapshot ended after {written} events, before declared event count {event_count}"
+            );
+        }
+    }
+    if written != event_count || after != last_cursor {
+        bail!(
+            "snapshot prefix mismatch: wrote {written} events through cursor {after}, expected {event_count} events through cursor {last_cursor}"
+        );
+    }
+    Ok(metadata)
+}
+
+/// Restore a seekable snapshot only after a complete validation pass.
+///
+/// This prevents a corrupt or truncated snapshot from partially filling an
+/// empty Sift data directory.
+pub(crate) fn restore_seekable_snapshot<R>(
+    journal: &DurableJournal,
+    reader: &mut R,
+) -> Result<SnapshotMetadata>
+where
+    R: Read + Seek,
+{
+    if journal.last_cursor() != 0 {
+        bail!("snapshot restore requires an empty Sift data directory");
+    }
+
+    reader
+        .seek(SeekFrom::Start(0))
+        .context("seek to the start of the Sift snapshot")?;
+    let validated = read_snapshot(reader, |_| Ok(()))?;
+
+    reader
+        .seek(SeekFrom::Start(0))
+        .context("rewind the validated Sift snapshot")?;
+    let mut page = Vec::with_capacity(SNAPSHOT_PAGE_EVENTS);
+    let restored = read_snapshot(reader, |event| {
+        page.push(event);
+        if page.len() == SNAPSHOT_PAGE_EVENTS {
+            journal.restore_stored_page(std::mem::take(&mut page))?;
+            page.reserve(SNAPSHOT_PAGE_EVENTS);
+        }
+        Ok(())
+    })?;
+    if !page.is_empty() {
+        journal.restore_stored_page(page)?;
+    }
+    if restored != validated {
+        bail!("Sift snapshot metadata changed between validation and restore");
+    }
+    if journal.total_event_count() != restored.event_count
+        || journal.last_cursor() != restored.last_cursor
+    {
+        bail!("restored Sift snapshot does not match its declared event count and cursor");
+    }
+    Ok(restored)
+}
+
+/// Spool a non-seekable Raft snapshot in the data directory, validate it, and
+/// then restore it in bounded pages. The temporary file stays on the same file
+/// system as all other Sift atomic work.
+pub(crate) fn restore_streamed_snapshot(
+    journal: &DurableJournal,
+    reader: &mut dyn Read,
+) -> Result<SnapshotMetadata> {
+    let tmp_dir = journal.data_dir().join("tmp");
+    let mut spool = tempfile::tempfile_in(&tmp_dir)
+        .with_context(|| format!("create snapshot spool in {}", tmp_dir.display()))?;
+    std::io::copy(reader, &mut spool).context("spool incoming Sift snapshot")?;
+    spool
+        .sync_all()
+        .context("sync incoming Sift snapshot spool")?;
+    restore_seekable_snapshot(journal, &mut spool)
+}
+
+fn write_snapshot_header(writer: &mut dyn Write, metadata: SnapshotMetadata) -> Result<()> {
+    let mut header = Vec::with_capacity(SNAPSHOT_HEADER_BYTES);
+    header.extend_from_slice(SNAPSHOT_MAGIC);
+    header.extend_from_slice(&SNAPSHOT_FORMAT_VERSION.to_le_bytes());
+    header.extend_from_slice(&0_u16.to_le_bytes());
+    header.extend_from_slice(&metadata.applied_index.to_le_bytes());
+    header.extend_from_slice(&metadata.last_cursor.to_le_bytes());
+    header.extend_from_slice(&metadata.event_count.to_le_bytes());
+    let checksum = crc32fast::hash(&header);
+    header.extend_from_slice(&checksum.to_le_bytes());
+    debug_assert_eq!(header.len(), SNAPSHOT_HEADER_BYTES);
+    writer
+        .write_all(&header)
+        .context("write Sift snapshot header")
+}
+
+fn write_snapshot_event(writer: &mut dyn Write, stored: &StoredEvent) -> Result<()> {
+    let payload = serde_json::to_vec(stored).context("encode Sift snapshot event")?;
+    if payload.len() > MAX_SNAPSHOT_EVENT_BYTES {
+        bail!(
+            "Sift snapshot event at cursor {} exceeds the {} byte limit",
+            stored.cursor,
+            MAX_SNAPSHOT_EVENT_BYTES
+        );
+    }
+    let payload_len = u32::try_from(payload.len()).context("snapshot event length exceeds u32")?;
+    let checksum = crc32fast::hash(&payload);
+    writer
+        .write_all(&stored.cursor.to_le_bytes())
+        .context("write Sift snapshot event cursor")?;
+    writer
+        .write_all(&payload_len.to_le_bytes())
+        .context("write Sift snapshot event length")?;
+    writer
+        .write_all(&checksum.to_le_bytes())
+        .context("write Sift snapshot event checksum")?;
+    writer
+        .write_all(&payload)
+        .context("write Sift snapshot event payload")
+}
+
+fn read_snapshot<R, F>(reader: &mut R, mut on_event: F) -> Result<SnapshotMetadata>
+where
+    R: Read,
+    F: FnMut(StoredEvent) -> Result<()>,
+{
+    let metadata = read_snapshot_header(reader)?;
+    let mut expected_cursor = 1_u64;
+    let mut last_cursor = 0_u64;
+    for position in 0..metadata.event_count {
+        let mut frame = [0_u8; SNAPSHOT_FRAME_HEADER_BYTES];
+        reader
+            .read_exact(&mut frame)
+            .with_context(|| format!("read Sift snapshot frame {position}"))?;
+        let cursor = u64::from_le_bytes(frame[0..8].try_into().unwrap());
+        let payload_len = u32::from_le_bytes(frame[8..12].try_into().unwrap()) as usize;
+        let expected_checksum = u32::from_le_bytes(frame[12..16].try_into().unwrap());
+        if payload_len == 0 || payload_len > MAX_SNAPSHOT_EVENT_BYTES {
+            bail!("Sift snapshot event at cursor {cursor} has invalid length {payload_len}");
+        }
+        let mut payload = vec![0_u8; payload_len];
+        reader
+            .read_exact(&mut payload)
+            .with_context(|| format!("read Sift snapshot event payload at cursor {cursor}"))?;
+        let actual_checksum = crc32fast::hash(&payload);
+        if actual_checksum != expected_checksum {
+            bail!("Sift snapshot checksum mismatch at cursor {cursor}");
+        }
+        let stored: StoredEvent = serde_json::from_slice(&payload)
+            .with_context(|| format!("decode Sift snapshot event at cursor {cursor}"))?;
+        if cursor != stored.cursor {
+            bail!(
+                "Sift snapshot frame cursor {cursor} does not match payload cursor {}",
+                stored.cursor
+            );
+        }
+        if cursor != expected_cursor {
+            bail!("Sift snapshot cursor {cursor} is out of order; expected {expected_cursor}");
+        }
+        stored
+            .event
+            .validate()
+            .with_context(|| format!("validate Sift snapshot event at cursor {cursor}"))?;
+        on_event(stored)?;
+        last_cursor = cursor;
+        expected_cursor = expected_cursor
+            .checked_add(1)
+            .context("snapshot cursor exhausted u64")?;
+    }
+    if last_cursor != metadata.last_cursor {
+        bail!(
+            "Sift snapshot ended at cursor {last_cursor}, expected {}",
+            metadata.last_cursor
+        );
+    }
+    if metadata.event_count == 0 && metadata.last_cursor != 0 {
+        bail!("empty Sift snapshot declares a non-zero last cursor");
+    }
+    if read_one_or_eof(reader)?.is_some() {
+        bail!("Sift snapshot contains trailing bytes");
+    }
+    Ok(metadata)
+}
+
+fn read_snapshot_header(reader: &mut dyn Read) -> Result<SnapshotMetadata> {
+    let mut header = [0_u8; SNAPSHOT_HEADER_BYTES];
+    reader
+        .read_exact(&mut header)
+        .context("read Sift snapshot header")?;
+    if &header[..SNAPSHOT_MAGIC.len()] != SNAPSHOT_MAGIC {
+        if matches!(header.first(), Some(b'{') | Some(b'[')) {
+            bail!("legacy Sift JSON snapshot is unsupported; create a new empty data directory");
+        }
+        bail!("invalid Sift snapshot magic");
+    }
+    let version = u16::from_le_bytes(header[8..10].try_into().unwrap());
+    if version != SNAPSHOT_FORMAT_VERSION {
+        bail!("unsupported Sift snapshot format version {version}");
+    }
+    let flags = u16::from_le_bytes(header[10..12].try_into().unwrap());
+    if flags != 0 {
+        bail!("unsupported Sift snapshot flags {flags}");
+    }
+    let expected_checksum = u32::from_le_bytes(header[36..40].try_into().unwrap());
+    let actual_checksum = crc32fast::hash(&header[..36]);
+    if actual_checksum != expected_checksum {
+        bail!("Sift snapshot header checksum mismatch");
+    }
+    Ok(SnapshotMetadata {
+        applied_index: u64::from_le_bytes(header[12..20].try_into().unwrap()),
+        last_cursor: u64::from_le_bytes(header[20..28].try_into().unwrap()),
+        event_count: u64::from_le_bytes(header[28..36].try_into().unwrap()),
+    })
+}
+
+fn read_one_or_eof(reader: &mut dyn Read) -> Result<Option<u8>> {
+    let mut byte = [0_u8; 1];
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => return Ok(None),
+            Ok(_) => return Ok(Some(byte[0])),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error).context("check Sift snapshot end"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct JournalSnapshot {
-    pub applied_index: u64,
-    pub events: Vec<StoredEvent>,
-    #[serde(default)]
-    pub replay_jobs: BTreeMap<String, ReplayJob>,
-    #[serde(default)]
-    pub error_lifecycles: BTreeMap<String, ErrorLifecycleV1>,
-    #[serde(default)]
-    pub audit_legal_holds: BTreeMap<String, AuditLegalHoldV1>,
-    #[serde(default)]
-    pub audit_exports: BTreeMap<String, AuditExportManifestV1>,
+#[serde(deny_unknown_fields)]
+struct ControlState {
+    format_version: u16,
+    applied_index: u64,
 }
 
-impl JournalSnapshot {
-    pub(crate) fn from_state(events: Vec<StoredEvent>, control: &SiftControlState) -> Self {
+impl Default for ControlState {
+    fn default() -> Self {
         Self {
-            applied_index: control.applied_index,
-            events,
-            replay_jobs: control.replay_jobs.clone(),
-            error_lifecycles: control.error_lifecycles.clone(),
-            audit_legal_holds: control.audit_legal_holds.clone(),
-            audit_exports: control.audit_exports.clone(),
-        }
-    }
-
-    pub(crate) fn from_events(events: Vec<StoredEvent>) -> Self {
-        let applied_index = events.last().map(|event| event.cursor).unwrap_or(0);
-        Self {
-            applied_index,
-            events,
-            replay_jobs: BTreeMap::new(),
-            error_lifecycles: BTreeMap::new(),
-            audit_legal_holds: BTreeMap::new(),
-            audit_exports: BTreeMap::new(),
+            format_version: CONTROL_STATE_FORMAT_VERSION,
+            applied_index: 0,
         }
     }
 }
 
-/// The only replicated applier for Sift events. RaftHost calls this adapter in
-/// committed-index order, so an acknowledged replica write has passed through
-/// the same durable journal boundary on every voter.
+/// Applies one committed Raft batch to the canonical per-signal WAL.
 pub struct SiftStateMachine {
     journal: Arc<DurableJournal>,
     control_path: PathBuf,
-    control: Mutex<SiftControlState>,
-    append_outcomes: Mutex<BTreeMap<u64, AppendResult>>,
+    control: Mutex<ControlState>,
+    append_outcomes: Mutex<BTreeMap<u64, Vec<AppendResult>>>,
     applied_index: AtomicU64,
 }
 
 impl SiftStateMachine {
-    /// Compatibility constructor for existing embedders. New service startup
-    /// uses [`open`](Self::open) so initialization failures remain explicit.
     pub fn new(journal: Arc<DurableJournal>) -> Self {
-        let data_dir = journal
-            .snapshot_path
-            .parent()
-            .expect("Sift snapshot path must have a data directory")
-            .to_path_buf();
-        Self::open(data_dir, journal).expect("open Sift state machine control state")
+        let data_dir = journal.data_dir().to_path_buf();
+        Self::open(data_dir, journal).expect("open Sift state-machine control state")
     }
 
     pub fn open(data_dir: impl AsRef<Path>, journal: Arc<DurableJournal>) -> Result<Self> {
-        let control_path = data_dir.as_ref().join(CONTROL_STATE_FILE);
-        let mut control =
+        let control_dir = data_dir.as_ref().join("control");
+        fs::create_dir_all(&control_dir)
+            .with_context(|| format!("create Sift control directory {}", control_dir.display()))?;
+        set_directory_mode(&control_dir)?;
+        let control_path = control_dir.join(CONTROL_STATE_FILE);
+        let control =
             if control_path.exists() {
-                serde_json::from_slice::<SiftControlState>(&fs::read(&control_path).with_context(
+                serde_json::from_slice::<ControlState>(&fs::read(&control_path).with_context(
                     || format!("read Sift control state {}", control_path.display()),
                 )?)
                 .with_context(|| format!("decode Sift control state {}", control_path.display()))?
             } else {
-                SiftControlState::default()
+                ControlState::default()
             };
-        if control.format_version != SIFT_COMMAND_FORMAT_VERSION {
+        if control.format_version != CONTROL_STATE_FORMAT_VERSION {
             bail!(
                 "unsupported Sift control state format {}",
                 control.format_version
             );
         }
-        // An old Sift journal had no separate control file. A raw append may
-        // also have reached fsync immediately before a process crash prevented
-        // the control write. In both cases the durable raw cursor is a valid
-        // lower bound for the next local commit index.
-        control.applied_index = control.applied_index.max(journal.last_cursor());
         persist_control(&control_path, &control)?;
         let applied_index = control.applied_index;
         Ok(Self {
@@ -139,57 +402,7 @@ impl SiftStateMachine {
         <Self as RaftStateMachine>::apply(self, index, command)
     }
 
-    pub fn replay_job(&self, id: &str) -> Option<ReplayJob> {
-        self.control
-            .lock()
-            .expect("Sift control state lock poisoned")
-            .replay_jobs
-            .get(id)
-            .cloned()
-    }
-
-    pub fn error_lifecycle(&self, project: &str, fingerprint: &str) -> Option<ErrorLifecycleV1> {
-        self.control
-            .lock()
-            .expect("Sift control state lock poisoned")
-            .error_lifecycles
-            .get(&crate::projection::error_lifecycle_key(
-                project,
-                fingerprint,
-            ))
-            .cloned()
-    }
-
-    pub fn audit_legal_hold(&self, project: &str, id: &str) -> Option<AuditLegalHoldV1> {
-        self.control
-            .lock()
-            .expect("Sift control state lock poisoned")
-            .audit_legal_holds
-            .get(&crate::projection::audit_control_key(project, id))
-            .cloned()
-    }
-
-    pub fn audit_legal_holds(&self, project: &str) -> Vec<AuditLegalHoldV1> {
-        self.control
-            .lock()
-            .expect("Sift control state lock poisoned")
-            .audit_legal_holds
-            .values()
-            .filter(|hold| hold.project == project && hold.active)
-            .cloned()
-            .collect()
-    }
-
-    pub fn audit_export(&self, project: &str, id: &str) -> Option<AuditExportManifestV1> {
-        self.control
-            .lock()
-            .expect("Sift control state lock poisoned")
-            .audit_exports
-            .get(&crate::projection::audit_control_key(project, id))
-            .cloned()
-    }
-
-    pub fn take_append_outcome(&self, index: u64) -> Option<AppendResult> {
+    pub fn take_append_outcomes(&self, index: u64) -> Option<Vec<AppendResult>> {
         self.append_outcomes
             .lock()
             .expect("Sift append outcome lock poisoned")
@@ -202,162 +415,50 @@ impl RaftStateMachine for SiftStateMachine {
         if index <= self.applied_index.load(Ordering::Acquire) {
             return Ok(());
         }
+        if command.len() > RAFT_BATCH_MAX_BYTES {
+            bail!("Sift Raft batch exceeds the 1 MiB limit");
+        }
         let command = decode_command(command)?;
+        let results = match command {
+            SiftCommandV1::AppendEvents { events } => {
+                validate_events(&events)?;
+                self.journal
+                    .append_durable_batch(events)?
+                    .into_iter()
+                    .map(|result| result.with_commit_index(index))
+                    .collect()
+            }
+        };
+
         let mut control = self
             .control
             .lock()
             .expect("Sift control state lock poisoned");
-        match command {
-            SiftCommandV1::AppendEvent { event } => {
-                // Raw cursors remain dense when non-event commands interleave.
-                // A retry after raw fsync/control-write failure is event-id
-                // idempotent at this boundary.
-                let result = self.journal.append(*event)?.with_commit_index(index);
-                let mut outcomes = self
-                    .append_outcomes
-                    .lock()
-                    .expect("Sift append outcome lock poisoned");
-                outcomes.insert(index, result);
-                while outcomes.len() > 4_096 {
-                    if let Some(oldest) = outcomes.keys().next().copied() {
-                        outcomes.remove(&oldest);
-                    }
-                }
-            }
-            SiftCommandV1::UpsertReplayJob { mut job } => {
-                job.commit_index = index;
-                control.replay_jobs.insert(job.id.clone(), *job);
-            }
-            SiftCommandV1::TransitionErrorGroup { mut lifecycle } => {
-                validate_error_lifecycle(&lifecycle)?;
-                lifecycle.commit_index = index;
-                let key = lifecycle.key();
-                let previous = control
-                    .error_lifecycles
-                    .get(&key)
-                    .map(|value| value.state)
-                    .unwrap_or(ErrorLifecycleState::Open);
-                for signal in [SignalKind::AuditEvent, SignalKind::ChangeEvent] {
-                    let suffix = if signal == SignalKind::AuditEvent {
-                        "audit"
-                    } else {
-                        "change"
-                    };
-                    let mut event = EventEnvelope::for_project(
-                        lifecycle.project.clone(),
-                        "control",
-                        format!(
-                            "error-lifecycle:{}:{}:{index}:{suffix}",
-                            lifecycle.project, lifecycle.fingerprint
-                        ),
-                        signal,
-                        serde_json::json!({
-                            "kind": "error_group_lifecycle_transition",
-                            "fingerprint": lifecycle.fingerprint,
-                            "from": previous,
-                            "to": lifecycle.state,
-                            "actor": lifecycle.actor,
-                            "reason": lifecycle.reason,
-                            "muted_until": lifecycle.muted_until,
-                            "occurrence_cursor": lifecycle.occurrence_cursor,
-                            "commit_index": index,
-                        }),
-                    );
-                    event.occurred_at.clone_from(&lifecycle.updated_at);
-                    event.observed_at.clone_from(&lifecycle.updated_at);
-                    event.resource.insert("service.name".into(), "sift".into());
-                    self.journal.append(event)?;
-                }
-                control.error_lifecycles.insert(key, *lifecycle);
-            }
-            SiftCommandV1::UpsertAuditLegalHold { mut hold } => {
-                validate_audit_legal_hold(&hold)?;
-                hold.commit_index = index;
-                let key = hold.key();
-                let previous_active = control
-                    .audit_legal_holds
-                    .get(&key)
-                    .is_some_and(|previous| previous.active);
-                append_control_evidence(
-                    &self.journal,
-                    &hold.project,
-                    &hold.updated_at,
-                    &format!("audit-hold:{}:{}:{index}", hold.project, hold.id),
-                    true,
-                    serde_json::json!({
-                        "kind": "audit_legal_hold_transition",
-                        "action": if hold.active { "audit.hold.activate" } else { "audit.hold.release" },
-                        "target": hold.id.clone(),
-                        "actor": hold.actor.clone(),
-                        "reason": hold.reason.clone(),
-                        "start_time": hold.start_time.clone(),
-                        "end_time": hold.end_time.clone(),
-                        "from_active": previous_active,
-                        "to_active": hold.active,
-                        "commit_index": index,
-                    }),
-                )?;
-                control.audit_legal_holds.insert(key, *hold);
-            }
-            SiftCommandV1::RecordAuditExport { mut export } => {
-                validate_audit_export(&export)?;
-                export.commit_index = index;
-                let key = export.key();
-                if control.audit_exports.contains_key(&key) {
-                    bail!("audit export id `{}` already exists", export.id);
-                }
-                append_control_evidence(
-                    &self.journal,
-                    &export.project,
-                    &export.exported_at,
-                    &format!("audit-export:{}:{}:{index}", export.project, export.id),
-                    false,
-                    serde_json::json!({
-                        "kind": "audit_controlled_export",
-                        "action": "audit.export",
-                        "target": export.id.clone(),
-                        "actor": export.actor.clone(),
-                        "record_count": export.record_count,
-                        "content_sha256": export.content_sha256.clone(),
-                        "start_time": export.start_time.clone(),
-                        "end_time": export.end_time.clone(),
-                        "commit_index": index,
-                    }),
-                )?;
-                control.audit_exports.insert(key, *export);
-            }
-        }
         control.applied_index = index;
         persist_control(&self.control_path, &control)?;
+        self.append_outcomes
+            .lock()
+            .expect("Sift append outcome lock poisoned")
+            .insert(index, results);
         self.applied_index.store(index, Ordering::Release);
         Ok(())
     }
 
     fn snapshot(&self, writer: &mut dyn std::io::Write) -> Result<()> {
-        let control = self
+        let applied_index = self
             .control
             .lock()
-            .expect("Sift control state lock poisoned");
-        let bytes = serde_json::to_vec(&JournalSnapshot::from_state(
-            self.journal.snapshot_events(),
-            &control,
-        ))?;
-        writer.write_all(&bytes)?;
+            .expect("Sift control state lock poisoned")
+            .applied_index;
+        write_snapshot(&self.journal, applied_index, writer)?;
         Ok(())
     }
 
     fn restore(&self, reader: &mut dyn std::io::Read) -> Result<()> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
-        let snapshot: JournalSnapshot = serde_json::from_slice(&bytes)?;
-        self.journal.restore_snapshot(snapshot.events)?;
-        let restored = SiftControlState {
-            format_version: SIFT_COMMAND_FORMAT_VERSION,
+        let snapshot = restore_streamed_snapshot(&self.journal, reader)?;
+        let restored = ControlState {
+            format_version: CONTROL_STATE_FORMAT_VERSION,
             applied_index: snapshot.applied_index,
-            replay_jobs: snapshot.replay_jobs,
-            error_lifecycles: snapshot.error_lifecycles,
-            audit_legal_holds: snapshot.audit_legal_holds,
-            audit_exports: snapshot.audit_exports,
         };
         persist_control(&self.control_path, &restored)?;
         *self
@@ -374,123 +475,54 @@ impl RaftStateMachine for SiftStateMachine {
     }
 }
 
-fn validate_error_lifecycle(lifecycle: &ErrorLifecycleV1) -> Result<()> {
-    if lifecycle.project.trim().is_empty()
-        || lifecycle.fingerprint.trim().is_empty()
-        || lifecycle.actor.trim().is_empty()
-    {
-        bail!("error lifecycle project, fingerprint, and actor must not be empty");
+fn validate_events(events: &[EventEnvelope]) -> Result<()> {
+    if events.is_empty() {
+        bail!("Sift Raft batch must not be empty");
     }
-    DateTime::parse_from_rfc3339(&lifecycle.updated_at)
-        .context("error lifecycle updated_at must be RFC3339")?;
-    match (lifecycle.state, lifecycle.muted_until.as_deref()) {
-        (ErrorLifecycleState::Muted, Some(until)) => {
-            DateTime::parse_from_rfc3339(until)
-                .context("muted error lifecycle requires RFC3339 muted_until")?;
-        }
-        (ErrorLifecycleState::Muted, None) => {
-            bail!("muted error lifecycle requires muted_until")
-        }
-        (_, Some(_)) => bail!("only muted error lifecycle may set muted_until"),
-        (_, None) => {}
+    let signal = events[0].signal;
+    if events.iter().any(|event| event.signal != signal) {
+        bail!("Sift Raft batch must contain exactly one signal");
     }
-    Ok(())
-}
-
-fn validate_audit_legal_hold(hold: &AuditLegalHoldV1) -> Result<()> {
-    if hold.id.trim().is_empty()
-        || hold.project.trim().is_empty()
-        || hold.reason.trim().is_empty()
-        || hold.actor.trim().is_empty()
-    {
-        bail!("audit hold id, project, reason, and actor must not be empty");
-    }
-    let start = DateTime::parse_from_rfc3339(&hold.start_time)
-        .context("audit hold start_time must be RFC3339")?;
-    let end = DateTime::parse_from_rfc3339(&hold.end_time)
-        .context("audit hold end_time must be RFC3339")?;
-    DateTime::parse_from_rfc3339(&hold.updated_at)
-        .context("audit hold updated_at must be RFC3339")?;
-    if start >= end {
-        bail!("audit hold start_time must be earlier than end_time");
-    }
-    Ok(())
-}
-
-fn validate_audit_export(export: &AuditExportManifestV1) -> Result<()> {
-    if export.id.trim().is_empty()
-        || export.project.trim().is_empty()
-        || export.actor.trim().is_empty()
-    {
-        bail!("audit export id, project, and actor must not be empty");
-    }
-    if export.content_sha256.len() != 64
-        || !export
-            .content_sha256
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit())
-    {
-        bail!("audit export content_sha256 must be a 64-character hex digest");
-    }
-    DateTime::parse_from_rfc3339(&export.exported_at)
-        .context("audit export exported_at must be RFC3339")?;
-    Ok(())
-}
-
-fn append_control_evidence(
-    journal: &DurableJournal,
-    project: &str,
-    occurred_at: &str,
-    event_id_prefix: &str,
-    include_change: bool,
-    payload: serde_json::Value,
-) -> Result<()> {
-    let signals: &[SignalKind] = if include_change {
-        &[SignalKind::AuditEvent, SignalKind::ChangeEvent]
-    } else {
-        &[SignalKind::AuditEvent]
-    };
-    for signal in signals {
-        let suffix = if *signal == SignalKind::AuditEvent {
-            "audit"
-        } else {
-            "change"
-        };
-        let mut event = EventEnvelope::for_project(
-            project,
-            "control",
-            format!("{event_id_prefix}:{suffix}"),
-            *signal,
-            payload.clone(),
-        );
-        event.occurred_at = occurred_at.to_string();
-        event.observed_at = occurred_at.to_string();
-        event.resource.insert("service.name".into(), "sift".into());
-        journal.append(event)?;
+    for event in events {
+        event.validate()?;
     }
     Ok(())
 }
 
 fn decode_command(bytes: &[u8]) -> Result<SiftCommandV1> {
-    match serde_json::from_slice::<SiftCommandV1>(bytes) {
-        Ok(command) => Ok(command),
-        Err(command_error) => serde_json::from_slice::<IncomingEvent>(bytes)
-            .map(|event| SiftCommandV1::AppendEvent {
-                event: Box::new(event.into_inner()),
-            })
-            .with_context(|| {
-                format!("decode Sift command v1 or legacy bare event: {command_error}")
-            }),
-    }
+    serde_json::from_slice(bytes).context("decode Sift command v1")
 }
 
-fn persist_control(path: &Path, control: &SiftControlState) -> Result<()> {
-    service_durability::atomic_write(
+fn persist_control(path: &Path, control: &ControlState) -> Result<()> {
+    storage_durable::atomic_write(
         path,
         &serde_json::to_vec_pretty(control)?,
-        service_durability::FsyncPolicy::Always,
+        storage_durable::FsyncPolicy::Always,
     )
-    .with_context(|| format!("atomically persist Sift control state {}", path.display()))
+    .with_context(|| format!("atomically persist Sift control state {}", path.display()))?;
+    set_file_mode(path)
 }
 
-// HANDWRITE-END
+#[cfg(unix)]
+fn set_directory_mode(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("set private control directory mode on {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn set_directory_mode(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_file_mode(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("set private control file mode on {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn set_file_mode(_path: &Path) -> Result<()> {
+    Ok(())
+}

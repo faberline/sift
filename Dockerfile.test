@@ -15,9 +15,14 @@
 #   dist/linux/amd64/sift
 #   dist/linux/arm64/sift
 #
-#   docker buildx build -f projects/sift/Dockerfile.test \
+#   docker buildx build -f apps/sift/Dockerfile.test \
 #     --platform linux/amd64,linux/arm64 \
 #     -t ghcr.io/<owner>/sift:sha-<git12> --push .
+
+# Prepare the empty durable root in a stage with install(1); distroless has no
+# shell or ownership tools.
+FROM debian:bookworm-slim AS data-root
+RUN install -d -m 0700 -o 65532 -g 65532 /image-root/var/lib/sift
 
 # distroless static runtime — only the binary + CA certs, nonroot. Identical
 # to Dockerfile.release's runtime stage; static-debian12 ships no
@@ -26,12 +31,13 @@
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG TARGETARCH=amd64
 COPY dist/linux/${TARGETARCH}/sift /usr/local/bin/sift
+COPY --from=data-root --chown=65532:65532 --chmod=0700 /image-root/var/lib/sift /var/lib/sift
 ENV SIFT_HOST=0.0.0.0 \
     SIFT_PORT=7380 \
     SIFT_DATA_DIR=/var/lib/sift \
     SIFT_LOG_FORMAT=json
 VOLUME ["/var/lib/sift"]
-EXPOSE 7380
+EXPOSE 4317 7380
 ENTRYPOINT ["/usr/local/bin/sift"]
 CMD ["serve"]
 # HANDWRITE-END

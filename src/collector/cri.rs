@@ -7,14 +7,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
-use service_durability::{atomic_write, FsyncPolicy};
+use service_collector::CollectorSource as _;
 
 use crate::AttributeValue;
 
 use super::checkpoint::QuarantineEntry;
 use super::source::{
-    read_bounded_line, CollectorSource, CommitStats, RawRecord, ReadOutcome, RecordEnrichment,
-    SourceCursor, SourceRejection,
+    read_bounded_line, CommitStats, RawRecord, ReadOutcome, RecordEnrichment, SourceCursor,
+    SourceRejection,
 };
 use super::CriSourceConfig;
 
@@ -271,7 +271,12 @@ impl CriSource {
     }
 }
 
-impl CollectorSource for CriSource {
+impl service_collector::CollectorSource for CriSource {
+    type Cursor = SourceCursor;
+    type Error = anyhow::Error;
+    type Record = RawRecord;
+    type Rejection = SourceRejection;
+
     fn next_record(&mut self, max_bytes: usize) -> Result<ReadOutcome> {
         if let Some(loss) = self.pending_losses.pop_front() {
             if let SourceCursor::CriLoss { identity, .. } = &loss.cursor {
@@ -414,20 +419,13 @@ impl CollectorSource for CriSource {
         self.checkpoint.save(&self.checkpoint_path)
     }
 
-    fn start_offset(&self) -> u64 {
-        self.start_offset
-    }
-
-    fn final_offset(&self) -> u64 {
-        self.checkpoint.files.values().map(|file| file.offset).sum()
-    }
-
-    fn lost_bytes(&self) -> u64 {
-        self.checkpoint.lost_bytes
-    }
-
-    fn lost_sources(&self) -> u64 {
-        self.checkpoint.lost_sources
+    fn progress(&self) -> service_collector::SourceProgress {
+        service_collector::SourceProgress {
+            start_offset: self.start_offset,
+            final_offset: self.checkpoint.files.values().map(|file| file.offset).sum(),
+            lost_bytes: self.checkpoint.lost_bytes,
+            lost_sources: self.checkpoint.lost_sources,
+        }
     }
 }
 
@@ -449,10 +447,8 @@ impl CriCheckpoint {
         if !path.exists() {
             return Ok(Self::new(root));
         }
-        let bytes = std::fs::read(path)
-            .with_context(|| format!("read CRI checkpoint {}", path.display()))?;
-        let checkpoint: Self = serde_json::from_slice(&bytes)
-            .with_context(|| format!("decode CRI checkpoint {}", path.display()))?;
+        let checkpoint: Self = service_collector::load_json_checkpoint(path)?
+            .context("CRI checkpoint disappeared while loading")?;
         if checkpoint.schema != CRI_CHECKPOINT_SCHEMA {
             bail!(
                 "unsupported CRI checkpoint schema {}; expected {CRI_CHECKPOINT_SCHEMA}",
@@ -469,9 +465,7 @@ impl CriCheckpoint {
     }
 
     fn save(&self, path: &Path) -> Result<()> {
-        let bytes = serde_json::to_vec_pretty(self)?;
-        atomic_write(path, &bytes, FsyncPolicy::Always)
-            .with_context(|| format!("commit CRI checkpoint {}", path.display()))
+        service_collector::save_json_checkpoint(path, self)
     }
 }
 

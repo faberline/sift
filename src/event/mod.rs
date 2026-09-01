@@ -4,13 +4,12 @@ mod model;
 
 pub use governance::{GovernancePolicy, GovernancePolicySet};
 pub use model::{
-    decode_event_json, AttributeValue, ContentBlobRef, EventEnvelopeV1, IncomingEvent,
-    InstrumentationScope, MetricExemplar, MetricPoint, MetricTemporality, OperationalEventV2,
-    SignalKind, EVENT_SCHEMA_URL, EVENT_SCHEMA_VERSION, EVENT_SCHEMA_VERSION_V1,
+    decode_event_json, AttributeValue, ContentBlobRef, IncomingEvent, InstrumentationScope,
+    MetricExemplar, MetricPoint, MetricTemporality, OperationalEventV2, SignalKind,
+    EVENT_SCHEMA_URL, EVENT_SCHEMA_VERSION,
 };
 
-/// Compatibility name for callers of the bootstrap Sift API. New code should
-/// prefer [`OperationalEventV2`] when the schema generation is relevant.
+/// Short name used by the internal ingest and storage layers.
 pub use model::OperationalEventV2 as EventEnvelope;
 
 // HANDWRITE-END

@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{AttributeValue, OperationalEventV2, SignalKind};
+use super::{AttributeValue, OperationalEventV2};
 
 const POLICY_FILE_ENV: &str = "SIFT_GOVERNANCE_POLICY_FILE";
 const DEFAULT_MAX_STRING_BYTES: usize = 4_096;
@@ -111,11 +111,10 @@ impl GovernancePolicySet {
         let policy = self.projects.get(&event.project).unwrap_or(&self.default);
         policy.validate()?;
 
-        let is_genai = event.signal == SignalKind::Evaluation
-            || event.attributes.keys().any(|key| {
-                let key = key.to_ascii_lowercase();
-                key.starts_with("gen_ai.") || key.starts_with("llm.")
-            });
+        let is_genai = event.attributes.keys().any(|key| {
+            let key = key.to_ascii_lowercase();
+            key.starts_with("gen_ai.") || key.starts_with("llm.")
+        });
         govern_attributes(&mut event.attributes, policy, is_genai);
         if let Some(scope) = &mut event.instrumentation_scope {
             govern_attributes(&mut scope.attributes, policy, is_genai);

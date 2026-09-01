@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: projects/sift/build.sh <debug|release>
+Usage: apps/sift/build.sh <debug|release>
 
 debug    Build Sift and install target/debug/sift to ~/.cargo/bin/sift.
 release  Build Sift with the release profile and install it locally.

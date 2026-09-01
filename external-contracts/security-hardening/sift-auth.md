@@ -32,11 +32,11 @@ tool_contracts:
     tool: guard
     manifest: guard.toml
     category: security
-    command: "target/debug/guard scan projects/sift --compact --no-persist"
+    command: "target/debug/guard scan apps/sift --compact --no-persist"
     native:
       version: 1
       project: sift
       source_contract: sift-security-hardening-bearer-auth
-      target: projects/sift
+      target: apps/sift
 ```
 <!-- HANDWRITE-END -->
