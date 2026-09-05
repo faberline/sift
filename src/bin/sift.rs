@@ -1,27 +1,35 @@
 // HANDWRITE-BEGIN gap="sift-service-cli" tracker="1576" reason="Implement serve, event, query, replay, spec, llm, upgrade, and issue CLI surfaces."
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    io::{Read, Write},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use axum::extract::DefaultBodyLimit;
+use base64::Engine as _;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use prost::Message as _;
+use prost14::Message as _;
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sift::{
     auth::SiftVerifier,
     collector::{
         CollectorConfig, CriMetadata, CriSourceConfig, SourceSpec, DEFAULT_BATCH_SIZE,
         DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_RETRIES,
     },
-    decode_event_json,
     deploy::{DockerfileVariant, InstanceProfile},
-    DurableJournal, EventQuery, ServiceState, SignalKind,
+    DurableJournal, ServiceState,
 };
 
 #[derive(Parser)]
 #[command(
     name = "sift",
     version,
-    about = "Sift — operational event service and CLI"
+    about = "Sift — one SRE product for logs, metrics, and traces"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -34,12 +42,10 @@ enum Command {
     Serve(ServeArgs),
     /// Collect axiom.service.log.v1 JSONL from a file, stdin, or Kubernetes CRI logs.
     Collect(CollectArgs),
-    /// Write or import versioned events into the local raw journal.
-    Event(EventArgs),
-    /// Query durable raw events without starting a server.
+    /// Run one versioned logs, metrics, or traces query through the Sift API.
     Query(QueryArgs),
-    /// Replay durable raw events after a cursor without starting a server.
-    Replay(ReplayArgs),
+    /// Serve the read-only Sift MCP tools.
+    Mcp(McpArgs),
     /// Write a consistent Sift journal snapshot to stdout or a local file.
     Snapshot(SnapshotArgs),
     /// Restore a journal snapshot from a shared backup object URI.
@@ -60,16 +66,64 @@ enum Command {
     Upgrade(UpgradeArgs),
     /// Search, inspect, or file Sift issues.
     Issue(IssueArgs),
+    /// Emit deterministic protocol bytes for the isolated acceptance runner.
+    #[command(hide = true)]
+    AcceptancePayload(AcceptancePayloadArgs),
+    /// Emit immutable build provenance for candidate verification.
+    #[command(hide = true)]
+    AcceptanceBuildInfo,
+    /// Send one valid and one invalid log through OTLP/gRPC for acceptance.
+    #[command(hide = true)]
+    AcceptanceGrpc(AcceptanceGrpcArgs),
+}
+
+#[derive(Args)]
+struct AcceptancePayloadArgs {
+    #[arg(long, value_enum)]
+    kind: AcceptancePayloadKind,
+    #[arg(long, default_value_t = 1)]
+    items: usize,
+    #[arg(long, default_value = "sift")]
+    project: String,
+    #[arg(long, default_value = "acceptance")]
+    event_prefix: String,
+    #[arg(long)]
+    timestamp_unix_nano: u64,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum AcceptancePayloadKind {
+    OtlpLogsProtobuf,
+    PrometheusRemoteWriteV1,
+}
+
+#[derive(Args)]
+struct AcceptanceGrpcArgs {
+    #[arg(long)]
+    endpoint: String,
+    #[arg(long, default_value = "sift")]
+    project: String,
+    #[arg(long)]
+    token_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
 struct ServeArgs {
+    /// Internal Sift deployment role. All roles use the same product binary.
+    #[arg(long, value_enum, default_value = "all")]
+    role: RunRole,
     #[arg(long, env = "SIFT_HOST", default_value = "0.0.0.0")]
     host: String,
     #[arg(long, env = "SIFT_PORT", default_value_t = 7380)]
     port: u16,
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = "sift-data")]
+    /// OTLP/gRPC listener port. It defaults to 4317 for the normal HTTP port.
+    #[arg(long, env = "SIFT_GRPC_PORT")]
+    grpc_port: Option<u16>,
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
+    /// Development-only temporary storage. Production roles refuse this flag.
+    #[arg(long, conflicts_with = "data_dir")]
+    ephemeral: bool,
     #[arg(long, env = "SIFT_LOG_LEVEL", default_value = "info")]
     log_level: String,
     #[arg(long, env = "SIFT_LOG_FORMAT", value_enum, default_value_t = LogFormat::Json)]
@@ -101,8 +155,17 @@ struct CollectArgs {
     #[arg(long, env = "SIFT_URL", default_value = "http://127.0.0.1:7380")]
     endpoint: String,
     /// Optional Sift bearer token.
-    #[arg(long, env = "SIFT_TOKEN")]
+    #[arg(long, env = "SIFT_TOKEN", conflicts_with = "token_file")]
     token: Option<String>,
+    /// Rotating projected ServiceAccount token. The file is read for every request.
+    #[arg(long, env = "SIFT_TOKEN_FILE", conflicts_with = "token")]
+    token_file: Option<PathBuf>,
+    /// Required audience in a projected ServiceAccount token.
+    #[arg(long, env = "SIFT_TOKEN_AUDIENCE", default_value = "sift.axiom.dev")]
+    token_audience: String,
+    /// Persistent Sift root used for agent checkpoints and rejected records.
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
+    data_dir: PathBuf,
     #[arg(long, default_value = "default")]
     project: String,
     #[arg(long, default_value = "local")]
@@ -116,7 +179,7 @@ struct CollectArgs {
     location: Option<String>,
     #[arg(long, env = "NODE_NAME")]
     node: Option<String>,
-    /// Durable source offset checkpoint; defaults beside the source file.
+    /// Durable source offset checkpoint; defaults under DATA_DIR/agent.
     #[arg(long)]
     checkpoint: Option<PathBuf>,
     /// Invalid-line JSONL sink; defaults beside the checkpoint.
@@ -143,63 +206,74 @@ enum LogFormat {
     Json,
 }
 
-#[derive(Args)]
-struct EventArgs {
-    #[command(subcommand)]
-    command: EventCommand,
+#[derive(Clone, Copy, Eq, PartialEq, ValueEnum)]
+enum RunRole {
+    All,
+    Agent,
+    Gateway,
+    Query,
+    Store,
+    Control,
+    Operator,
 }
 
-#[derive(Subcommand)]
-enum EventCommand {
-    /// Append one OperationalEventV2 JSON document.
-    Write(EventFileArgs),
-    /// Import a bounded JSON array or `{ "events": [...] }` batch.
-    Import(EventImportArgs),
-}
-
-#[derive(Args)]
-struct EventFileArgs {
-    /// JSON file containing one EventEnvelope.
-    file: PathBuf,
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = "sift-data")]
-    data_dir: PathBuf,
-}
-
-#[derive(Args)]
-struct EventImportArgs {
-    /// JSON file containing an event array or EventWriteRequest.
-    file: PathBuf,
-    #[arg(long, default_value = "default")]
-    project: String,
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = "sift-data")]
-    data_dir: PathBuf,
+impl From<RunRole> for sift::storage::StorageRole {
+    fn from(role: RunRole) -> Self {
+        match role {
+            RunRole::All => Self::All,
+            RunRole::Agent => Self::Agent,
+            RunRole::Gateway => Self::Gateway,
+            RunRole::Query => Self::Query,
+            RunRole::Store => Self::Store,
+            RunRole::Control => Self::Control,
+            RunRole::Operator => Self::Operator,
+        }
+    }
 }
 
 #[derive(Args)]
 struct QueryArgs {
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = "sift-data")]
-    data_dir: PathBuf,
-    #[arg(long, value_enum)]
-    signal: Option<SignalKind>,
-    #[arg(long, default_value_t = 100)]
-    limit: usize,
-    #[arg(long, default_value_t = 0)]
-    after: u64,
+    /// QueryRequestV1 JSON file, or `-` for stdin.
+    #[arg(value_name = "REQUEST")]
+    request: String,
+    /// Sift service base URL.
+    #[arg(long, env = "SIFT_URL", default_value = "http://127.0.0.1:7380")]
+    endpoint: String,
+    /// Optional Sift bearer token.
+    #[arg(long, env = "SIFT_TOKEN")]
+    token: Option<String>,
+    #[arg(long, default_value_t = 30)]
+    request_timeout_secs: u64,
 }
 
 #[derive(Args)]
-struct ReplayArgs {
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = "sift-data")]
-    data_dir: PathBuf,
-    #[arg(long, default_value_t = 0)]
-    after: u64,
-    #[arg(long, default_value_t = 100)]
-    limit: usize,
+struct McpArgs {
+    #[command(subcommand)]
+    command: McpCommand,
+}
+
+#[derive(Subcommand)]
+enum McpCommand {
+    /// Serve Sift tools over standard input and output.
+    Serve(McpServeArgs),
+}
+
+#[derive(Args)]
+struct McpServeArgs {
+    /// Use the MCP standard-input and standard-output transport.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
+    stdio: bool,
+    /// Sift service base URL used by the MCP tools.
+    #[arg(long, env = "SIFT_URL", default_value = "http://127.0.0.1:7380")]
+    endpoint: String,
+    /// Optional Sift bearer token.
+    #[arg(long, env = "SIFT_TOKEN")]
+    token: Option<String>,
 }
 
 #[derive(Args)]
 struct SnapshotArgs {
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = "sift-data")]
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
     /// Write the raw snapshot bytes here; omit to emit them in a JSON terminal envelope.
     #[arg(long)]
@@ -208,7 +282,7 @@ struct SnapshotArgs {
 
 #[derive(Args)]
 struct RestoreArgs {
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = "sift-data")]
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
     /// Source URI accepted by service-backup, for example file:///backup/sift.json.
     #[arg(long)]
@@ -229,8 +303,26 @@ struct BackupArgs {
     #[arg(long, conflicts_with = "url", required_unless_present = "url")]
     data_dir: Option<PathBuf>,
     /// Admin bearer token for live mode. Invalid with offline --data-dir.
-    #[arg(long, env = "SIFT_BACKUP_TOKEN", requires = "url")]
+    #[arg(
+        long,
+        env = "SIFT_BACKUP_TOKEN",
+        requires = "url",
+        conflicts_with = "token_file"
+    )]
     token: Option<String>,
+    /// Rotating projected ServiceAccount token for live mode.
+    #[arg(
+        long,
+        env = "SIFT_TOKEN_FILE",
+        requires = "url",
+        conflicts_with = "token"
+    )]
+    token_file: Option<PathBuf>,
+    #[arg(long, env = "SIFT_TOKEN_AUDIENCE", default_value = "sift.axiom.dev")]
+    token_audience: String,
+    /// Project checked by Kubernetes SubjectAccessReview for live backup.
+    #[arg(long, env = "SIFT_PROJECT", default_value = "*")]
+    project: String,
     /// Shared backup destination URI: file://, s3://, or gs://.
     #[arg(long)]
     dest: String,
@@ -550,13 +642,13 @@ const TOOL: cli_std::ToolInfo = cli_std::ToolInfo {
 const LLM_TOPICS: &[cli_std::llm::Topic] = &[
     cli_std::llm::Topic {
         id: "ingest",
-        summary: "versioned six-signal ingest and the fsync acknowledgement boundary",
-        body: "# Sift ingest\n\nUse `sift collect --source <service.stdout.jsonl>` for file capture, `--source -` for stdin, or `--cri-root /var/log/pods --gcp-project <id>` for the Sift-owned Kubernetes CRI adapter. File, stdin, and CRI records feed the same checkpointed `axiom.service.log.v1` decoder/batch/retry core; `--follow` supports regular files and CRI discovery. Render the least-privilege node deployment with `sift k8s collector render`. Canonical event clients use `sift event write <file>` or `sift event import <file>`; HTTP collectors use `/v1/events:write` or OTLP `/v1/logs`, `/v1/traces`, `/v1/metrics`, and `/v1/profiles`. Accepted items have completed the shared durable append path.",
+        summary: "OTLP logs, metrics, traces, and durable acknowledgement",
+        body: "# Sift ingest\n\nUse OTLP/HTTP `/v1/logs`, `/v1/metrics`, and `/v1/traces`, or OTLP/gRPC on port 4317. Metrics clients can also use Prometheus Remote Write 1.0 at `/prometheus/api/v1/write`. Use `sift collect --source <service.stdout.jsonl>` for file capture, `--source -` for stdin, or `--cri-root /var/log/pods --gcp-project <id>` for Kubernetes CRI logs. Collector checkpoints live under `/var/lib/sift/agent` by default. Accepted items have completed the durable Sift append path.",
     },
     cli_std::llm::Topic {
         id: "operations",
-        summary: "h2c serving, probe routes, query, replay, and local CLI use",
-        body: "# Sift operations\n\nRun `sift serve --data-dir ./sift-data`. The process serves HTTP/1.1 and h2c on one port plus `/healthz`, `/readyz`, `/metrics`, `/openapi.json`, and `/docs`. Use `sift event write|import`, `sift query`, and `sift replay` for local durable-journal inspection. Scheduled backups use `sift backup --url <service> --dest <uri>` and may supply `--token`/`SIFT_BACKUP_TOKEN`; legacy `--data-dir` backup is an explicit offline-only mode for a stopped journal and cannot be combined with `--url`.",
+        summary: "persistent roles, unified query, MCP, and backup",
+        body: "# Sift operations\n\nRun `sift serve` with a writable `/var/lib/sift`, or set `--data-dir`. The process serves HTTP/1.1 and h2c plus OTLP/gRPC. Use `sift query <request.json> --endpoint <url>` for the versioned logs, metrics, or traces query API. Use `sift mcp serve --stdio --endpoint <url>` for the same read-only capabilities through MCP. Scheduled backups use `sift backup --url <service> --dest <uri>` and may supply `--token` or `SIFT_BACKUP_TOKEN`.",
     },
 ];
 
@@ -569,9 +661,8 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Serve(args) => serve(args).await,
         Command::Collect(args) => collect(args).await,
-        Command::Event(args) => append_event(args),
-        Command::Query(args) => query(args),
-        Command::Replay(args) => replay(args),
+        Command::Query(args) => query(args).await,
+        Command::Mcp(args) => mcp(args).await,
         Command::Snapshot(args) => snapshot(args),
         Command::Restore(args) => restore(args),
         Command::Backup(args) => backup(args).await,
@@ -616,6 +707,14 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Issue(args) => issue(args).await,
+        Command::AcceptancePayload(args) => acceptance_payload(args),
+        Command::AcceptanceBuildInfo => print_json_terminal(serde_json::json!({
+            "version": TOOL.version,
+            "git_sha": TOOL.git_sha,
+            "target": TOOL.target,
+            "built_at": TOOL.built_at,
+        })),
+        Command::AcceptanceGrpc(args) => acceptance_grpc(args).await,
     }
 }
 
@@ -630,7 +729,7 @@ mod tests {
 
 // <HANDWRITE gap="missing-generator:logic" tracker="1873" reason="Implement the Sift-owned local structured-stdout collector CLI seam.">
 async fn collect(args: CollectArgs) -> Result<()> {
-    let (source, default_source_id, default_checkpoint) = if let Some(root) = args.cri_root {
+    let (source, default_source_id) = if let Some(root) = args.cri_root {
         let canonical = std::fs::canonicalize(&root)
             .with_context(|| format!("resolve CRI root {}", root.display()))?;
         let gcp_project = args
@@ -652,32 +751,31 @@ async fn collect(args: CollectArgs) -> Result<()> {
                 },
             }),
             source_id,
-            PathBuf::from("sift-cri.checkpoint.json"),
         )
     } else if args.source.as_deref() == Some("-") {
-        (
-            SourceSpec::Stdin,
-            "stdin".to_string(),
-            PathBuf::from("sift-stdin.checkpoint.json"),
-        )
+        (SourceSpec::Stdin, "stdin".to_string())
     } else {
         let source_arg = args.source.context("--source or --cri-root is required")?;
         let path = PathBuf::from(&source_arg);
         let canonical = std::fs::canonicalize(&path)
             .with_context(|| format!("resolve collector source {}", path.display()))?;
         let source_id = format!("file:{}", canonical.display());
-        let checkpoint = PathBuf::from(format!("{}.sift-checkpoint.json", path.display()));
-        (SourceSpec::File(path), source_id, checkpoint)
+        (SourceSpec::File(path), source_id)
     };
-    let checkpoint_path = args.checkpoint.unwrap_or(default_checkpoint);
+    let source_id = args.source_id.unwrap_or(default_source_id);
+    let checkpoint_path = args
+        .checkpoint
+        .unwrap_or_else(|| agent_checkpoint_path(&args.data_dir, &source_id));
     let quarantine_path = args
         .quarantine
         .unwrap_or_else(|| PathBuf::from(format!("{}.rejected.jsonl", checkpoint_path.display())));
     let summary = sift::collector::run_collector(CollectorConfig {
         source,
-        source_id: args.source_id.unwrap_or(default_source_id),
+        source_id,
         endpoint: args.endpoint,
         token: args.token,
+        token_file: args.token_file,
+        token_audience: args.token_audience,
         project: args.project,
         environment: args.environment,
         checkpoint_path,
@@ -693,15 +791,262 @@ async fn collect(args: CollectArgs) -> Result<()> {
     .await?;
     print_json_terminal(summary)
 }
+
+fn agent_checkpoint_path(data_dir: &std::path::Path, source_id: &str) -> PathBuf {
+    let digest = Sha256::digest(source_id.as_bytes());
+    data_dir
+        .join("agent")
+        .join(format!("{}.checkpoint.json", hex::encode(&digest[..16])))
+}
 // </HANDWRITE>
 
+fn acceptance_payload(args: AcceptancePayloadArgs) -> Result<()> {
+    if args.items == 0 || args.items > 1_000 {
+        anyhow::bail!("--items must be between 1 and 1000");
+    }
+    if args.project.trim().is_empty() {
+        anyhow::bail!("--project must not be empty");
+    }
+    if args.event_prefix.trim().is_empty() {
+        anyhow::bail!("--event-prefix must not be empty");
+    }
+    let bytes = match args.kind {
+        AcceptancePayloadKind::OtlpLogsProtobuf => {
+            use sift::ingest::otlp::wire::{
+                any_value, AnyValue, ExportLogsServiceRequest, KeyValue, LogRecord, Resource,
+                ResourceLogs, ScopeLogs,
+            };
+
+            let mut log_records = Vec::with_capacity(args.items);
+            for index in 0..args.items {
+                let timestamp = args
+                    .timestamp_unix_nano
+                    .checked_add(index as u64)
+                    .context("OTLP fixture timestamp overflow")?;
+                log_records.push(LogRecord {
+                    time_unix_nano: timestamp,
+                    observed_time_unix_nano: timestamp,
+                    severity_number: 9,
+                    severity_text: "INFO".into(),
+                    body: Some(AnyValue {
+                        value: Some(any_value::Value::StringValue(format!(
+                            "Sift acceptance log {index}"
+                        ))),
+                    }),
+                    attributes: vec![KeyValue {
+                        key: "sift.event_id".into(),
+                        value: Some(AnyValue {
+                            value: Some(any_value::Value::StringValue(format!(
+                                "{}-{index}",
+                                args.event_prefix
+                            ))),
+                        }),
+                        ..Default::default()
+                    }],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: Vec::new(),
+                    span_id: Vec::new(),
+                    event_name: String::new(),
+                });
+            }
+            ExportLogsServiceRequest {
+                resource_logs: vec![ResourceLogs {
+                    resource: Some(Resource {
+                        attributes: vec![KeyValue {
+                            key: "service.name".into(),
+                            value: Some(AnyValue {
+                                value: Some(any_value::Value::StringValue(
+                                    "sift-acceptance".into(),
+                                )),
+                            }),
+                            ..Default::default()
+                        }],
+                        dropped_attributes_count: 0,
+                        entity_refs: Vec::new(),
+                    }),
+                    scope_logs: vec![ScopeLogs {
+                        scope: None,
+                        log_records,
+                        schema_url: String::new(),
+                    }],
+                    schema_url: String::new(),
+                }],
+            }
+            .encode_to_vec()
+        }
+        AcceptancePayloadKind::PrometheusRemoteWriteV1 => {
+            use sift::prometheus::remote::{Label, Sample, TimeSeries, WriteRequest};
+
+            let base_millis = i64::try_from(args.timestamp_unix_nano / 1_000_000)
+                .context("Prometheus fixture timestamp exceeds i64 milliseconds")?;
+            let samples = (0..args.items)
+                .map(|index| {
+                    let timestamp = base_millis
+                        .checked_add(index as i64)
+                        .context("Prometheus fixture timestamp overflow")?;
+                    Ok(Sample {
+                        value: index as f64,
+                        timestamp,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let request = WriteRequest {
+                timeseries: vec![TimeSeries {
+                    labels: vec![
+                        Label {
+                            name: "__name__".into(),
+                            value: "sift_acceptance_total".into(),
+                        },
+                        Label {
+                            name: "environment".into(),
+                            value: "acceptance".into(),
+                        },
+                        Label {
+                            name: "fixture".into(),
+                            value: args.event_prefix,
+                        },
+                        Label {
+                            name: "project".into(),
+                            value: args.project,
+                        },
+                    ],
+                    samples,
+                    exemplars: Vec::new(),
+                }],
+                metadata: Vec::new(),
+            };
+            metrics_remote_write::encode_snappy(&request.encode_to_vec())
+                .context("compress Prometheus Remote Write fixture")?
+        }
+    };
+    std::io::stdout()
+        .lock()
+        .write_all(&bytes)
+        .context("write acceptance protocol bytes")
+}
+
+async fn acceptance_grpc(args: AcceptanceGrpcArgs) -> Result<()> {
+    use opentelemetry_proto::tonic::{
+        collector::logs::v1::{logs_service_client::LogsServiceClient, ExportLogsServiceRequest},
+        common::v1::{any_value, AnyValue, KeyValue},
+        logs::v1::{LogRecord, ResourceLogs, ScopeLogs},
+        resource::v1::Resource,
+    };
+    use tonic::{codec::CompressionEncoding, Request};
+
+    if args.project.trim().is_empty() {
+        anyhow::bail!("--project must not be empty");
+    }
+    let timestamp = u64::try_from(chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default())
+        .context("current time precedes Unix epoch")?;
+    let valid = LogRecord {
+        time_unix_nano: timestamp,
+        observed_time_unix_nano: timestamp,
+        severity_text: "INFO".into(),
+        body: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(
+                "Sift OTLP/gRPC acceptance".into(),
+            )),
+        }),
+        attributes: vec![KeyValue {
+            key: "sift.event_id".into(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(format!(
+                    "grpc-acceptance-{timestamp}"
+                ))),
+            }),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let invalid = LogRecord {
+        time_unix_nano: timestamp.saturating_add(1),
+        observed_time_unix_nano: timestamp.saturating_add(1),
+        ..Default::default()
+    };
+    let request = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![KeyValue {
+                    key: "service.name".into(),
+                    value: Some(AnyValue {
+                        value: Some(any_value::Value::StringValue("sift-acceptance".into())),
+                    }),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![valid, invalid],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+    let mut client = LogsServiceClient::connect(args.endpoint)
+        .await
+        .context("connect to Sift OTLP/gRPC")?
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip);
+    let mut request = Request::new(request);
+    request.metadata_mut().insert(
+        "x-sift-project",
+        args.project.parse().context("encode project metadata")?,
+    );
+    if let Some(path) = args.token_file {
+        let token = std::fs::read_to_string(&path)
+            .with_context(|| format!("read projected token {}", path.display()))?;
+        let authorization = format!("Bearer {}", token.trim());
+        request.metadata_mut().insert(
+            "authorization",
+            authorization
+                .parse()
+                .context("encode authorization metadata")?,
+        );
+    }
+    let response = client
+        .export(request)
+        .await
+        .context("export OTLP/gRPC logs")?
+        .into_inner();
+    let rejected = response
+        .partial_success
+        .as_ref()
+        .map_or(0, |partial| partial.rejected_log_records);
+    if rejected != 1 {
+        anyhow::bail!("OTLP/gRPC acceptance expected one rejected log, got {rejected}");
+    }
+    print_json_terminal(serde_json::json!({
+        "signal":"logs",
+        "accepted":1,
+        "rejected":rejected,
+        "compression":"gzip"
+    }))
+}
+
 async fn serve(args: ServeArgs) -> Result<()> {
+    if args.ephemeral && (args.role != RunRole::All || production_environment()) {
+        anyhow::bail!(
+            "--ephemeral is forbidden for production Sift roles; use writable persistent storage"
+        );
+    }
+    let ephemeral_root = args
+        .ephemeral
+        .then(|| tempfile::Builder::new().prefix("sift-ephemeral-").tempdir())
+        .transpose()
+        .context("create explicit ephemeral Sift root")?;
+    let data_dir = ephemeral_root
+        .as_ref()
+        .map(|root| root.path())
+        .unwrap_or(args.data_dir.as_path());
     let format = match args.log_format {
         LogFormat::Pretty => service_http::LogFormat::Pretty,
         LogFormat::Json => service_http::LogFormat::Json,
     };
     let config = service_http::HttpConfig::new(
-        args.host,
+        args.host.clone(),
         args.port,
         args.log_level,
         format,
@@ -711,13 +1056,198 @@ async fn serve(args: ServeArgs) -> Result<()> {
     );
     service_http::init_tracing(&config)?;
 
-    let state = Arc::new(ServiceState::open(&args.data_dir)?);
-    let projection_worker = state.start_projection_worker();
-    let verifier = Arc::new(SiftVerifier::from_env()?);
-    let data_plane = sift::protected_router(state.clone(), verifier);
-    let data_plane = match state.raft_router() {
-        Some(raft_routes) => data_plane.merge(raft_routes),
-        None => data_plane,
+    if matches!(args.role, RunRole::All | RunRole::Store) {
+        if let Ok(manifest_uri) = std::env::var("SIFT_BOOTSTRAP_ARCHIVE_MANIFEST_URI") {
+            if !manifest_uri.trim().is_empty() {
+                match sift::storage::archive::bootstrap_gcs_if_needed(&manifest_uri, data_dir)? {
+                    Some(manifest) => tracing::info!(
+                        source_manifest = manifest_uri,
+                        source_cluster_id = manifest.source_cluster_id,
+                        event_count = manifest.event_count,
+                        "Sift fresh-volume archive bootstrap completed"
+                    ),
+                    None => tracing::info!(
+                        source_manifest = manifest_uri,
+                        "Sift archive bootstrap already completed; reusing restored volume"
+                    ),
+                }
+            }
+        }
+    }
+
+    let state = Arc::new(ServiceState::open_with_role(data_dir, args.role.into())?);
+    let grace = Duration::from_secs(config.grace_secs.max(1));
+    let reserve = Duration::from_secs((config.grace_secs / 10).min(5));
+    let supervisor = server_lifecycle::TaskSupervisor::new(grace, reserve)?;
+    let drain_state = state.clone();
+    supervisor.register_hook(
+        server_lifecycle::HookStage::AdmissionStop,
+        "sift-ingest-admission",
+        move |_| {
+            let drain_state = drain_state.clone();
+            async move {
+                drain_state.start_drain();
+                Ok(())
+            }
+        },
+    )?;
+
+    let projection_worker = Arc::new(tokio::sync::Mutex::new(Some(
+        state.start_projection_worker(),
+    )));
+    let archive_worker = if matches!(args.role, RunRole::All | RunRole::Store) {
+        let destination = std::env::var("SIFT_ARCHIVE_DESTINATION")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let interval = std::env::var("SIFT_ARCHIVE_INTERVAL_SECS")
+            .unwrap_or_else(|_| "60".to_string())
+            .parse::<u64>()
+            .context("SIFT_ARCHIVE_INTERVAL_SECS must be a positive integer")?;
+        if interval == 0 {
+            anyhow::bail!("SIFT_ARCHIVE_INTERVAL_SECS must be greater than zero");
+        }
+        Some(match destination {
+            Some(destination) => {
+                state.start_archive_worker(destination, Duration::from_secs(interval))
+            }
+            None => state.start_local_archive_worker(Duration::from_secs(interval)),
+        })
+    } else {
+        None
+    };
+    let archive_worker = Arc::new(tokio::sync::Mutex::new(archive_worker));
+    let drain_batches = state.clone();
+    supervisor.register_hook(
+        server_lifecycle::HookStage::DomainQuiesce,
+        "sift-ingest-batches",
+        move |_| {
+            let drain_batches = drain_batches.clone();
+            async move {
+                drain_batches
+                    .finish_drain()
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+        },
+    )?;
+    let stop_archive = archive_worker.clone();
+    supervisor.register_hook(
+        server_lifecycle::HookStage::BackgroundStop,
+        "sift-lifecycle-worker",
+        move |_| {
+            let stop_archive = stop_archive.clone();
+            async move {
+                if let Some(worker) = stop_archive.lock().await.take() {
+                    worker.stop().await;
+                }
+                Ok(())
+            }
+        },
+    )?;
+    let flush_projections = projection_worker.clone();
+    supervisor.register_hook(
+        server_lifecycle::HookStage::FinalFlush,
+        "sift-projections",
+        move |_| {
+            let flush_projections = flush_projections.clone();
+            async move {
+                if let Some(worker) = flush_projections.lock().await.take() {
+                    worker.stop().await;
+                }
+                Ok(())
+            }
+        },
+    )?;
+    let verifier = Arc::new(SiftVerifier::from_env().await?);
+    if let Some((transport, peer_port, raft_router)) = state.peer_server() {
+        let listener = tokio::net::TcpListener::bind((args.host.as_str(), peer_port))
+            .await
+            .context("bind Sift peer mTLS listener")?;
+        let address = listener
+            .local_addr()
+            .context("read Sift peer mTLS listener address")?;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        tracing::info!(%address, "sift serving mutually authenticated Raft peers");
+        let task = tokio::spawn(async move {
+            transport
+                .serve(listener, raft_router, async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+        });
+        supervisor.register_oneshot_task(
+            server_lifecycle::HookStage::TransportDrain,
+            "sift-raft-peer",
+            shutdown_tx,
+            task,
+        )?;
+    }
+    if matches!(args.role, RunRole::All | RunRole::Gateway | RunRole::Store) {
+        let grpc_port = args
+            .grpc_port
+            .unwrap_or(if args.port == 7380 { 4317 } else { 0 });
+        let listener = tokio::net::TcpListener::bind((args.host.as_str(), grpc_port))
+            .await
+            .context("bind Sift OTLP/gRPC listener")?;
+        let address = listener
+            .local_addr()
+            .context("read OTLP/gRPC listener address")?;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let grpc_state = state.clone();
+        let grpc_verifier = verifier.clone();
+        let grpc_store = (args.role == RunRole::Gateway).then(|| {
+            std::env::var("SIFT_STORE_GRPC_ENDPOINT")
+                .unwrap_or_else(|_| "http://127.0.0.1:4317".to_string())
+        });
+        let maximum_message_bytes = config.body_limit_bytes;
+        tracing::info!(%address, "sift serving OTLP/gRPC");
+        let task = tokio::spawn(async move {
+            if let Some(store) = grpc_store {
+                sift::grpc::serve_proxy(
+                    listener,
+                    &store,
+                    grpc_verifier,
+                    maximum_message_bytes,
+                    async {
+                        let _ = shutdown_rx.await;
+                    },
+                )
+                .await
+            } else {
+                sift::grpc::serve(listener, grpc_state, grpc_verifier, async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+            }
+        });
+        supervisor.register_oneshot_task(
+            server_lifecycle::HookStage::TransportDrain,
+            "sift-otlp-grpc",
+            shutdown_tx,
+            task,
+        )?;
+    }
+    let internal_endpoint = local_http_endpoint(&args.host, args.port);
+    let data_plane = match args.role {
+        RunRole::Gateway => {
+            let store = std::env::var("SIFT_STORE_ENDPOINT")
+                .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
+            let query = std::env::var("SIFT_QUERY_ENDPOINT").unwrap_or_else(|_| store.clone());
+            sift::proxy::gateway_router(&store, &query, config.body_limit_bytes)?
+                .merge(sift::mcp::http_router(&internal_endpoint)?)
+                .layer(axum::middleware::from_fn_with_state(
+                    verifier,
+                    sift::auth::auth_middleware,
+                ))
+        }
+        RunRole::Query => {
+            let store = std::env::var("SIFT_STORE_ENDPOINT")
+                .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
+            sift::query_role_router(state.clone(), &store, config.body_limit_bytes)?.layer(
+                axum::middleware::from_fn_with_state(verifier, sift::auth::auth_middleware),
+            )
+        }
+        _ => sift::protected_router_with_mcp(state.clone(), verifier, &internal_endpoint)?,
     }
     .layer(DefaultBodyLimit::max(config.body_limit_bytes));
     let app =
@@ -733,80 +1263,103 @@ async fn serve(args: ServeArgs) -> Result<()> {
         .await
         .context("bind Sift service listener")?;
     tracing::info!(address = %config.bind_addr(), "sift serving HTTP/1.1 and h2c");
-    let grace = Duration::from_secs(config.grace_secs);
-    service_http::serve(
+    let lifecycle = supervisor.lifecycle();
+    let signal_supervisor = supervisor.clone();
+    let signal_task = tokio::spawn(async move {
+        service_http::wait_shutdown_signal().await;
+        signal_supervisor
+            .shutdown("signal", "Sift shutdown signal received")
+            .await
+    });
+    let http_report = service_http::serve_with_lifecycle(
         listener,
         app,
-        service_http::shutdown_with_drain(move || state.start_drain(), grace),
+        service_http::HttpServerOptions::default(),
+        lifecycle,
     )
     .await;
-    projection_worker.stop().await;
+    let shutdown_report = signal_task.await.context("join Sift shutdown supervisor")?;
+    let failures = shutdown_report
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.status != server_lifecycle::HookStatus::Completed)
+        .map(|outcome| format!("{}: {:?}", outcome.name, outcome.status))
+        .collect::<Vec<_>>();
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "Sift shutdown did not complete cleanly: {}",
+            failures.join(", ")
+        );
+    }
+    tracing::info!(
+        accepted = http_report.accepted,
+        completed = http_report.completed,
+        failed = http_report.failed,
+        timed_out = http_report.timed_out,
+        "Sift shared HTTP runtime stopped"
+    );
     Ok(())
 }
 
-fn append_event(args: EventArgs) -> Result<()> {
-    match args.command {
-        EventCommand::Write(args) => {
-            let source = std::fs::read_to_string(&args.file)
-                .with_context(|| format!("read event file {}", args.file.display()))?;
-            let event =
-                decode_event_json(source.as_bytes()).context("parse operational event JSON")?;
-            let result = DurableJournal::open(&args.data_dir)?.append(event)?;
-            print_json_terminal(result)
-        }
-        EventCommand::Import(args) => import_events(args),
-    }
+fn production_environment() -> bool {
+    std::env::var("SIFT_PRODUCTION").ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "on"
+        )
+    }) || std::env::var("SIFT_ENVIRONMENT").ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "prod" | "production"
+        )
+    })
 }
 
-fn import_events(args: EventImportArgs) -> Result<()> {
-    let source = std::fs::read(&args.file)
-        .with_context(|| format!("read event batch {}", args.file.display()))?;
-    let value: Value = serde_json::from_slice(&source).context("parse event batch JSON")?;
-    let values = match value {
-        Value::Array(values) => values,
-        Value::Object(mut object) => object
-            .remove("events")
-            .and_then(|value| value.as_array().cloned())
-            .context("event import object must contain an events array")?,
-        _ => anyhow::bail!("event import expects a JSON array or object with events"),
+fn local_http_endpoint(host: &str, port: u16) -> String {
+    let host = match host {
+        "0.0.0.0" | "::" | "[::]" => "127.0.0.1".to_string(),
+        host if host.starts_with('[') => host.to_string(),
+        host if host.contains(':') => format!("[{host}]"),
+        host => host.to_string(),
     };
-    let journal = DurableJournal::open(&args.data_dir)?;
-    let mut results = Vec::with_capacity(values.len());
-    for (index, value) in values.into_iter().enumerate() {
-        let event_id = sift::ingest::batch::event_id_hint(&value);
-        match sift::ingest::batch::decode_item(value, &args.project)
-            .and_then(|event| journal.append(event))
-        {
-            Ok(result) => results.push(sift::ingest::BatchItemResult::accepted(
-                index,
-                result.event_id,
-                result.cursor,
-                result.duplicate,
-            )),
-            Err(error) => results.push(sift::ingest::BatchItemResult::rejected(
-                index,
-                event_id,
-                "invalid_event",
-                error.to_string(),
-                false,
-            )),
+    format!("http://{host}:{port}")
+}
+
+async fn query(args: QueryArgs) -> Result<()> {
+    let source = read_json_input(&args.request)?;
+    let request: sift::api::QueryRequestV1 =
+        serde_json::from_slice(&source).context("parse QueryRequestV1 JSON")?;
+    request.validate().context("validate QueryRequestV1")?;
+    let response = sift::mcp::SiftApiClient::new(
+        &args.endpoint,
+        args.token,
+        Duration::from_secs(args.request_timeout_secs),
+    )?
+    .query(&request)
+    .await?;
+    print_json_terminal(response)
+}
+
+fn read_json_input(source: &str) -> Result<Vec<u8>> {
+    if source == "-" {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut bytes)
+            .context("read JSON from stdin")?;
+        return Ok(bytes);
+    }
+    std::fs::read(source).with_context(|| format!("read JSON file {source}"))
+}
+
+async fn mcp(args: McpArgs) -> Result<()> {
+    match args.command {
+        McpCommand::Serve(args) => {
+            if !args.stdio {
+                anyhow::bail!("only --stdio is supported by `sift mcp serve`");
+            }
+            sift::mcp::serve_stdio(args.endpoint, args.token).await
         }
     }
-    print_json_terminal(sift::ingest::EventWriteResponse::from_results(results))
-}
-
-fn query(args: QueryArgs) -> Result<()> {
-    let rows = DurableJournal::open(&args.data_dir)?.query(EventQuery {
-        signal: args.signal,
-        after: args.after,
-        limit: args.limit,
-    })?;
-    print_json_terminal(rows)
-}
-
-fn replay(args: ReplayArgs) -> Result<()> {
-    let rows = DurableJournal::open(&args.data_dir)?.replay(args.after, args.limit)?;
-    print_json_terminal(rows)
 }
 
 fn snapshot(args: SnapshotArgs) -> Result<()> {
@@ -827,7 +1380,12 @@ fn snapshot(args: SnapshotArgs) -> Result<()> {
             "bytes": bytes.len(),
         }));
     }
-    print_json_terminal(serde_json::from_slice::<Value>(&bytes)?)
+    print_json_terminal(serde_json::json!({
+        "format": "sift-snapshot-v2",
+        "encoding": "base64",
+        "bytes": bytes.len(),
+        "snapshot_base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
 }
 
 fn restore(args: RestoreArgs) -> Result<()> {
@@ -842,9 +1400,12 @@ fn restore(args: RestoreArgs) -> Result<()> {
 async fn backup(args: BackupArgs) -> Result<()> {
     let result = match (args.url.as_deref(), args.data_dir.as_deref()) {
         (Some(url), None) => {
-            sift::backup::backup_live_journal(
+            sift::backup::backup_live_journal_authenticated(
                 url,
                 args.token.as_deref(),
+                args.token_file.as_deref(),
+                &args.token_audience,
+                &args.project,
                 &args.dest,
                 args.retention_secs,
             )
@@ -877,7 +1438,7 @@ fn dockerfile(args: DockerfileArgs) -> Result<()> {
                 args.out.as_deref(),
                 file_name,
                 &body,
-                "docker build -f projects/sift/Dockerfile -t sift:dev .",
+                "docker build -f apps/sift/Dockerfile -t sift:dev .",
             )
         }
     }

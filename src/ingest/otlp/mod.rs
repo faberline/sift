@@ -1,13 +1,13 @@
 // HANDWRITE-BEGIN gap="sift-otlp-normalizer" tracker="1658" reason="Decode signal endpoint payloads, dispatch wire normalization, and encode media-type-matched partial-success responses."
-pub mod wire;
+pub use transport_otlp::proto as wire;
 
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{DateTime, Utc};
-use prost::Message;
-use serde_json::{json, Map, Value};
+use prost14::Message;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -16,59 +16,7 @@ use crate::{
 };
 
 use self::wire::{any_value, metric, number_data_point, AnyValue};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OtlpSignal {
-    Logs,
-    Traces,
-    Metrics,
-    Profiles,
-}
-
-impl OtlpSignal {
-    pub fn rejected_json_field(self) -> &'static str {
-        match self {
-            Self::Logs => "rejectedLogRecords",
-            Self::Traces => "rejectedSpans",
-            Self::Metrics => "rejectedDataPoints",
-            Self::Profiles => "rejectedProfiles",
-        }
-    }
-
-    fn signal_kind(self) -> SignalKind {
-        match self {
-            Self::Logs => SignalKind::Log,
-            Self::Traces => SignalKind::Span,
-            Self::Metrics => SignalKind::Metric,
-            Self::Profiles => SignalKind::Profile,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OtlpMediaType {
-    Json,
-    Protobuf,
-}
-
-impl OtlpMediaType {
-    pub fn parse(value: Option<&str>) -> Result<Self> {
-        let value = value.unwrap_or("application/json");
-        let media = value.split(';').next().unwrap_or(value).trim();
-        match media {
-            "application/json" => Ok(Self::Json),
-            "application/x-protobuf" | "application/protobuf" => Ok(Self::Protobuf),
-            other => bail!("unsupported OTLP content-type `{other}`"),
-        }
-    }
-
-    pub fn content_type(self) -> &'static str {
-        match self {
-            Self::Json => "application/json",
-            Self::Protobuf => "application/x-protobuf",
-        }
-    }
-}
+pub use transport_otlp::{OtlpMediaType, OtlpSignal};
 
 #[derive(Clone, Debug)]
 pub struct OtlpItemError {
@@ -97,15 +45,30 @@ pub fn decode(
     body: &[u8],
     project: &str,
 ) -> Result<DecodedOtlp> {
-    let items = match (signal, media) {
-        (OtlpSignal::Logs, OtlpMediaType::Json) => decode_logs_json(body, project)?,
-        (OtlpSignal::Logs, OtlpMediaType::Protobuf) => decode_logs_proto(body, project)?,
-        (OtlpSignal::Traces, OtlpMediaType::Json) => decode_traces_json(body, project)?,
-        (OtlpSignal::Traces, OtlpMediaType::Protobuf) => decode_traces_proto(body, project)?,
-        (OtlpSignal::Metrics, OtlpMediaType::Json) => decode_metrics_json(body, project)?,
-        (OtlpSignal::Metrics, OtlpMediaType::Protobuf) => decode_metrics_proto(body, project)?,
-        (OtlpSignal::Profiles, OtlpMediaType::Json) => decode_profiles_json(body, project)?,
-        (OtlpSignal::Profiles, OtlpMediaType::Protobuf) => decode_profiles_proto(body, project)?,
+    let payload = transport_otlp::decode_payload(signal, media, body)?;
+    normalize_payload(payload, project)
+}
+
+pub fn normalize_payload(
+    payload: transport_otlp::DecodedPayload,
+    project: &str,
+) -> Result<DecodedOtlp> {
+    let items = match payload {
+        transport_otlp::DecodedPayload::Logs(request) => decode_logs_proto(request, project)?,
+        transport_otlp::DecodedPayload::Metrics(request) => decode_metrics_proto(request, project)?,
+        transport_otlp::DecodedPayload::Traces(request) => decode_traces_proto(request, project)?,
+        transport_otlp::DecodedPayload::Json {
+            signal: OtlpSignal::Logs,
+            value,
+        } => decode_logs_json(&value, project)?,
+        transport_otlp::DecodedPayload::Json {
+            signal: OtlpSignal::Metrics,
+            value,
+        } => decode_metrics_json(&value, project)?,
+        transport_otlp::DecodedPayload::Json {
+            signal: OtlpSignal::Traces,
+            value,
+        } => decode_traces_json(&value, project)?,
     };
     if items.is_empty() {
         bail!("OTLP request contains no signal items");
@@ -119,42 +82,23 @@ pub fn encode_response(
     rejected: usize,
     messages: &[String],
 ) -> Result<EncodedOtlpResponse> {
-    let error_message = messages.join("; ");
-    let body = match media {
-        OtlpMediaType::Json => {
-            let value = if rejected == 0 && error_message.is_empty() {
-                json!({})
-            } else {
-                let mut partial = Map::new();
-                partial.insert(signal.rejected_json_field().into(), json!(rejected));
-                partial.insert("errorMessage".into(), json!(error_message));
-                json!({"partialSuccess": partial})
-            };
-            serde_json::to_vec(&value)?
-        }
-        OtlpMediaType::Protobuf => wire::ExportResponse {
-            partial_success: (rejected != 0 || !error_message.is_empty()).then_some(
-                wire::PartialSuccess {
-                    rejected_items: rejected as i64,
-                    error_message,
-                },
-            ),
-        }
-        .encode_to_vec(),
-    };
+    let encoded = transport_otlp::encode_response(
+        signal,
+        media,
+        &transport_otlp::PartialSuccess::new(rejected, messages.join("; ")),
+    )?;
     Ok(EncodedOtlpResponse {
-        content_type: media.content_type(),
-        body,
+        content_type: encoded.content_type,
+        body: encoded.body,
     })
 }
 
 fn decode_logs_json(
-    body: &[u8],
+    root: &Value,
     project: &str,
 ) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let root: Value = serde_json::from_slice(body).context("decode OTLP logs JSON")?;
     let mut output = Vec::new();
-    for resource_logs in array(&root, "resourceLogs", "resource_logs") {
+    for resource_logs in array(root, "resourceLogs", "resource_logs") {
         let resource = json_resource(resource_logs.get("resource"));
         for scope_logs in array(resource_logs, "scopeLogs", "scope_logs") {
             let scope = json_scope(
@@ -205,6 +149,7 @@ fn json_log_event(
     );
     event.instrumentation_scope = scope;
     event.attributes = json_attributes(record.get("attributes"));
+    apply_common_attributes(&mut event);
     event.trace_id = trace_id;
     event.span_id = span_id;
     event.severity = string(record, "severityText", "severity_text").map(str::to_string);
@@ -215,11 +160,9 @@ fn json_log_event(
 }
 
 fn decode_logs_proto(
-    body: &[u8],
+    request: wire::ExportLogsServiceRequest,
     project: &str,
 ) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let request =
-        wire::ExportLogsServiceRequest::decode(body).context("decode OTLP logs protobuf")?;
     let mut output = Vec::new();
     for resource_logs in request.resource_logs {
         let resource = proto_resource(resource_logs.resource.as_ref());
@@ -254,6 +197,7 @@ fn decode_logs_proto(
                 );
                 event.instrumentation_scope = scope.clone();
                 event.attributes = proto_attributes(&record.attributes);
+                apply_common_attributes(&mut event);
                 event.trace_id = valid_proto_id(&record.trace_id, 16);
                 event.span_id = valid_proto_id(&record.span_id, 8);
                 event.severity = (!record.severity_text.is_empty()).then_some(record.severity_text);
@@ -265,12 +209,11 @@ fn decode_logs_proto(
 }
 
 fn decode_traces_json(
-    body: &[u8],
+    root: &Value,
     project: &str,
 ) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let root: Value = serde_json::from_slice(body).context("decode OTLP traces JSON")?;
     let mut output = Vec::new();
-    for resource_spans in array(&root, "resourceSpans", "resource_spans") {
+    for resource_spans in array(root, "resourceSpans", "resource_spans") {
         let resource = json_resource(resource_spans.get("resource"));
         for scope_spans in array(resource_spans, "scopeSpans", "scope_spans") {
             let scope = json_scope(
@@ -290,6 +233,32 @@ fn decode_traces_json(
                 }
                 let start = nanos(span, "startTimeUnixNano", "start_time_unix_nano");
                 let end = nanos(span, "endTimeUnixNano", "end_time_unix_nano");
+                let events = array(span, "events", "events")
+                    .iter()
+                    .map(|event| {
+                        json!({
+                            "name": string(event, "name", "name").unwrap_or(""),
+                            "time_unix_nano": nanos(event, "timeUnixNano", "time_unix_nano"),
+                            "attributes": json_attributes(event.get("attributes")),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let links = array(span, "links", "links")
+                    .iter()
+                    .filter_map(|link| {
+                        Some(json!({
+                            "trace_id": id_string(link.get("traceId").or_else(|| link.get("trace_id")))?,
+                            "span_id": id_string(link.get("spanId").or_else(|| link.get("span_id")))?,
+                            "attributes": json_attributes(link.get("attributes")),
+                        }))
+                    })
+                    .collect::<Vec<_>>();
+                let status = span.get("status").map(|status| {
+                    json!({
+                        "code": status.get("code").cloned(),
+                        "message": string(status, "message", "message"),
+                    })
+                });
                 let mut event = base_event(
                     OtlpSignal::Traces,
                     project,
@@ -305,10 +274,20 @@ fn decode_traces_json(
                     ),
                     start,
                     end,
-                    span.clone(),
+                    json!({
+                        "name": name,
+                        "kind": scalar_value_string(span.get("kind")),
+                        "parent_span_id": id_string(span.get("parentSpanId").or_else(|| span.get("parent_span_id"))),
+                        "start_time_unix_nano": start,
+                        "end_time_unix_nano": end,
+                        "status": status,
+                        "events": events,
+                        "links": links,
+                    }),
                 );
                 event.instrumentation_scope = scope.clone();
                 event.attributes = json_attributes(span.get("attributes"));
+                apply_common_attributes(&mut event);
                 event.trace_id = trace_id;
                 event.span_id = span_id;
                 output.push(Ok(event));
@@ -319,11 +298,9 @@ fn decode_traces_json(
 }
 
 fn decode_traces_proto(
-    body: &[u8],
+    request: wire::ExportTraceServiceRequest,
     project: &str,
 ) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let request =
-        wire::ExportTraceServiceRequest::decode(body).context("decode OTLP traces protobuf")?;
     let mut output = Vec::new();
     for resource_spans in request.resource_spans {
         let resource = proto_resource(resource_spans.resource.as_ref());
@@ -339,6 +316,32 @@ fn decode_traces_proto(
                     )));
                     continue;
                 }
+                let events = span
+                    .events
+                    .iter()
+                    .map(|event| {
+                        json!({
+                            "name": event.name,
+                            "time_unix_nano": event.time_unix_nano,
+                            "attributes": proto_attributes(&event.attributes),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let links = span
+                    .links
+                    .iter()
+                    .filter_map(|link| {
+                        Some(json!({
+                            "trace_id": valid_proto_id(&link.trace_id, 16)?,
+                            "span_id": valid_proto_id(&link.span_id, 8)?,
+                            "attributes": proto_attributes(&link.attributes),
+                        }))
+                    })
+                    .collect::<Vec<_>>();
+                let kind =
+                    opentelemetry_proto::tonic::trace::v1::span::SpanKind::try_from(span.kind)
+                        .ok()
+                        .map(|kind| kind.as_str_name().to_string());
                 let mut event = base_event(
                     OtlpSignal::Traces,
                     project,
@@ -356,15 +359,18 @@ fn decode_traces_proto(
                     span.end_time_unix_nano,
                     json!({
                         "name": span.name,
-                        "kind": span.kind,
-                        "parentSpanId": hex::encode(span.parent_span_id),
-                        "events": span.events.iter().map(|event| json!({"name": event.name, "timeUnixNano": event.time_unix_nano})).collect::<Vec<_>>(),
-                        "links": span.links.iter().map(|link| json!({"traceId": hex::encode(&link.trace_id), "spanId": hex::encode(&link.span_id)})).collect::<Vec<_>>(),
+                        "kind": kind,
+                        "parent_span_id": valid_proto_id(&span.parent_span_id, 8),
+                        "start_time_unix_nano": span.start_time_unix_nano,
+                        "end_time_unix_nano": span.end_time_unix_nano,
+                        "events": events,
+                        "links": links,
                         "status": span.status.as_ref().map(|status| json!({"code": status.code, "message": status.message})),
                     }),
                 );
                 event.instrumentation_scope = scope.clone();
                 event.attributes = proto_attributes(&span.attributes);
+                apply_common_attributes(&mut event);
                 event.trace_id = trace_id;
                 event.span_id = span_id;
                 output.push(Ok(event));
@@ -375,12 +381,11 @@ fn decode_traces_proto(
 }
 
 fn decode_metrics_json(
-    body: &[u8],
+    root: &Value,
     project: &str,
 ) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let root: Value = serde_json::from_slice(body).context("decode OTLP metrics JSON")?;
     let mut output = Vec::new();
-    for resource_metrics in array(&root, "resourceMetrics", "resource_metrics") {
+    for resource_metrics in array(root, "resourceMetrics", "resource_metrics") {
         let resource = json_resource(resource_metrics.get("resource"));
         for scope_metrics in array(resource_metrics, "scopeMetrics", "scope_metrics") {
             let scope = json_scope(
@@ -429,9 +434,11 @@ fn decode_metrics_json(
                     );
                     event.instrumentation_scope = scope.clone();
                     event.attributes = json_attributes(point.get("attributes"));
+                    apply_common_attributes(&mut event);
                     event.metric = Some(MetricPoint {
                         name: name.to_string(),
                         value,
+                        stale: false,
                         unit: unit.clone(),
                         temporality,
                         exemplars: json_exemplars(point.get("exemplars")),
@@ -445,11 +452,9 @@ fn decode_metrics_json(
 }
 
 fn decode_metrics_proto(
-    body: &[u8],
+    request: wire::ExportMetricsServiceRequest,
     project: &str,
 ) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let request =
-        wire::ExportMetricsServiceRequest::decode(body).context("decode OTLP metrics protobuf")?;
     let mut output = Vec::new();
     for resource_metrics in request.resource_metrics {
         let resource = proto_resource(resource_metrics.resource.as_ref());
@@ -489,6 +494,13 @@ fn decode_metrics_proto(
                                 json!({"count": point.count, "sum": point.sum, "bucketCounts": point.bucket_counts, "explicitBounds": point.explicit_bounds}),
                             )));
                             }
+                            continue;
+                        }
+                        metric::Data::ExponentialHistogram(_) | metric::Data::Summary(_) => {
+                            output.push(Err(item_error(
+                                None,
+                                format!("metric `{name}` has unsupported data"),
+                            )));
                             continue;
                         }
                     };
@@ -550,9 +562,11 @@ fn proto_metric_event(
     );
     event.instrumentation_scope = scope;
     event.attributes = attributes;
+    apply_common_attributes(&mut event);
     event.metric = Some(MetricPoint {
         name: name.to_string(),
         value,
+        stale: false,
         unit,
         temporality,
         exemplars,
@@ -560,214 +574,18 @@ fn proto_metric_event(
     event
 }
 
-fn decode_profiles_json(
-    body: &[u8],
-    project: &str,
-) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let root: Value = serde_json::from_slice(body).context("decode OTLP profiles JSON")?;
-    let dictionary = root
-        .get("dictionary")
-        .or_else(|| root.get("profilesDictionary"))
-        .or_else(|| root.get("profiles_dictionary"))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let mut output = Vec::new();
-    for resource_profiles in array(&root, "resourceProfiles", "resource_profiles") {
-        let resource = json_resource(resource_profiles.get("resource"));
-        for scope_profiles in array(resource_profiles, "scopeProfiles", "scope_profiles") {
-            let scope = json_scope(
-                scope_profiles.get("scope"),
-                string(scope_profiles, "schemaUrl", "schema_url"),
-            );
-            let profiles = {
-                let direct = array(scope_profiles, "profiles", "profiles");
-                if direct.is_empty() {
-                    array(scope_profiles, "profileContainers", "profile_containers")
-                } else {
-                    direct
-                }
-            };
-            for profile in profiles {
-                let start = nanos(profile, "timeUnixNano", "time_unix_nano").max(nanos(
-                    profile,
-                    "startTimeUnixNano",
-                    "start_time_unix_nano",
-                ));
-                let profile_id = id_string(
-                    profile
-                        .get("profileId")
-                        .or_else(|| profile.get("profile_id")),
-                )
-                .unwrap_or_else(|| {
-                    stable_id(
-                        "profile-source",
-                        project,
-                        &serde_json::to_string(profile).unwrap_or_default(),
-                    )
-                });
-                let mut event = base_event(
-                    OtlpSignal::Profiles,
-                    project,
-                    &resource,
-                    stable_id("profile", project, &profile_id),
-                    start,
-                    start,
-                    json!({
-                        "profile": profile,
-                        "dictionary": dictionary.clone(),
-                    }),
-                );
-                event.instrumentation_scope = scope.clone();
-                if let Some((trace_id, span_id)) = json_profile_correlation(profile, &dictionary) {
-                    event.trace_id = Some(trace_id);
-                    event.span_id = Some(span_id);
-                }
-                output.push(Ok(event));
-            }
+fn apply_common_attributes(event: &mut OperationalEventV2) {
+    if let Some(AttributeValue::String(event_id)) = event.attributes.get("sift.event_id") {
+        if !event_id.trim().is_empty() {
+            event.event_id.clone_from(event_id);
         }
     }
-    Ok(output)
-}
-
-fn decode_profiles_proto(
-    body: &[u8],
-    project: &str,
-) -> Result<Vec<std::result::Result<OperationalEventV2, OtlpItemError>>> {
-    let request = wire::ExportProfilesServiceRequest::decode(body)
-        .context("decode OTLP profiles protobuf envelope")?;
-    if request.resource_profiles.is_empty() {
-        bail!("OTLP profiles protobuf contains no resource_profiles");
+    if let Some(AttributeValue::String(request_id)) = event.attributes.get("sift.request_id") {
+        event.request_id = Some(request_id.clone());
     }
-    let dictionary = request.dictionary.unwrap_or_default();
-    let dictionary_json = proto_profile_dictionary_json(&dictionary);
-    let mut output = Vec::new();
-    for resource_profiles in request.resource_profiles {
-        let resource = proto_resource(resource_profiles.resource.as_ref());
-        for scope_profiles in resource_profiles.scope_profiles {
-            let scope = proto_scope(scope_profiles.scope.as_ref(), &scope_profiles.schema_url);
-            for profile_value in scope_profiles.profiles {
-                let profile_id = if profile_value.profile_id.is_empty() {
-                    stable_id(
-                        "profile-source",
-                        project,
-                        &serde_json::to_string(&proto_profile_json(&profile_value))
-                            .unwrap_or_default(),
-                    )
-                } else {
-                    hex::encode(&profile_value.profile_id)
-                };
-                let mut event = base_event(
-                    OtlpSignal::Profiles,
-                    project,
-                    &resource,
-                    stable_id("profile", project, &profile_id),
-                    profile_value.time_unix_nano,
-                    profile_value.time_unix_nano,
-                    json!({
-                        "profile": proto_profile_json(&profile_value),
-                        "dictionary": dictionary_json.clone(),
-                    }),
-                );
-                event.instrumentation_scope = scope.clone();
-                if let Some(link) = profile_value
-                    .samples
-                    .iter()
-                    .filter_map(|sample| usize::try_from(sample.link_index).ok())
-                    .find_map(|index| dictionary.link_table.get(index))
-                    .filter(|link| !link.trace_id.is_empty() && !link.span_id.is_empty())
-                {
-                    event.trace_id = Some(hex::encode(&link.trace_id));
-                    event.span_id = Some(hex::encode(&link.span_id));
-                }
-                output.push(Ok(event));
-            }
-        }
+    if let Some(AttributeValue::String(session_id)) = event.attributes.get("sift.session_id") {
+        event.session_id = Some(session_id.clone());
     }
-    if output.is_empty() {
-        bail!("OTLP profiles protobuf contains no profiles");
-    }
-    Ok(output)
-}
-
-fn json_profile_correlation(profile: &Value, dictionary: &Value) -> Option<(String, String)> {
-    let sample = array(profile, "samples", "samples")
-        .iter()
-        .find(|sample| nanos(sample, "linkIndex", "link_index") > 0)?;
-    let index = usize::try_from(nanos(sample, "linkIndex", "link_index")).ok()?;
-    let link = array(dictionary, "linkTable", "link_table").get(index)?;
-    Some((
-        id_string(link.get("traceId").or_else(|| link.get("trace_id")))?,
-        id_string(link.get("spanId").or_else(|| link.get("span_id")))?,
-    ))
-}
-
-fn proto_profile_json(profile: &wire::Profile) -> Value {
-    json!({
-        "sampleType": profile.sample_type.as_ref().map(|value| json!({
-            "typeStrindex": value.type_strindex,
-            "unitStrindex": value.unit_strindex,
-        })),
-        "samples": profile.samples.iter().map(|sample| json!({
-            "stackIndex": sample.stack_index,
-            "attributeIndices": sample.attribute_indices,
-            "linkIndex": sample.link_index,
-            "values": sample.values,
-            "timestampsUnixNano": sample.timestamps_unix_nano.iter().map(u64::to_string).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-        "timeUnixNano": profile.time_unix_nano.to_string(),
-        "durationNano": profile.duration_nano.to_string(),
-        "periodType": profile.period_type.as_ref().map(|value| json!({
-            "typeStrindex": value.type_strindex,
-            "unitStrindex": value.unit_strindex,
-        })),
-        "period": profile.period,
-        "profileId": hex::encode(&profile.profile_id),
-        "droppedAttributesCount": profile.dropped_attributes_count,
-        "originalPayloadFormat": profile.original_payload_format,
-        "originalPayloadBase64": (!profile.original_payload.is_empty()).then(|| BASE64.encode(&profile.original_payload)),
-        "attributeIndices": profile.attribute_indices,
-    })
-}
-
-fn proto_profile_dictionary_json(dictionary: &wire::ProfilesDictionary) -> Value {
-    json!({
-        "mappingTable": dictionary.mapping_table.iter().map(|mapping| json!({
-            "memoryStart": mapping.memory_start.to_string(),
-            "memoryLimit": mapping.memory_limit.to_string(),
-            "fileOffset": mapping.file_offset.to_string(),
-            "filenameStrindex": mapping.filename_strindex,
-            "attributeIndices": mapping.attribute_indices,
-        })).collect::<Vec<_>>(),
-        "locationTable": dictionary.location_table.iter().map(|location| json!({
-            "mappingIndex": location.mapping_index,
-            "address": location.address.to_string(),
-            "lines": location.lines.iter().map(|line| json!({
-                "functionIndex": line.function_index,
-                "line": line.line,
-                "column": line.column,
-            })).collect::<Vec<_>>(),
-            "attributeIndices": location.attribute_indices,
-        })).collect::<Vec<_>>(),
-        "functionTable": dictionary.function_table.iter().map(|function| json!({
-            "nameStrindex": function.name_strindex,
-            "systemNameStrindex": function.system_name_strindex,
-            "filenameStrindex": function.filename_strindex,
-            "startLine": function.start_line,
-        })).collect::<Vec<_>>(),
-        "linkTable": dictionary.link_table.iter().map(|link| json!({
-            "traceId": hex::encode(&link.trace_id),
-            "spanId": hex::encode(&link.span_id),
-        })).collect::<Vec<_>>(),
-        "stringTable": dictionary.string_table,
-        "attributeTable": dictionary.attribute_table.iter().map(|attribute| json!({
-            "keyStrindex": attribute.key_strindex,
-            "value": attribute.value.as_ref().map(proto_any_json),
-            "unitStrindex": attribute.unit_strindex,
-        })).collect::<Vec<_>>(),
-        "stackTable": dictionary.stack_table.iter().map(|stack| json!({
-            "locationIndices": stack.location_indices,
-        })).collect::<Vec<_>>(),
-    })
 }
 
 fn base_event(
@@ -779,12 +597,10 @@ fn base_event(
     observed_nanos: u64,
     payload: Value,
 ) -> OperationalEventV2 {
-    let project = resource
-        .get("gcp.project_id")
-        .or_else(|| resource.get("cloud.account.id"))
-        .or_else(|| resource.get("project.id"))
-        .map(String::as_str)
-        .unwrap_or(project_hint);
+    // The authenticated request project is the tenant boundary. Cloud account
+    // and infrastructure project attributes remain queryable resource data;
+    // they must never override the admitted Sift project.
+    let project = project_hint;
     let environment = resource
         .get("deployment.environment.name")
         .or_else(|| resource.get("environment"))
@@ -800,7 +616,7 @@ fn base_event(
         project,
         environment,
         event_id,
-        signal.signal_kind(),
+        signal_kind(signal),
         payload,
     );
     event.occurred_at = occurred_at;
@@ -812,6 +628,14 @@ fn base_event(
             .insert("service.name".into(), "unknown".into());
     }
     event
+}
+
+fn signal_kind(signal: OtlpSignal) -> SignalKind {
+    match signal {
+        OtlpSignal::Logs => SignalKind::Log,
+        OtlpSignal::Metrics => SignalKind::Metric,
+        OtlpSignal::Traces => SignalKind::Span,
+    }
 }
 
 fn stable_id(kind: &str, project: &str, identity: &str) -> String {
@@ -858,6 +682,15 @@ fn nanos(value: &Value, camel: &str, snake: &str) -> u64 {
         .or_else(|| value.get(snake))
         .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
         .unwrap_or(0)
+}
+
+fn scalar_value_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
 }
 
 fn id_string(value: Option<&Value>) -> Option<String> {
@@ -1137,6 +970,9 @@ fn proto_any_json(value: &AnyValue) -> Value {
         Some(any_value::Value::IntValue(value)) => json!(value),
         Some(any_value::Value::DoubleValue(value)) => json!(value),
         Some(any_value::Value::BytesValue(value)) => json!({"bytesBase64": BASE64.encode(value)}),
+        Some(any_value::Value::StringValueStrindex(value)) => {
+            json!({"stringValueStrindex": value})
+        }
         Some(any_value::Value::ArrayValue(value)) => {
             Value::Array(value.values.iter().map(proto_any_json).collect())
         }

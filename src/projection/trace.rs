@@ -1,6 +1,5 @@
 // HANDWRITE-BEGIN gap="sift-trace-projection" tracker="1665" reason="Define span/link/event schemas, trace topology, partial diagnostics, critical path, correlations, snapshot, and rebuild semantics."
 use std::{
-    any::Any,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::RwLock,
 };
@@ -15,7 +14,9 @@ use crate::{AttributeValue, InstrumentationScope, SignalKind, StoredEvent};
 use super::{model::ProjectionDescriptor, runtime::Projection};
 
 pub const PROJECTION_TRACE_STORE: &str = "trace-store";
-pub const TRACE_SCHEMA_VERSION: u32 = 1;
+pub const TRACE_SCHEMA_VERSION: u32 = 3;
+pub const MAX_TRACE_QUERY_LIMIT: usize = 1_000;
+pub const DEFAULT_RETAINED_TRACE_SPANS: usize = 100_000;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, ToSchema)]
 pub struct SpanLinkV1 {
@@ -91,11 +92,100 @@ pub struct TraceResultV1 {
     pub projection_cursor: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct TraceQuery {
+    pub project: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time_unix_nano: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_time_unix_nano: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_duration_unix_nano: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_duration_unix_nano: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub attributes: BTreeMap<String, AttributeValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_trace_id: Option<String>,
+    #[serde(default = "default_trace_query_limit")]
+    pub limit: usize,
+}
+
+impl TraceQuery {
+    pub fn for_project(project: impl Into<String>) -> Self {
+        Self {
+            project: project.into(),
+            environment: None,
+            start_time_unix_nano: None,
+            end_time_unix_nano: None,
+            service: None,
+            operation: None,
+            min_duration_unix_nano: None,
+            max_duration_unix_nano: None,
+            status: None,
+            attributes: BTreeMap::new(),
+            after_trace_id: None,
+            limit: default_trace_query_limit(),
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.project.trim().is_empty() {
+            bail!("project must not be empty");
+        }
+        if self.limit == 0 || self.limit > MAX_TRACE_QUERY_LIMIT {
+            bail!("limit must be between 1 and {MAX_TRACE_QUERY_LIMIT}");
+        }
+        if self
+            .start_time_unix_nano
+            .zip(self.end_time_unix_nano)
+            .is_some_and(|(start, end)| start >= end)
+        {
+            bail!("start_time_unix_nano must be earlier than end_time_unix_nano");
+        }
+        if self
+            .min_duration_unix_nano
+            .zip(self.max_duration_unix_nano)
+            .is_some_and(|(min, max)| min > max)
+        {
+            bail!("minimum trace duration must not exceed maximum trace duration");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+pub struct TracePage {
+    pub traces: Vec<TraceResultV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_trace_id: Option<String>,
+    pub projection_cursor: u64,
+    pub has_more: bool,
+}
+
 #[derive(Default, Deserialize, Serialize)]
 struct TraceState {
     traces: BTreeMap<String, BTreeMap<String, SpanRecordV1>>,
-    cursor_by_event_id: BTreeMap<String, u64>,
+    #[serde(default)]
+    location_by_cursor: BTreeMap<u64, TraceLocation>,
     conflicts: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    projection_cursor: u64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct TraceLocation {
+    trace_key: String,
+    span_id: String,
 }
 
 #[derive(Default, Deserialize)]
@@ -128,13 +218,23 @@ struct SpanStatusPayload {
 
 pub struct TraceProjection {
     state: RwLock<TraceState>,
+    max_spans: usize,
 }
 
 impl TraceProjection {
     pub fn new() -> Self {
-        Self {
-            state: RwLock::new(TraceState::default()),
+        Self::with_max_spans(DEFAULT_RETAINED_TRACE_SPANS)
+            .expect("default trace span retention is valid")
+    }
+
+    pub fn with_max_spans(max_spans: usize) -> Result<Self> {
+        if max_spans == 0 {
+            bail!("trace retention must keep at least one span");
         }
+        Ok(Self {
+            state: RwLock::new(TraceState::default()),
+            max_spans,
+        })
     }
 
     pub fn get_trace(&self, project: &str, trace_id: &str) -> Result<Option<TraceResultV1>> {
@@ -224,13 +324,58 @@ impl TraceProjection {
             cycles,
             critical_path_span_ids,
             duration_unix_nano,
-            projection_cursor: state
-                .cursor_by_event_id
-                .values()
-                .copied()
-                .max()
-                .unwrap_or(0),
+            projection_cursor: state.projection_cursor,
         }))
+    }
+
+    pub fn query(&self, query: &TraceQuery) -> Result<TracePage> {
+        query.validate()?;
+        let prefix = format!("{}\u{1f}", query.project);
+        let trace_ids = {
+            let state = self.state.read().expect("trace projection lock poisoned");
+            state
+                .traces
+                .keys()
+                .filter_map(|key| key.strip_prefix(&prefix))
+                .filter(|trace_id| {
+                    query
+                        .after_trace_id
+                        .as_deref()
+                        .is_none_or(|after| *trace_id > after)
+                })
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let mut traces = Vec::new();
+        for trace_id in trace_ids {
+            let Some(trace) = self.get_trace(&query.project, &trace_id)? else {
+                continue;
+            };
+            if trace_matches(&trace, query) {
+                traces.push(trace);
+                if traces.len() > query.limit {
+                    break;
+                }
+            }
+        }
+        let has_more = traces.len() > query.limit;
+        traces.truncate(query.limit);
+        let projection_cursor = traces
+            .iter()
+            .map(|trace| trace.projection_cursor)
+            .max()
+            .unwrap_or_else(|| {
+                self.state
+                    .read()
+                    .expect("trace projection lock poisoned")
+                    .projection_cursor
+            });
+        Ok(TracePage {
+            next_trace_id: traces.last().map(|trace| trace.trace_id.clone()),
+            traces,
+            projection_cursor,
+            has_more,
+        })
     }
 }
 
@@ -301,18 +446,23 @@ impl Projection for TraceProjection {
         };
         let key = trace_key(&event.project, trace_id);
         let mut state = self.state.write().expect("trace projection lock poisoned");
-        if state
-            .cursor_by_event_id
-            .get(&event.event_id)
-            .is_some_and(|cursor| *cursor >= stored.cursor)
-        {
+        if state.projection_cursor >= stored.cursor {
             return Ok(());
         }
+        state.projection_cursor = state.projection_cursor.max(stored.cursor);
         let conflicting = state
             .traces
             .get(&key)
             .and_then(|trace| trace.get(span_id))
             .is_some_and(|existing| existing != &record);
+        if let Some(previous_cursor) = state
+            .traces
+            .get(&key)
+            .and_then(|trace| trace.get(span_id))
+            .map(|previous| previous.cursor)
+        {
+            remove_tracked_cursor(&mut state, previous_cursor);
+        }
         if conflicting {
             state
                 .conflicts
@@ -322,12 +472,22 @@ impl Projection for TraceProjection {
         }
         state
             .traces
-            .entry(key)
+            .entry(key.clone())
             .or_default()
             .insert(span_id.into(), record);
-        state
-            .cursor_by_event_id
-            .insert(event.event_id.clone(), stored.cursor);
+        state.location_by_cursor.insert(
+            stored.cursor,
+            TraceLocation {
+                trace_key: key,
+                span_id: span_id.into(),
+            },
+        );
+        while state.location_by_cursor.len() > self.max_spans {
+            let Some(oldest_cursor) = state.location_by_cursor.keys().next().copied() else {
+                break;
+            };
+            remove_tracked_cursor(&mut state, oldest_cursor);
+        }
         Ok(())
     }
 
@@ -337,22 +497,124 @@ impl Projection for TraceProjection {
     }
 
     fn restore(&self, bytes: &[u8]) -> Result<()> {
-        *self.state.write().expect("trace projection lock poisoned") =
+        let mut state: TraceState =
             serde_json::from_slice(bytes).context("decode trace projection snapshot")?;
+        let mut rows = Vec::new();
+        for (trace_key, trace) in &state.traces {
+            for (span_id, record) in trace {
+                rows.push((
+                    record.cursor,
+                    TraceLocation {
+                        trace_key: trace_key.clone(),
+                        span_id: span_id.clone(),
+                    },
+                ));
+            }
+        }
+        state.location_by_cursor.clear();
+        for (cursor, location) in rows {
+            state.projection_cursor = state.projection_cursor.max(cursor);
+            state.location_by_cursor.insert(cursor, location);
+        }
+        while state.location_by_cursor.len() > self.max_spans {
+            let Some(oldest_cursor) = state.location_by_cursor.keys().next().copied() else {
+                break;
+            };
+            remove_tracked_cursor(&mut state, oldest_cursor);
+        }
+        *self.state.write().expect("trace projection lock poisoned") = state;
         Ok(())
     }
 
     fn semantic_digest(&self) -> Result<String> {
         Ok(hex::encode(Sha256::digest(self.snapshot()?)))
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 fn trace_key(project: &str, trace_id: &str) -> String {
     format!("{project}\u{1f}{trace_id}")
+}
+
+fn remove_tracked_cursor(state: &mut TraceState, cursor: u64) {
+    let Some(location) = state.location_by_cursor.remove(&cursor) else {
+        return;
+    };
+    let mut remove_trace = false;
+    if let Some(trace) = state.traces.get_mut(&location.trace_key) {
+        if trace
+            .get(&location.span_id)
+            .is_some_and(|record| record.cursor == cursor)
+        {
+            trace.remove(&location.span_id);
+        }
+        remove_trace = trace.is_empty();
+    }
+    if remove_trace {
+        state.traces.remove(&location.trace_key);
+        state.conflicts.remove(&location.trace_key);
+        return;
+    }
+    let remove_conflicts = if let Some(conflicts) = state.conflicts.get_mut(&location.trace_key) {
+        conflicts.remove(&location.span_id);
+        conflicts.is_empty()
+    } else {
+        false
+    };
+    if remove_conflicts {
+        state.conflicts.remove(&location.trace_key);
+    }
+}
+
+fn default_trace_query_limit() -> usize {
+    100
+}
+
+fn trace_matches(trace: &TraceResultV1, query: &TraceQuery) -> bool {
+    if query
+        .min_duration_unix_nano
+        .is_some_and(|minimum| trace.duration_unix_nano < minimum)
+        || query
+            .max_duration_unix_nano
+            .is_some_and(|maximum| trace.duration_unix_nano > maximum)
+    {
+        return false;
+    }
+    let spans = trace.spans.iter().filter(|span| {
+        query
+            .environment
+            .as_deref()
+            .is_none_or(|environment| span.environment == environment)
+            && query
+                .start_time_unix_nano
+                .is_none_or(|start| span.end_time_unix_nano >= start)
+            && query
+                .end_time_unix_nano
+                .is_none_or(|end| span.start_time_unix_nano < end)
+    });
+    let spans = spans.collect::<Vec<_>>();
+    if spans.is_empty() {
+        return false;
+    }
+    query.service.as_deref().is_none_or(|service| {
+        spans
+            .iter()
+            .any(|span| span.resource.get("service.name").map(String::as_str) == Some(service))
+    }) && query
+        .operation
+        .as_deref()
+        .is_none_or(|operation| spans.iter().any(|span| span.name == operation))
+        && query.status.as_deref().is_none_or(|status| {
+            spans.iter().any(|span| {
+                span.status_code
+                    .as_deref()
+                    .is_some_and(|actual| actual.eq_ignore_ascii_case(status))
+            })
+        })
+        && query.attributes.iter().all(|(key, value)| {
+            spans
+                .iter()
+                .any(|span| span.attributes.get(key) == Some(value))
+        })
 }
 
 fn detect_cycles(by_id: &BTreeMap<String, &SpanRecordV1>) -> Vec<Vec<String>> {

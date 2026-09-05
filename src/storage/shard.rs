@@ -91,10 +91,10 @@ impl ShardRouter {
         let mut updated = epochs.clone();
         updated.push(next.clone());
         validate_epochs(&updated)?;
-        service_durability::atomic_write(
+        storage_durable::atomic_write(
             &self.path,
             &serde_json::to_vec_pretty(&updated)?,
-            service_durability::FsyncPolicy::Always,
+            storage_durable::FsyncPolicy::Always,
         )?;
         *epochs = updated;
         Ok(next)
@@ -112,10 +112,10 @@ pub(crate) fn bucket_for(event_id: &str) -> u16 {
 
 pub(crate) fn write_epoch_maps(root: &Path, epochs: &[EpochMap]) -> Result<()> {
     validate_epochs(epochs)?;
-    service_durability::atomic_write(
+    storage_durable::atomic_write(
         epoch_path(root),
         &serde_json::to_vec_pretty(epochs)?,
-        service_durability::FsyncPolicy::Always,
+        storage_durable::FsyncPolicy::Always,
     )
 }
 

@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use service_observability::{
-    ServiceLogEventV1, MAX_ATTRIBUTES, MAX_ATTRIBUTE_KEY_BYTES, MAX_ATTRIBUTE_VALUE_BYTES,
+    StructuredServiceLogV1, MAX_ATTRIBUTES, MAX_ATTRIBUTE_KEY_BYTES, MAX_ATTRIBUTE_VALUE_BYTES,
     MAX_EVENT_BYTES, MAX_REQUEST_ID_BYTES, SERVICE_LOG_SCHEMA_V1,
 };
 use sha2::{Digest, Sha256};
@@ -40,7 +40,7 @@ pub(crate) fn decode_service_log_enriched(
     enrichment: &RecordEnrichment,
 ) -> Result<OperationalEventV2> {
     let json = trim_line_ending(raw_line);
-    let log: ServiceLogEventV1 =
+    let log: StructuredServiceLogV1 =
         serde_json::from_slice(json).context("decode axiom service log JSON")?;
     validate(&log)?;
 
@@ -120,7 +120,7 @@ pub(crate) fn decode_service_log_enriched(
 }
 // </HANDWRITE>
 
-fn validate(log: &ServiceLogEventV1) -> Result<()> {
+fn validate(log: &StructuredServiceLogV1) -> Result<()> {
     if log.schema != SERVICE_LOG_SCHEMA_V1 {
         bail!(
             "unsupported service log schema {}; expected {}",
@@ -254,8 +254,8 @@ mod tests {
 
     use super::*;
 
-    fn fixture() -> ServiceLogEventV1 {
-        ServiceLogEventV1 {
+    fn fixture() -> StructuredServiceLogV1 {
+        StructuredServiceLogV1 {
             schema: SERVICE_LOG_SCHEMA_V1.to_string(),
             timestamp: "2026-07-17T10:00:00Z".to_string(),
             severity: "INFO".to_string(),

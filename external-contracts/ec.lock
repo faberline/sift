@@ -1,26 +1,26 @@
 version = 1
 project = "sift"
 ir_kind = "ec"
-ec_path = "projects/sift/external-contracts"
-inventory_path = "projects/sift/aw.toml"
+ec_path = "apps/sift/external-contracts"
+inventory_path = "apps/sift/aw.toml"
 generated_at = "2026-07-13T18:05:55.675297+00:00"
 ir_digest = "sha256:b34e7ec0f9ef8d33f893c5880aae79ddb2f66e0bb57cda3791743260f6466c90"
 source_digest = "sha256:27e93cb9f500374e113bb311f4335a69256ce20757b2b2aea3b0173001cde762"
 
 [[sources]]
-path = "projects/sift/external-contracts/behavior/durable-ingest-http-contract.md"
+path = "apps/sift/external-contracts/behavior/durable-ingest-http-contract.md"
 digest = "sha256:38f2e8e10aef81b7d617f1e6961686ba7c70334ba181270fabbf1f66d7e7b1c9"
 
 [[sources]]
-path = "projects/sift/external-contracts/behavior/standard-operational-endpoints-contract.md"
+path = "apps/sift/external-contracts/behavior/standard-operational-endpoints-contract.md"
 digest = "sha256:a63e0a178b625a97042a2401aa50dac1454958086f4dfdee6b989dfe2c5c4720"
 
 [[sources]]
-path = "projects/sift/external-contracts/long-running-stability/sift-resilience.md"
+path = "apps/sift/external-contracts/long-running-stability/sift-resilience.md"
 digest = "sha256:7123f1b3550b0780cd6d964b168381f28aeccb53227927485734c46e24cf80c3"
 
 [[sources]]
-path = "projects/sift/external-contracts/security-hardening/sift-auth.md"
+path = "apps/sift/external-contracts/security-hardening/sift-auth.md"
 digest = "sha256:df263e62d5beb60253fb07ef2ade6da35067aa593105850862c9f384b2cd7064"
 
 [[cases]]
@@ -29,8 +29,8 @@ capability_id = "operational-event-ingest"
 claim_id = "h2c-openapi-event-write-route"
 contract_id = "sift.durable_ingest_http.v1"
 dimension = "behavior"
-source_ref = "projects/sift/external-contracts/behavior/durable-ingest-http-contract.md#durable-ingest-http-contract"
-test_path = "projects/sift/tests/behavior_durable_ingest_http_contract.rs"
+source_ref = "apps/sift/external-contracts/behavior/durable-ingest-http-contract.md#durable-ingest-http-contract"
+test_path = "apps/sift/e2e/behavior_durable_ingest_http_contract.rs"
 command = "cargo test -p sift --test ingest_api"
 required_for_production = true
 assertions = [
@@ -48,8 +48,8 @@ capability_id = "standard-operational-endpoints"
 claim_id = "one-port-health-readiness-metrics"
 contract_id = "sift.standard_operational_endpoints.v1"
 dimension = "behavior"
-source_ref = "projects/sift/external-contracts/behavior/standard-operational-endpoints-contract.md#one-port-health-readiness-metrics-contract"
-test_path = "projects/sift/tests/behavior_one_port_health_readiness_metrics_contract.rs"
+source_ref = "apps/sift/external-contracts/behavior/standard-operational-endpoints-contract.md#one-port-health-readiness-metrics-contract"
+test_path = "apps/sift/e2e/behavior_one_port_health_readiness_metrics_contract.rs"
 command = "cargo test -p sift --test ingest_api"
 required_for_production = true
 assertions = ["The service exposes /healthz, /readyz, and Prometheus /metrics on its data-plane port."]
@@ -63,8 +63,8 @@ capability_id = "standard-operational-endpoints"
 claim_id = "served-openapi-and-docs"
 contract_id = "sift.standard_operational_endpoints.v1"
 dimension = "behavior"
-source_ref = "projects/sift/external-contracts/behavior/standard-operational-endpoints-contract.md#served-openapi-and-docs-contract"
-test_path = "projects/sift/tests/behavior_served_openapi_and_docs_contract.rs"
+source_ref = "apps/sift/external-contracts/behavior/standard-operational-endpoints-contract.md#served-openapi-and-docs-contract"
+test_path = "apps/sift/e2e/behavior_served_openapi_and_docs_contract.rs"
 command = "cargo test -p sift --test ingest_api"
 required_for_production = true
 assertions = ["The service exposes /openapi.json and /docs on that same port."]
@@ -78,8 +78,8 @@ capability_id = "long-running-stability"
 claim_id = "ingest-query-replay-soak"
 contract_id = "sift.resilience.v1"
 dimension = "stability"
-source_ref = "projects/sift/external-contracts/long-running-stability/sift-resilience.md#sift-long-running-stability-resilience"
-test_path = "projects/sift/tests/stability_sift_long_running_stability_resilience.rs"
+source_ref = "apps/sift/external-contracts/long-running-stability/sift-resilience.md#sift-long-running-stability-resilience"
+test_path = "apps/sift/e2e/stability_sift_long_running_stability_resilience.rs"
 command = "cargo test -p sift --test stability_e2e -- --nocapture"
 required_for_production = true
 assertions = [
@@ -96,8 +96,8 @@ capability_id = "security-hardening"
 claim_id = "shared-bearer-token-auth"
 contract_id = "sift.bearer_auth.v1"
 dimension = "security"
-source_ref = "projects/sift/external-contracts/security-hardening/sift-auth.md#sift-security-hardening-bearer-auth"
-test_path = "projects/sift/tests/security_sift_security_hardening_bearer_auth.rs"
+source_ref = "apps/sift/external-contracts/security-hardening/sift-auth.md#sift-security-hardening-bearer-auth"
+test_path = "apps/sift/e2e/security_sift_security_hardening_bearer_auth.rs"
 command = "cargo test -p sift --test runtime_security_e2e -- --nocapture"
 required_for_production = true
 assertions = [
@@ -112,9 +112,9 @@ digest = "sha256:b0f7ffe5cbafff9d3515c98f3b457f8fc98ee3844d70119b7f597f081bba3f8
 id = "sift-guard-auth-surface"
 tool = "guard"
 dimension = "security"
-source_ref = "projects/sift/external-contracts/security-hardening/sift-auth.md#sift-guard-auth-surface"
-manifest_path = "projects/sift/guard.toml"
-command = "target/debug/guard scan projects/sift --compact --no-persist"
+source_ref = "apps/sift/external-contracts/security-hardening/sift-auth.md#sift-guard-auth-surface"
+manifest_path = "apps/sift/guard.toml"
+command = "target/debug/guard scan apps/sift --compact --no-persist"
 content_digest = "sha256:27fcee43a220cadf6f9d1a08bc7ada4ae2fb471b4719047e2d695504be6f78f3"
 digest = "sha256:d969e02ed227e8846d386205ded7123dede0ed019c90fd70af913479a6782bd7"
 
@@ -122,8 +122,8 @@ digest = "sha256:d969e02ed227e8846d386205ded7123dede0ed019c90fd70af913479a6782bd
 id = "sift-meter-stability"
 tool = "meter"
 dimension = "stability"
-source_ref = "projects/sift/external-contracts/long-running-stability/sift-resilience.md#sift-meter-stability"
-manifest_path = "projects/sift/meter-stability.toml"
+source_ref = "apps/sift/external-contracts/long-running-stability/sift-resilience.md#sift-meter-stability"
+manifest_path = "apps/sift/meter-stability.toml"
 command = "target/debug/meter test -- -p sift --test stability_e2e -- --nocapture"
 content_digest = "sha256:a1edddb2f5ae495e0f46a16d61fa99c2574579d797db7afd940088f37d9b680d"
 digest = "sha256:bcace99607a934978767ff8132404526684cf307612edb37995cb3fe7ac9c96a"
@@ -132,8 +132,8 @@ digest = "sha256:bcace99607a934978767ff8132404526684cf307612edb37995cb3fe7ac9c96
 id = "sift-rig-resilience"
 tool = "rig"
 dimension = "stability"
-source_ref = "projects/sift/external-contracts/long-running-stability/sift-resilience.md#sift-rig-resilience"
-manifest_path = "projects/sift/rig.toml"
-command = "cd projects/sift && ../../target/debug/vat run ec-stability"
+source_ref = "apps/sift/external-contracts/long-running-stability/sift-resilience.md#sift-rig-resilience"
+manifest_path = "apps/sift/rig.toml"
+command = "cd apps/sift && ../../target/debug/vat run ec-stability"
 content_digest = "sha256:8fd65e532c534774c4ab90378d3d7f088cb9e54a1cc0adee7b432cd0d3c422de"
 digest = "sha256:883d5a99895cfbc23cea30cf16154a0fe9448f5932539ff09bc72ae132afe228"

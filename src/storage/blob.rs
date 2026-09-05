@@ -10,7 +10,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::{ContentBlobRef, OperationalEventV2, SignalKind};
+use crate::{ContentBlobRef, OperationalEventV2};
 
 #[derive(Debug, Clone)]
 pub struct BlobStore {
@@ -20,7 +20,11 @@ pub struct BlobStore {
 
 impl BlobStore {
     pub fn open(root: impl AsRef<Path>, externalize_bytes: usize) -> Result<Self> {
-        let root = root.as_ref().join("blobs").join("sha256");
+        let root = root
+            .as_ref()
+            .join("archive-cache")
+            .join("blobs")
+            .join("sha256");
         fs::create_dir_all(&root)
             .with_context(|| format!("create blob store {}", root.display()))?;
         Ok(Self {
@@ -40,7 +44,7 @@ impl BlobStore {
                 bail!("content-addressed blob collision for {hash}");
             }
         } else {
-            service_durability::atomic_write(&path, bytes, service_durability::FsyncPolicy::Always)
+            storage_durable::atomic_write(&path, bytes, storage_durable::FsyncPolicy::Always)
                 .with_context(|| format!("durably write blob {}", path.display()))?;
         }
         Ok(ContentBlobRef {
@@ -63,15 +67,6 @@ impl BlobStore {
     pub fn externalize_event(&self, event: &mut OperationalEventV2) -> Result<()> {
         let mut refs = Vec::new();
         self.externalize_value(&mut event.payload, &mut refs)?;
-        if event.signal == SignalKind::Profile
-            && event.payload.get("profileBlob").is_none()
-            && serde_json::to_vec(&event.payload)?.len() >= self.externalize_bytes
-        {
-            let bytes = serde_json::to_vec(&event.payload)?;
-            let reference = self.put(&bytes, "application/json")?;
-            event.payload = json!({"profileBlob": reference.clone()});
-            refs.push(reference);
-        }
         let mut seen = event
             .blob_refs
             .iter()
@@ -165,6 +160,20 @@ impl BlobStore {
         }
         paths.sort();
         Ok(paths)
+    }
+
+    pub(crate) fn remove(&self, hash: &str) -> Result<bool> {
+        let path = self.path_for_hash(hash)?;
+        match fs::remove_file(&path) {
+            Ok(()) => {
+                storage_durable::sync_parent_dir(&path)?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => {
+                Err(error).with_context(|| format!("remove expired blob {}", path.display()))
+            }
+        }
     }
 }
 // HANDWRITE-END

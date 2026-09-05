@@ -1,114 +1,97 @@
 // HANDWRITE-BEGIN gap="missing-generator:logic:d9e63ee1" tracker="1873" reason="Run the sole bounded decode, quarantine, delivery, ack, and checkpoint loop over source-neutral records."
+use std::time::Duration;
+
 use anyhow::Result;
 
-use super::checkpoint::{append_quarantine, QuarantineEntry};
+use super::checkpoint::QuarantineEntry;
 use super::client::CollectorClient;
 use super::model::decode_service_log_enriched;
-use super::source::{open_source, CommitStats, ReadOutcome, SourceCursor};
+use super::source::{open_source, RawRecord};
 use super::{CollectorConfig, CollectorSummary};
+
+struct SiftRecordDecoder<'a> {
+    project: &'a str,
+    environment: &'a str,
+}
+
+impl service_collector::RecordDecoder<RawRecord> for SiftRecordDecoder<'_> {
+    type Item = crate::OperationalEventV2;
+    type Rejection = QuarantineEntry;
+
+    fn decode(&self, record: RawRecord) -> Result<Self::Item, Self::Rejection> {
+        decode_service_log_enriched(
+            &record.bytes,
+            &record.source_id,
+            record.offset,
+            self.project,
+            self.environment,
+            &record.enrichment,
+        )
+        .map_err(|error| {
+            QuarantineEntry::invalid_line(
+                &record.source_id,
+                record.line,
+                record.offset,
+                "invalid_service_log",
+                error.to_string(),
+                &record.bytes,
+            )
+        })
+    }
+}
 
 // <HANDWRITE gap="missing-generator:logic" tracker="1675" reason="Drive file, stdin, and CRI through one shared collector core.">
 pub async fn run(config: CollectorConfig) -> Result<CollectorSummary> {
     let mut source = open_source(&config)?;
-    let client = CollectorClient::new(
+    let mut client = CollectorClient::new(
         &config.endpoint,
         &config.project,
         config.token.clone(),
-        config.max_retries,
         config.request_timeout,
-        config.initial_backoff,
     )?;
-    let mut summary = CollectorSummary {
-        source_id: config.source_id.clone(),
-        start_offset: source.start_offset(),
-        final_offset: source.final_offset(),
-        lost_bytes: source.lost_bytes(),
-        lost_sources: source.lost_sources(),
-        ..CollectorSummary::default()
-    };
-
-    loop {
-        let mut events = Vec::with_capacity(config.batch_size);
-        let mut rejections: Vec<QuarantineEntry> = Vec::new();
-        let mut cursors: Vec<SourceCursor> = Vec::with_capacity(config.batch_size);
-        let mut reached_end = false;
-
-        for _ in 0..config.batch_size {
-            match source.next_record(config.max_line_bytes)? {
-                ReadOutcome::Record(record) => {
-                    cursors.push(record.cursor.clone());
-                    match decode_service_log_enriched(
-                        &record.bytes,
-                        &record.source_id,
-                        record.offset,
-                        &config.project,
-                        &config.environment,
-                        &record.enrichment,
-                    ) {
-                        Ok(event) => events.push(event),
-                        Err(error) => rejections.push(QuarantineEntry::invalid_line(
-                            &record.source_id,
-                            record.line,
-                            record.offset,
-                            "invalid_service_log",
-                            error.to_string(),
-                            &record.bytes,
-                        )),
-                    }
-                }
-                ReadOutcome::Rejection(rejection) => {
-                    cursors.push(rejection.cursor);
-                    rejections.push(rejection.entry);
-                }
-                ReadOutcome::Pending | ReadOutcome::Exhausted => {
-                    reached_end = true;
-                    break;
-                }
-            }
-        }
-
-        if cursors.is_empty() {
-            if config.follow {
-                tokio::time::sleep(config.follow_poll_interval).await;
-                source.refresh()?;
-                continue;
-            }
-            break;
-        }
-
-        let delivered = client.send(&events).await?;
-        append_quarantine(&config.quarantine_path, &rejections)?;
-        source.commit(
-            &cursors,
-            CommitStats {
-                accepted: delivered.accepted,
-                duplicates: delivered.duplicates,
-                rejected: rejections.len() as u64,
-            },
-        )?;
-
-        summary.lines += cursors.len() as u64;
-        summary.accepted += delivered.accepted;
-        summary.duplicates += delivered.duplicates;
-        summary.rejected += rejections.len() as u64;
-        summary.final_offset = source.final_offset();
-        summary.lost_bytes = source.lost_bytes();
-        summary.lost_sources = source.lost_sources();
-
-        if reached_end {
-            if config.follow {
-                tokio::time::sleep(config.follow_poll_interval).await;
-                source.refresh()?;
-            } else {
-                break;
-            }
-        }
+    if let Some(path) = &config.token_file {
+        client = client.with_projected_token_file(path.clone(), config.token_audience.clone());
     }
+    let mut quarantine =
+        service_collector::JsonlQuarantine::<QuarantineEntry>::new(&config.quarantine_path);
+    let report = service_collector::run_collector_with_delivery_mode(
+        &mut *source,
+        &SiftRecordDecoder {
+            project: &config.project,
+            environment: &config.environment,
+        },
+        &client,
+        &mut quarantine,
+        service_collector::RuntimeConfig {
+            batch_size: config.batch_size,
+            max_record_bytes: config.max_line_bytes,
+            retry: service_collector::RetryPolicy::new(
+                config.max_retries,
+                config.initial_backoff,
+                Duration::from_secs(5),
+            )?,
+            follow: config.follow,
+            follow_poll_interval: config.follow_poll_interval,
+        },
+        if config.follow {
+            service_collector::DeliveryRetryMode::UntilCancelled
+        } else {
+            service_collector::DeliveryRetryMode::Bounded
+        },
+    )
+    .await?;
 
-    summary.final_offset = source.final_offset();
-    summary.lost_bytes = source.lost_bytes();
-    summary.lost_sources = source.lost_sources();
-    Ok(summary)
+    Ok(CollectorSummary {
+        source_id: config.source_id.clone(),
+        start_offset: report.progress.start_offset,
+        final_offset: report.progress.final_offset,
+        lines: report.lines,
+        accepted: report.accepted,
+        duplicates: report.duplicates,
+        rejected: report.rejected,
+        lost_bytes: report.progress.lost_bytes,
+        lost_sources: report.progress.lost_sources,
+    })
 }
 // </HANDWRITE>
 
@@ -136,6 +119,8 @@ mod tests {
             source_id: "fixture".to_string(),
             endpoint: "http://127.0.0.1:7380".to_string(),
             token: None,
+            token_file: None,
+            token_audience: "sift.axiom.dev".to_string(),
             project: "local".to_string(),
             environment: "test".to_string(),
             checkpoint_path,

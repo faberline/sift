@@ -4,11 +4,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: projects/sift/build.sh <debug|release>
+Usage: apps/sift/build.sh <debug|release>
 
 debug    Build Sift and install target/debug/sift to ~/.cargo/bin/sift.
 release  Prepare the local release candidate: read the version from
-         projects/sift/Cargo.toml, pin every projects/sift/k8s/** image to
+         apps/sift/Cargo.toml, pin the operator and collector image defaults to
          ghcr.io/chrischeng-c4/sift:<version>, build with --release --locked,
          and install locally. It neither bumps the version nor commits.
 
@@ -23,7 +23,7 @@ fail_hint() {
   local mode="$1"
   echo ""
   echo "Build failed."
-  echo "Retry with: projects/sift/build.sh ${mode}"
+  echo "Retry with: apps/sift/build.sh ${mode}"
   echo "Verify with: ~/.cargo/bin/sift --version"
 }
 
@@ -43,18 +43,16 @@ cd "$ROOT"
 . scripts/project-build-lib.sh
 trap 'fail_hint "$MODE"' ERR
 
-# Every manifest below carries exactly one Sift GHCR pin. `src/deploy.rs`
+# Each operator and collector manifest below carries one Sift GHCR pin.
+# Instance and overlay manifests retain their required immutable digest input.
+# `src/deploy.rs`
 # substitutes the same `ghcr.io/chrischeng-c4/sift:<CARGO_PKG_VERSION>` string
 # when it renders `--image` overrides, so a pin that drifts from Cargo.toml
 # silently disables those overrides; `cargo test -p sift --test deployment_cli`
 # is the tripwire and this sync is the fix.
 SIFT_IMAGE_PINS=(
-  projects/sift/k8s/collector/daemonset.yaml
-  projects/sift/k8s/instances/dev.yaml
-  projects/sift/k8s/operator/operator.yaml
-  projects/sift/k8s/overlays/dev/sift.yaml
-  projects/sift/k8s/overlays/prod/sift.yaml
-  projects/sift/k8s/overlays/staging/sift.yaml
+  apps/sift/k8s/collector/daemonset.yaml
+  apps/sift/k8s/operator/operator.yaml
 )
 
 install_sift() {
@@ -92,7 +90,7 @@ case "$MODE" in
     echo "next: done"
     ;;
   release)
-    CURRENT_VERSION="$(project_build_read_version projects/sift/Cargo.toml)"
+    CURRENT_VERSION="$(project_build_read_version apps/sift/Cargo.toml)"
     sync_sift_release_image_pins "$CURRENT_VERSION" "${SIFT_IMAGE_PINS[@]}"
     cargo build --release --locked -p sift --bin sift
     install_sift release

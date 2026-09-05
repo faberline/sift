@@ -47,16 +47,18 @@ ARG TARGETARCH
 COPY dist/linux/${TARGETARCH}/sift /tmp/sift
 
 FROM binary-source-${SOURCE} AS binary-source
+RUN install -d -m 0700 -o 65532 -g 65532 /image-root/var/lib/sift
 
 # ---- stage 2: distroless static runtime — only the binary, nonroot (uid 65532)
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --chown=65532:65532 --from=binary-source /tmp/sift /usr/local/bin/sift
+COPY --from=binary-source --chown=65532:65532 --chmod=0700 /image-root/var/lib/sift /var/lib/sift
 ENV SIFT_HOST=0.0.0.0 \
     SIFT_PORT=7380 \
     SIFT_DATA_DIR=/var/lib/sift \
     SIFT_LOG_FORMAT=json
 VOLUME ["/var/lib/sift"]
-EXPOSE 7380
+EXPOSE 4317 7380
 ENTRYPOINT ["/usr/local/bin/sift"]
 CMD ["serve"]
 # HANDWRITE-END

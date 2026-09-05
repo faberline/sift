@@ -45,7 +45,7 @@ spec:
       initContainers:
         - name: prepare-state
           image: busybox:1.36.1
-          command: ["sh", "-ec", "chown 0:0 /var/lib/sift-collector && chmod 0700 /var/lib/sift-collector"]
+          command: ["sh", "-ec", "mkdir -p /var/lib/sift/agent && chown -R 65532:65532 /var/lib/sift/agent && chmod 0700 /var/lib/sift /var/lib/sift/agent"]
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
@@ -53,13 +53,13 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-              add: ["CHOWN", "FOWNER"]
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
           resources:
             requests: { cpu: 5m, memory: 8Mi }
             limits: { cpu: 50m, memory: 32Mi }
           volumeMounts:
             - name: state
-              mountPath: /var/lib/sift-collector
+              mountPath: /var/lib/sift
       containers:
         - name: collector
           image: ghcr.io/chrischeng-c4/sift:0.1.2
@@ -69,9 +69,9 @@ spec:
             - --cri-root
             - /var/log/pods
             - --checkpoint
-            - /var/lib/sift-collector/checkpoint.json
+            - /var/lib/sift/agent/checkpoint.json
             - --quarantine
-            - /var/lib/sift-collector/rejected.jsonl
+            - /var/lib/sift/agent/rejected.jsonl
             - --project
             - $(SIFT_PROJECT)
             - --environment
@@ -144,7 +144,7 @@ spec:
               mountPath: /var/log/pods
               readOnly: true
             - name: state
-              mountPath: /var/lib/sift-collector
+              mountPath: /var/lib/sift
       volumes:
         - name: pod-logs
           hostPath:
@@ -152,6 +152,6 @@ spec:
             type: Directory
         - name: state
           hostPath:
-            path: /var/lib/sift-collector
+            path: /var/lib/sift
             type: DirectoryOrCreate
 # HANDWRITE-END

@@ -20,16 +20,48 @@ spec:
           properties:
             spec:
               type: object
-              required: [image]
+              required: [image, peerTlsSecret, gcpProjectId, gkeClusterName, gkeLocation]
               properties:
                 image: { type: string }
-                # Safe membership change is tracked separately; this GKE
-                # acceptance CRD intentionally admits only the proven 1x1 path.
-                replicasPerShard: { type: integer, minimum: 1, maximum: 1 }
-                voterCount: { type: integer, minimum: 1, maximum: 1 }
+                peerTlsSecret: { type: string, minLength: 1 }
+                # Phase one uses one fixed three-voter Raft group per shard.
+                # Live membership changes are intentionally not admitted.
+                replicasPerShard: { type: integer, minimum: 3, maximum: 3 }
+                voterCount: { type: integer, minimum: 3, maximum: 3 }
+                # Deprecated. New resources use the four role-specific fields.
                 dataSize: { type: string }
-                auth: { type: string, enum: ["off", "required"] }
+                archive:
+                  type: object
+                  required: [destination]
+                  properties:
+                    destination: { type: string, minLength: 1 }
+                bootstrap:
+                  type: object
+                  properties:
+                    archiveManifestUri: { type: string, minLength: 1 }
+                storage:
+                  type: object
+                  properties:
+                    storeSize: { type: string, default: 50Gi }
+                    controlSize: { type: string, default: 5Gi }
+                    gatewaySize: { type: string, default: 2Gi }
+                    querySize: { type: string, default: 2Gi }
+                ingest:
+                  type: object
+                  properties:
+                    maxItemsPerMinute: { type: integer, format: int64, minimum: 1, default: 720000 }
+                    maxConcurrentRequests: { type: integer, minimum: 1, default: 32 }
+                placement:
+                  type: object
+                  properties:
+                    nodeSelector:
+                      type: object
+                      additionalProperties: { type: string }
+                auth: { type: string, enum: ["off", "required", "kubernetes"] }
                 tokensSecret: { type: string }
+                gcpProjectId: { type: string, minLength: 1 }
+                gkeClusterName: { type: string, minLength: 1 }
+                gkeLocation: { type: string, minLength: 1 }
                 backup:
                   type: object
                   required: [schedule, destination]
@@ -50,6 +82,13 @@ spec:
                 currentReadyReplicasPerShard: { type: integer, minimum: 0 }
                 backupPhase: { type: string }
                 backupMessage: { type: string }
+                archivePhase: { type: string }
+                archiveWatermark: { type: integer, format: int64, minimum: 0 }
+                lastArchiveManifest: { type: string }
+                restorePhase: { type: string }
+                restoreSourceManifest: { type: string }
+                backpressure: { type: string }
+                lastDataError: { type: string }
                 message: { type: string }
       subresources:
         status: {}

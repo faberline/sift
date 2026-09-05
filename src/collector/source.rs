@@ -12,6 +12,8 @@ use super::checkpoint::{CollectorCheckpoint, QuarantineEntry};
 use super::cri::CriSource;
 use super::{CollectorConfig, SourceSpec};
 
+pub(crate) use service_collector::CommitStats;
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RecordEnrichment {
     pub(crate) resource: BTreeMap<String, String>,
@@ -29,10 +31,27 @@ pub(crate) struct RawRecord {
     pub(crate) enrichment: RecordEnrichment,
 }
 
+impl service_collector::CollectorRecord for RawRecord {
+    type Cursor = SourceCursor;
+
+    fn cursor(&self) -> &Self::Cursor {
+        &self.cursor
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SourceRejection {
     pub(crate) entry: QuarantineEntry,
     pub(crate) cursor: SourceCursor,
+}
+
+impl service_collector::CollectorRejection for SourceRejection {
+    type Cursor = SourceCursor;
+    type Entry = QuarantineEntry;
+
+    fn into_parts(self) -> (Self::Entry, Self::Cursor) {
+        (self.entry, self.cursor)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -53,31 +72,16 @@ pub(crate) enum SourceCursor {
     },
 }
 
-pub(crate) enum ReadOutcome {
-    Record(RawRecord),
-    Rejection(SourceRejection),
-    Pending,
-    Exhausted,
-}
+pub(crate) type ReadOutcome = service_collector::ReadOutcome<RawRecord, SourceRejection>;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct CommitStats {
-    pub(crate) accepted: u64,
-    pub(crate) duplicates: u64,
-    pub(crate) rejected: u64,
-}
+pub(crate) type DynCollectorSource = dyn service_collector::CollectorSource<
+    Cursor = SourceCursor,
+    Error = anyhow::Error,
+    Record = RawRecord,
+    Rejection = SourceRejection,
+>;
 
-pub(crate) trait CollectorSource {
-    fn next_record(&mut self, max_bytes: usize) -> Result<ReadOutcome>;
-    fn commit(&mut self, cursors: &[SourceCursor], stats: CommitStats) -> Result<()>;
-    fn refresh(&mut self) -> Result<()>;
-    fn start_offset(&self) -> u64;
-    fn final_offset(&self) -> u64;
-    fn lost_bytes(&self) -> u64;
-    fn lost_sources(&self) -> u64;
-}
-
-pub(crate) fn open_source(config: &CollectorConfig) -> Result<Box<dyn CollectorSource>> {
+pub(crate) fn open_source(config: &CollectorConfig) -> Result<Box<DynCollectorSource>> {
     match &config.source {
         SourceSpec::File(path) => Ok(Box::new(LinearSource::file(
             path.clone(),
@@ -173,7 +177,12 @@ impl LinearSource {
     }
 }
 
-impl CollectorSource for LinearSource {
+impl service_collector::CollectorSource for LinearSource {
+    type Cursor = SourceCursor;
+    type Error = anyhow::Error;
+    type Record = RawRecord;
+    type Rejection = SourceRejection;
+
     fn next_record(&mut self, max_bytes: usize) -> Result<ReadOutcome> {
         let start_offset = self.read_offset;
         let read = self.read(max_bytes)?;
@@ -263,20 +272,13 @@ impl CollectorSource for LinearSource {
         Ok(())
     }
 
-    fn start_offset(&self) -> u64 {
-        self.start_offset
-    }
-
-    fn final_offset(&self) -> u64 {
-        self.checkpoint.offset
-    }
-
-    fn lost_bytes(&self) -> u64 {
-        0
-    }
-
-    fn lost_sources(&self) -> u64 {
-        0
+    fn progress(&self) -> service_collector::SourceProgress {
+        service_collector::SourceProgress {
+            start_offset: self.start_offset,
+            final_offset: self.checkpoint.offset,
+            lost_bytes: 0,
+            lost_sources: 0,
+        }
     }
 }
 

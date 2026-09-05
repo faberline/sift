@@ -1,18 +1,22 @@
 // HANDWRITE-BEGIN gap="sift-sealed-segment-store" tracker="1659" reason="Append CRC frames per epoch/shard, recover torn tails, seal manifests, and move immutable segments without rewriting bytes."
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
 use anyhow::{bail, Context, Result};
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::StoredEvent;
 
 use super::shard::{bucket_for, Route};
+
+const FRAMED_LOG_HEADER_BYTES: u64 = 16;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -31,6 +35,10 @@ pub struct SegmentManifest {
     pub first_cursor: u64,
     pub last_cursor: u64,
     pub event_count: u64,
+    #[serde(default)]
+    pub min_event_time_unix_nano: i64,
+    #[serde(default)]
+    pub max_event_time_unix_nano: i64,
     pub bytes: u64,
     pub sha256: String,
     pub state: SegmentState,
@@ -50,10 +58,13 @@ struct ActiveSegment {
     route: Route,
     segment_id: String,
     path: PathBuf,
-    writer: service_durability::FramedLogWriter,
+    writer: storage_durable::FramedLogWriter,
     first_cursor: u64,
     last_cursor: u64,
     event_count: u64,
+    min_event_time_unix_nano: i64,
+    max_event_time_unix_nano: i64,
+    encoded_bytes: u64,
     bucket_min: u16,
     bucket_max: u16,
 }
@@ -69,21 +80,37 @@ pub struct SegmentStore {
     root: PathBuf,
     manifests_root: PathBuf,
     max_segment_events: usize,
+    max_segment_bytes: usize,
     inner: Mutex<SegmentStateData>,
 }
 
+pub(crate) struct SegmentEventReader {
+    paths: VecDeque<PathBuf>,
+    current: Option<storage_durable::FramedLogCursor>,
+    after: u64,
+}
+
 impl SegmentStore {
-    pub fn open(root: impl AsRef<Path>, max_segment_events: usize) -> Result<Self> {
+    pub(crate) fn open_at(
+        root: PathBuf,
+        max_segment_events: usize,
+        max_segment_bytes: usize,
+    ) -> Result<Self> {
         if max_segment_events == 0 {
             bail!("max_segment_events must be greater than zero");
         }
-        let root = root.as_ref().join("segments");
+        if max_segment_bytes == 0 {
+            bail!("max_segment_bytes must be greater than zero");
+        }
         let manifests_root = root.join("manifests");
         fs::create_dir_all(&manifests_root)?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
+        fs::set_permissions(&manifests_root, fs::Permissions::from_mode(0o700))?;
         let store = Self {
             root,
             manifests_root,
             max_segment_events,
+            max_segment_bytes,
             inner: Mutex::new(SegmentStateData::default()),
         };
         store.load()?;
@@ -93,15 +120,11 @@ impl SegmentStore {
     fn load(&self) -> Result<()> {
         let mut state = self.inner.lock().expect("segment state lock poisoned");
         for path in files_with_extension(&self.manifests_root, "json")? {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
             let manifest: SegmentManifest = serde_json::from_slice(&fs::read(&path)?)
                 .with_context(|| format!("decode segment manifest {}", path.display()))?;
+            fs::set_permissions(&manifest.local_path, fs::Permissions::from_mode(0o600))?;
             verify_segment(&manifest)?;
-            self.index_file(
-                &mut state,
-                &manifest.local_path,
-                manifest.epoch,
-                manifest.shard,
-            )?;
             state.sealed.insert(manifest.segment_id.clone(), manifest);
         }
         let sealed_paths = state
@@ -110,18 +133,27 @@ impl SegmentStore {
             .map(|manifest| manifest.local_path.clone())
             .collect::<HashSet<_>>();
         for path in files_with_extension(&self.root, "open")? {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
             if sealed_paths.contains(&path) {
                 continue;
             }
             let (epoch, shard) = route_from_path(&path)?;
-            let writer = service_durability::FramedLogWriter::open(
+            let writer = storage_durable::FramedLogWriter::open(
                 &path,
-                service_durability::FsyncPolicy::Always,
+                storage_durable::FsyncPolicy::Interval,
             )?;
+            if let Some(shard_root) = path.parent() {
+                fs::set_permissions(shard_root, fs::Permissions::from_mode(0o700))?;
+                if let Some(epoch_root) = shard_root.parent() {
+                    fs::set_permissions(epoch_root, fs::Permissions::from_mode(0o700))?;
+                }
+            }
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
             let events = read_events(&path)?;
             if events.is_empty() {
                 continue;
             }
+            let encoded_bytes = fs::metadata(&path)?.len();
             let segment_id = path
                 .file_stem()
                 .and_then(|value| value.to_str())
@@ -129,10 +161,15 @@ impl SegmentStore {
                 .to_string();
             let mut bucket_min = u16::MAX;
             let mut bucket_max = 0;
+            let mut min_event_time_unix_nano = i64::MAX;
+            let mut max_event_time_unix_nano = i64::MIN;
             for event in &events {
                 let bucket = bucket_for(&event.event.event_id);
+                let event_time = event_time_unix_nano(event)?;
                 bucket_min = bucket_min.min(bucket);
                 bucket_max = bucket_max.max(bucket);
+                min_event_time_unix_nano = min_event_time_unix_nano.min(event_time);
+                max_event_time_unix_nano = max_event_time_unix_nano.max(event_time);
                 self.index_event(
                     &mut state,
                     event,
@@ -161,6 +198,9 @@ impl SegmentStore {
                     first_cursor: events.first().unwrap().cursor,
                     last_cursor: events.last().unwrap().cursor,
                     event_count: events.len() as u64,
+                    min_event_time_unix_nano,
+                    max_event_time_unix_nano,
+                    encoded_bytes,
                     bucket_min,
                     bucket_max,
                 },
@@ -169,49 +209,10 @@ impl SegmentStore {
         let full_segments = state
             .active
             .iter()
-            .filter_map(|(key, active)| {
-                (active.event_count as usize >= self.max_segment_events).then_some(*key)
-            })
+            .filter_map(|(key, active)| self.segment_is_ready(active).then_some(*key))
             .collect::<Vec<_>>();
         for key in full_segments {
             self.seal_locked(&mut state, key)?;
-        }
-        Ok(())
-    }
-
-    fn index_file(
-        &self,
-        state: &mut SegmentStateData,
-        path: &Path,
-        epoch: u64,
-        shard: u16,
-    ) -> Result<()> {
-        for event in read_events(path)? {
-            let bucket = bucket_for(&event.event.event_id);
-            let segment_id = state
-                .sealed
-                .values()
-                .find(|manifest| manifest.local_path == path)
-                .map(|manifest| manifest.segment_id.clone())
-                .unwrap_or_else(|| {
-                    path.file_stem()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("segment")
-                        .to_string()
-                });
-            self.index_event(
-                state,
-                &event,
-                AppendLocation {
-                    route: Route {
-                        epoch,
-                        shard,
-                        bucket,
-                    },
-                    segment_id,
-                    path: path.to_path_buf(),
-                },
-            )?;
         }
         Ok(())
     }
@@ -248,6 +249,7 @@ impl SegmentStore {
             return Ok(location.clone());
         }
         let key = (route.epoch, route.shard);
+        let event_time = event_time_unix_nano(stored)?;
         if let std::collections::hash_map::Entry::Vacant(entry) = state.active.entry(key) {
             let segment_id = format!(
                 "segment-e{:020}-s{:04}-c{:020}",
@@ -258,9 +260,9 @@ impl SegmentStore {
                 .join(format!("epoch-{:020}", route.epoch))
                 .join(format!("shard-{:04}", route.shard))
                 .join(format!("{segment_id}.open"));
-            let writer = service_durability::FramedLogWriter::open(
+            let writer = storage_durable::FramedLogWriter::open(
                 &path,
-                service_durability::FsyncPolicy::Always,
+                storage_durable::FsyncPolicy::Interval,
             )?;
             entry.insert(ActiveSegment {
                 route,
@@ -270,6 +272,9 @@ impl SegmentStore {
                 first_cursor: stored.cursor,
                 last_cursor: stored.cursor,
                 event_count: 0,
+                min_event_time_unix_nano: event_time,
+                max_event_time_unix_nano: event_time,
+                encoded_bytes: 0,
                 bucket_min: route.bucket,
                 bucket_max: route.bucket,
             });
@@ -280,6 +285,12 @@ impl SegmentStore {
             active.writer.append(stored.cursor, &encoded)?;
             active.last_cursor = stored.cursor;
             active.event_count += 1;
+            active.min_event_time_unix_nano = active.min_event_time_unix_nano.min(event_time);
+            active.max_event_time_unix_nano = active.max_event_time_unix_nano.max(event_time);
+            active.encoded_bytes = active
+                .encoded_bytes
+                .saturating_add(FRAMED_LOG_HEADER_BYTES)
+                .saturating_add(encoded.len() as u64);
             active.bucket_min = active.bucket_min.min(route.bucket);
             active.bucket_max = active.bucket_max.max(route.bucket);
             (
@@ -288,24 +299,42 @@ impl SegmentStore {
                     segment_id: active.segment_id.clone(),
                     path: active.path.clone(),
                 },
-                active.event_count as usize >= self.max_segment_events,
+                self.segment_is_ready(active),
             )
         };
         self.index_event(&mut state, stored, location.clone())?;
-        if should_seal {
-            let manifest = self.seal_locked(&mut state, key)?;
-            let sealed_location = AppendLocation {
-                route,
-                segment_id: manifest.segment_id,
-                path: manifest.local_path,
-            };
-            state.cursors.insert(
-                stored.cursor,
-                (stored.event.event_id.clone(), sealed_location.clone()),
-            );
-            return Ok(sealed_location);
-        }
+        // Sealing performs fsync, hashing, rename, and manifest replacement.
+        // Keep it out of the acknowledgement path. The background storage
+        // worker calls `seal_ready`; an explicit archive calls `seal_all`.
+        let _ = should_seal;
         Ok(location)
+    }
+
+    pub fn seal_ready(&self) -> Result<Vec<SegmentManifest>> {
+        let mut state = self.inner.lock().expect("segment state lock poisoned");
+        let keys = state
+            .active
+            .iter()
+            .filter_map(|(key, active)| self.segment_is_ready(active).then_some(*key))
+            .collect::<Vec<_>>();
+        let mut manifests = Vec::with_capacity(keys.len());
+        for key in keys {
+            manifests.push(self.seal_locked(&mut state, key)?);
+        }
+        Ok(manifests)
+    }
+
+    pub fn flush_active(&self) -> Result<()> {
+        let mut state = self.inner.lock().expect("segment state lock poisoned");
+        for active in state.active.values_mut() {
+            active.writer.flush()?;
+        }
+        Ok(())
+    }
+
+    fn segment_is_ready(&self, active: &ActiveSegment) -> bool {
+        active.event_count as usize >= self.max_segment_events
+            || active.encoded_bytes >= self.max_segment_bytes as u64
     }
 
     fn seal_locked(
@@ -321,7 +350,7 @@ impl SegmentStore {
         drop(active.writer);
         let sealed_path = active.path.with_extension("framed");
         fs::rename(&active.path, &sealed_path)?;
-        service_durability::sync_parent_dir(&sealed_path)?;
+        storage_durable::sync_parent_dir(&sealed_path)?;
         let bytes = fs::metadata(&sealed_path)?.len();
         let manifest = SegmentManifest {
             segment_id: active.segment_id,
@@ -332,6 +361,8 @@ impl SegmentStore {
             first_cursor: active.first_cursor,
             last_cursor: active.last_cursor,
             event_count: active.event_count,
+            min_event_time_unix_nano: active.min_event_time_unix_nano,
+            max_event_time_unix_nano: active.max_event_time_unix_nano,
             bytes,
             sha256: sha256_file(&sealed_path)?,
             state: SegmentState::Sealed,
@@ -339,11 +370,9 @@ impl SegmentStore {
             object_uri: None,
         };
         self.write_manifest(&manifest)?;
-        for (_, location) in state.cursors.values_mut() {
-            if location.segment_id == manifest.segment_id {
-                location.path = sealed_path.clone();
-            }
-        }
+        state
+            .cursors
+            .retain(|_, (_, location)| location.segment_id != manifest.segment_id);
         state
             .sealed
             .insert(manifest.segment_id.clone(), manifest.clone());
@@ -351,12 +380,16 @@ impl SegmentStore {
     }
 
     fn write_manifest(&self, manifest: &SegmentManifest) -> Result<()> {
-        service_durability::atomic_write(
-            self.manifests_root
-                .join(format!("{}.json", manifest.segment_id)),
+        let path = self
+            .manifests_root
+            .join(format!("{}.json", manifest.segment_id));
+        storage_durable::atomic_write(
+            &path,
             &serde_json::to_vec_pretty(manifest)?,
-            service_durability::FsyncPolicy::Always,
-        )
+            storage_durable::FsyncPolicy::Always,
+        )?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        Ok(())
     }
 
     pub fn seal_all(&self) -> Result<Vec<SegmentManifest>> {
@@ -375,6 +408,296 @@ impl SegmentStore {
         let mut manifests = state.sealed.values().cloned().collect::<Vec<_>>();
         manifests.sort_by_key(|manifest| manifest.first_cursor);
         Ok(manifests)
+    }
+
+    /// Materialize a prefix taken from a hash-verified archive checkpoint.
+    /// The archive is authoritative, so its row can replace a conflicting row
+    /// at the same local cursor. Normal retention continues to use the stricter
+    pub(crate) fn write_reconciled_segment(
+        &self,
+        source_segment_id: &str,
+        retained: &[StoredEvent],
+    ) -> Result<Option<SegmentManifest>> {
+        self.write_derived_segment(source_segment_id, retained)
+    }
+
+    fn write_derived_segment(
+        &self,
+        source_segment_id: &str,
+        retained: &[StoredEvent],
+    ) -> Result<Option<SegmentManifest>> {
+        if retained.is_empty() {
+            bail!("retained local segment cannot be empty");
+        }
+        if retained
+            .windows(2)
+            .any(|pair| pair[0].cursor >= pair[1].cursor)
+        {
+            bail!("retained local segment cursors must be strictly increasing");
+        }
+
+        let mut state = self.inner.lock().expect("segment state lock poisoned");
+        let Some(source) = state.sealed.get(source_segment_id).cloned() else {
+            return Ok(None);
+        };
+        verify_segment(&source)?;
+
+        let mut identity = Sha256::new();
+        identity.update(source.epoch.to_le_bytes());
+        identity.update(source.shard.to_le_bytes());
+        for event in retained {
+            let encoded = serde_json::to_vec(event)?;
+            identity.update(event.cursor.to_le_bytes());
+            identity.update((encoded.len() as u64).to_le_bytes());
+            identity.update(encoded);
+        }
+        let identity = hex::encode(identity.finalize());
+        let segment_id = format!("retained-{}", &identity[..32]);
+        if let Some(existing) = state.sealed.get(&segment_id).cloned() {
+            verify_segment(&existing)?;
+            if read_events(&existing.local_path)? != retained {
+                bail!("retained segment identity collision for {segment_id}");
+            }
+            return Ok(Some(existing));
+        }
+
+        let parent = source
+            .local_path
+            .parent()
+            .context("sealed segment has no parent directory")?;
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let sealed_path = parent.join(format!("{segment_id}.framed"));
+        if sealed_path.exists() {
+            if read_events(&sealed_path)? != retained {
+                bail!(
+                    "uncommitted retained segment {} has unexpected contents",
+                    sealed_path.display()
+                );
+            }
+        } else {
+            let rewrite_path = parent.join(format!("{segment_id}.rewrite"));
+            match fs::remove_file(&rewrite_path) {
+                Ok(()) => storage_durable::sync_parent_dir(&rewrite_path)?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            let mut writer = storage_durable::FramedLogWriter::open(
+                &rewrite_path,
+                storage_durable::FsyncPolicy::Interval,
+            )?;
+            for event in retained {
+                writer.append(event.cursor, &serde_json::to_vec(event)?)?;
+            }
+            writer.sync()?;
+            drop(writer);
+            fs::rename(&rewrite_path, &sealed_path).with_context(|| {
+                format!(
+                    "commit retained segment {} -> {}",
+                    rewrite_path.display(),
+                    sealed_path.display()
+                )
+            })?;
+            storage_durable::sync_parent_dir(&sealed_path)?;
+        }
+        fs::set_permissions(&sealed_path, fs::Permissions::from_mode(0o600))?;
+
+        let mut bucket_min = u16::MAX;
+        let mut bucket_max = 0_u16;
+        let mut min_event_time_unix_nano = i64::MAX;
+        let mut max_event_time_unix_nano = i64::MIN;
+        for event in retained {
+            let bucket = bucket_for(&event.event.event_id);
+            let event_time = event_time_unix_nano(event)?;
+            bucket_min = bucket_min.min(bucket);
+            bucket_max = bucket_max.max(bucket);
+            min_event_time_unix_nano = min_event_time_unix_nano.min(event_time);
+            max_event_time_unix_nano = max_event_time_unix_nano.max(event_time);
+        }
+        let manifest = SegmentManifest {
+            segment_id: segment_id.clone(),
+            epoch: source.epoch,
+            shard: source.shard,
+            bucket_min,
+            bucket_max,
+            first_cursor: retained.first().expect("retained is non-empty").cursor,
+            last_cursor: retained.last().expect("retained is non-empty").cursor,
+            event_count: retained.len() as u64,
+            min_event_time_unix_nano,
+            max_event_time_unix_nano,
+            bytes: fs::metadata(&sealed_path)?.len(),
+            sha256: sha256_file(&sealed_path)?,
+            state: SegmentState::Sealed,
+            local_path: sealed_path,
+            object_uri: None,
+        };
+        self.write_manifest(&manifest)?;
+        for event in retained {
+            state.cursors.insert(
+                event.cursor,
+                (
+                    event.event.event_id.clone(),
+                    AppendLocation {
+                        route: Route {
+                            epoch: source.epoch,
+                            shard: source.shard,
+                            bucket: bucket_for(&event.event.event_id),
+                        },
+                        segment_id: segment_id.clone(),
+                        path: manifest.local_path.clone(),
+                    },
+                ),
+            );
+        }
+        state.sealed.insert(segment_id, manifest.clone());
+        Ok(Some(manifest))
+    }
+
+    /// Remove one local immutable copy after its remote archive receipt is
+    /// durable. Renaming the manifest first is the crash boundary: a restart
+    /// cannot reopen the segment after that rename.
+    pub(crate) fn evict_segment(
+        &self,
+        segment_id: &str,
+        receipt_root: &Path,
+    ) -> Result<Option<SegmentManifest>> {
+        let mut state = self.inner.lock().expect("segment state lock poisoned");
+        let Some(manifest) = state.sealed.get(segment_id).cloned() else {
+            return Ok(None);
+        };
+        verify_segment(&manifest)?;
+        fs::create_dir_all(receipt_root)?;
+        fs::set_permissions(receipt_root, fs::Permissions::from_mode(0o700))?;
+        let source_manifest = self.manifests_root.join(format!("{segment_id}.json"));
+        let receipt = receipt_root.join(format!("{segment_id}.json"));
+        if receipt.exists() {
+            let prior: SegmentManifest = serde_json::from_slice(&fs::read(&receipt)?)?;
+            if prior != manifest {
+                bail!("local eviction receipt for {segment_id} changed");
+            }
+            if source_manifest.exists() {
+                fs::remove_file(&source_manifest)?;
+                storage_durable::sync_parent_dir(&source_manifest)?;
+            }
+        } else {
+            fs::rename(&source_manifest, &receipt).with_context(|| {
+                format!(
+                    "move local segment manifest {} to eviction receipt {}",
+                    source_manifest.display(),
+                    receipt.display()
+                )
+            })?;
+            fs::set_permissions(&receipt, fs::Permissions::from_mode(0o600))?;
+            storage_durable::sync_parent_dir(&source_manifest)?;
+            storage_durable::sync_parent_dir(&receipt)?;
+        }
+        match fs::remove_file(&manifest.local_path) {
+            Ok(()) => storage_durable::sync_parent_dir(&manifest.local_path)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        state.sealed.remove(segment_id);
+        state
+            .cursors
+            .retain(|_, (_, location)| location.segment_id != segment_id);
+        Ok(Some(manifest))
+    }
+
+    pub fn query_events(&self, after: u64, limit: usize) -> Result<Vec<StoredEvent>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let state = self.inner.lock().expect("segment state lock poisoned");
+        let mut paths = state
+            .sealed
+            .values()
+            .map(|manifest| {
+                (
+                    manifest.first_cursor,
+                    manifest.last_cursor,
+                    manifest.local_path.clone(),
+                )
+            })
+            .chain(
+                state
+                    .active
+                    .values()
+                    .map(|active| (active.first_cursor, active.last_cursor, active.path.clone())),
+            )
+            .filter(|(_, last, _)| *last > after)
+            .collect::<Vec<_>>();
+        drop(state);
+        paths.sort_by_key(|(first, _, _)| *first);
+
+        let mut events = Vec::with_capacity(limit.min(1_000));
+        for (_, _, path) in paths {
+            let remaining = limit.saturating_sub(events.len());
+            events.extend(read_events_after(&path, after, remaining)?);
+            if events.len() == limit {
+                return Ok(events);
+            }
+        }
+        Ok(events)
+    }
+
+    pub(crate) fn reader(&self, after: u64) -> Result<SegmentEventReader> {
+        let state = self.inner.lock().expect("segment state lock poisoned");
+        let mut paths = state
+            .sealed
+            .values()
+            .map(|manifest| {
+                (
+                    manifest.first_cursor,
+                    manifest.last_cursor,
+                    manifest.local_path.clone(),
+                )
+            })
+            .chain(
+                state
+                    .active
+                    .values()
+                    .map(|active| (active.first_cursor, active.last_cursor, active.path.clone())),
+            )
+            .filter(|(_, last, _)| *last > after)
+            .collect::<Vec<_>>();
+        drop(state);
+        paths.sort_by_key(|(first, _, _)| *first);
+        Ok(SegmentEventReader {
+            paths: paths.into_iter().map(|(_, _, path)| path).collect(),
+            current: None,
+            after,
+        })
+    }
+
+    pub(crate) fn read_manifest_events(
+        &self,
+        manifest: &SegmentManifest,
+    ) -> Result<Vec<StoredEvent>> {
+        let state = self.inner.lock().expect("segment state lock poisoned");
+        let owned = state
+            .sealed
+            .get(&manifest.segment_id)
+            .filter(|owned| *owned == manifest)
+            .is_some();
+        drop(state);
+        if !owned {
+            bail!(
+                "segment {} is not owned by this signal store",
+                manifest.segment_id
+            );
+        }
+        verify_segment(manifest)?;
+        let events = read_events(&manifest.local_path)?;
+        if events.len() as u64 != manifest.event_count
+            || events.first().map(|event| event.cursor) != Some(manifest.first_cursor)
+            || events.last().map(|event| event.cursor) != Some(manifest.last_cursor)
+        {
+            bail!(
+                "segment {} content does not match its manifest",
+                manifest.segment_id
+            );
+        }
+        Ok(events)
     }
 
     pub fn recovered_events(&self) -> Result<Vec<StoredEvent>> {
@@ -432,29 +755,24 @@ impl SegmentStore {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {
                 let bytes = fs::read(&manifest.local_path)?;
-                service_durability::atomic_write(
+                storage_durable::atomic_write(
                     &target,
                     &bytes,
-                    service_durability::FsyncPolicy::Always,
+                    storage_durable::FsyncPolicy::Always,
                 )?;
                 let mut copied = manifest.clone();
                 copied.local_path = target.clone();
                 verify_segment(&copied)?;
                 fs::remove_file(&manifest.local_path)?;
-                service_durability::sync_parent_dir(&manifest.local_path)?;
+                storage_durable::sync_parent_dir(&manifest.local_path)?;
             }
             Err(error) => return Err(error.into()),
         }
-        service_durability::sync_parent_dir(&target)?;
+        storage_durable::sync_parent_dir(&target)?;
         manifest.local_path = target.clone();
         manifest.state = SegmentState::Moved;
         verify_segment(&manifest)?;
         self.write_manifest(&manifest)?;
-        for (_, location) in state.cursors.values_mut() {
-            if location.segment_id == segment_id {
-                location.path = target.clone();
-            }
-        }
         state
             .sealed
             .insert(segment_id.to_string(), manifest.clone());
@@ -462,8 +780,68 @@ impl SegmentStore {
     }
 }
 
+impl SegmentEventReader {
+    pub(crate) fn next_event(&mut self) -> Result<Option<StoredEvent>> {
+        loop {
+            if self.current.is_none() {
+                let Some(path) = self.paths.pop_front() else {
+                    return Ok(None);
+                };
+                self.current = Some(storage_durable::FramedLogCursor::open(path)?);
+            }
+            let Some(frame) = self
+                .current
+                .as_mut()
+                .expect("segment cursor exists")
+                .next_frame()?
+            else {
+                self.current = None;
+                continue;
+            };
+            let event: StoredEvent = serde_json::from_slice(&frame.payload)?;
+            if event.cursor != frame.seq {
+                bail!(
+                    "segment frame {} contains cursor {}",
+                    frame.seq,
+                    event.cursor
+                );
+            }
+            if event.cursor <= self.after {
+                continue;
+            }
+            self.after = event.cursor;
+            return Ok(Some(event));
+        }
+    }
+}
+
 fn read_events(path: &Path) -> Result<Vec<StoredEvent>> {
-    service_durability::FramedLogReader::read_frames(path, 0)?
+    storage_durable::FramedLogReader::read_frames(path, 0)?
+        .into_iter()
+        .map(|frame| {
+            let event: StoredEvent = serde_json::from_slice(&frame.payload)?;
+            if event.cursor != frame.seq {
+                bail!(
+                    "segment frame {} contains cursor {} in {}",
+                    frame.seq,
+                    event.cursor,
+                    path.display()
+                );
+            }
+            Ok(event)
+        })
+        .collect()
+}
+
+fn event_time_unix_nano(event: &StoredEvent) -> Result<i64> {
+    DateTime::parse_from_rfc3339(&event.event.occurred_at)
+        .context("segment event occurred_at must be RFC3339")?
+        .timestamp_nanos_opt()
+        .context("segment event occurred_at is outside the nanosecond range")
+}
+
+fn read_events_after(path: &Path, after: u64, limit: usize) -> Result<Vec<StoredEvent>> {
+    storage_durable::FramedLogReader::read_frames_bounded(path, after, limit)?
         .into_iter()
         .map(|frame| {
             let event: StoredEvent = serde_json::from_slice(&frame.payload)?;
