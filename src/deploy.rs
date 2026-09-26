@@ -7,7 +7,7 @@ use anyhow::{bail, Result};
 /// `build.sh release` pins into every `k8s/**` manifest, so the operator and
 /// collector renderers can substitute it byte-for-byte.
 pub const DEFAULT_OPERATOR_IMAGE: &str =
-    concat!("ghcr.io/chrischeng-c4/sift:", env!("CARGO_PKG_VERSION"));
+    concat!("ghcr.io/faberline/sift:", env!("CARGO_PKG_VERSION"));
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DockerfileVariant {

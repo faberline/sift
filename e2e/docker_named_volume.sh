@@ -25,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-docker build --file "$repo_root/apps/sift/Dockerfile" --tag "$image" "$repo_root"
+docker build --file "$repo_root/Dockerfile" --tag "$image" "$repo_root"
 docker volume create "$volume" >/dev/null
 
 start_container() {

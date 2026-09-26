@@ -32,17 +32,17 @@ tool_contracts:
     tool: rig
     manifest: rig.toml
     category: stability
-    command: "cd apps/sift && ../../target/debug/vat run ec-stability"
+    command: "vat run ec-stability"
     native:
       version: 1
       project: sift
       source_contract: sift-long-running-stability-resilience
-      scenarios_dir: apps/sift/e2e/rig/cases/resilience
+      scenarios_dir: e2e/rig/cases/resilience
   - id: sift-meter-stability
     tool: meter
     manifest: meter-stability.toml
     category: stability
-    command: "target/debug/meter test -- -p sift --test stability_e2e -- --nocapture"
+    command: "meter test -- -p sift --test stability_e2e -- --nocapture"
     native:
       version: 1
       project: sift

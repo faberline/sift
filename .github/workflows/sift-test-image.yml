@@ -87,7 +87,7 @@ jobs:
       - name: Run the complete Sift candidate gate
         env:
           SIFT_SOURCE_REVISION: ${{ needs.resolve.outputs.sha }}
-        run: bash apps/sift/test.sh --candidate
+        run: bash ./test.sh --candidate
 
   build:
     name: build (${{ matrix.target }})
@@ -200,7 +200,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/sift/Dockerfile.test
+          file: Dockerfile.test
           platforms: linux/amd64,linux/arm64
           push: true
           # NEVER add `latest` or a semver tag here — this is the dev/test

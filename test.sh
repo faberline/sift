@@ -2,14 +2,14 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-script_root="$(cd "$script_dir/../.." && pwd -P)"
+script_root="$(cd "$script_dir" && pwd -P)"
 if [[ -n "${SIFT_REPO_ROOT:-}" ]]; then
   if ! supplied_repo_root="$(cd "$SIFT_REPO_ROOT" 2>/dev/null && pwd -P)"; then
     echo "SIFT_REPO_ROOT does not name a readable directory" >&2
     exit 1
   fi
   if [[ "$supplied_repo_root" != "$script_root" ]]; then
-    echo "SIFT_REPO_ROOT must match the repository that contains apps/sift/test.sh" >&2
+    echo "SIFT_REPO_ROOT must match the repository that contains ./test.sh" >&2
     exit 1
   fi
 fi
@@ -43,7 +43,7 @@ if [[ "${1:-}" == "--candidate" ]]; then
     exit 1
   }
   export SIFT_SOURCE_REVISION="$candidate_revision"
-  bash apps/sift/e2e/candidate_root.sh
+  bash e2e/candidate_root.sh
   cargo build --locked \
     -p vat -p lumen -p tape -p relay -p defer -p sift --bins
   bash scripts/faberline-core-test.sh build-stamp
@@ -54,8 +54,8 @@ if [[ "${1:-}" == "--candidate" ]]; then
     exit 1
   }
   SIFT_EXPECTED_SOURCE_REVISION="$candidate_revision" \
-    bash apps/sift/e2e/prometheus_compliance.sh
-  bash apps/sift/e2e/docker_named_volume.sh
+    bash e2e/prometheus_compliance.sh
+  bash e2e/docker_named_volume.sh
   exit 0
 fi
 

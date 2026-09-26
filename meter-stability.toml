@@ -1,4 +1,4 @@
-# SPEC-MANAGED: apps/sift/external-contracts/long-running-stability/sift-resilience.md#sift-meter-stability
+# SPEC-MANAGED: external-contracts/long-running-stability/sift-resilience.md#sift-meter-stability
 # CODEGEN-BEGIN
 # AW-EC-TOOL-BEGIN
 delegate_command = "cargo test -p sift --test stability_e2e -- --nocapture"

@@ -2,7 +2,7 @@
 # HANDWRITE-BEGIN gap="sift-install-entrypoint" tracker="1576" reason="Sift releases install a target-specific verified archive into the local PATH."
 set -eu
 
-repo="${SIFT_REPO:-chrischeng-c4/axiom}"
+repo="${SIFT_REPO:-faberline/sift}"
 version="${SIFT_VERSION:-latest}"
 install_dir="${SIFT_INSTALL:-$HOME/.local/bin}"
 

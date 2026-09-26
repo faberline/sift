@@ -15,11 +15,7 @@ const SHARED_PACKAGES: &[&str] = &[
 ];
 
 fn metadata() -> serde_json::Value {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .join("Cargo.toml");
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let output = Command::new(env!("CARGO"))
         .args([
             "metadata",

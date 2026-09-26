@@ -632,7 +632,7 @@ struct IssueCommentArgs {
 
 const TOOL: cli_std::ToolInfo = cli_std::ToolInfo {
     project: "sift",
-    repo: "chrischeng-c4/axiom",
+    repo: "faberline/sift",
     target: env!("SIFT_TARGET"),
     version: env!("CARGO_PKG_VERSION"),
     git_sha: env!("SIFT_GIT_SHA"),
@@ -1438,7 +1438,7 @@ fn dockerfile(args: DockerfileArgs) -> Result<()> {
                 args.out.as_deref(),
                 file_name,
                 &body,
-                "docker build -f apps/sift/Dockerfile -t sift:dev .",
+                "docker build -f Dockerfile -t sift:dev .",
             )
         }
     }

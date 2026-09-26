@@ -15,7 +15,7 @@
 #   dist/linux/amd64/sift
 #   dist/linux/arm64/sift
 #
-#   docker buildx build -f apps/sift/Dockerfile.test \
+#   docker buildx build -f Dockerfile.test \
 #     --platform linux/amd64,linux/arm64 \
 #     -t ghcr.io/<owner>/sift:sha-<git12> --push .
 

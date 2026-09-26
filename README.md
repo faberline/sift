@@ -199,7 +199,7 @@ path as a volume, and runs Sift as a non-root user. The example uses a named
 volume:
 
 ```sh
-docker compose -f apps/sift/compose.yaml up --build
+docker compose -f compose.yaml up --build
 ```
 
 Removing the container does not remove the `sift-data` volume.
@@ -264,7 +264,7 @@ production performance claim.
 
 ## Contract discovery
 
-The `apps/sift` source owns the product boundary, Rust binary, signal engines,
+The `sift` source owns the product boundary, Rust binary, signal engines,
 public schemas, deployment files, and end-to-end tests.
 
 An `apps/<name>` source is another Axiom application with its own product
@@ -275,7 +275,7 @@ this repository. Sift owns the adapter and compatibility tests for every
 external contract that it adopts.
 
 The runtime OpenAPI document is available at `/openapi.json`. Each test listed
-below is an explicit Cargo test target under `apps/sift/e2e`.
+below is an explicit Cargo test target under `e2e`.
 
 ## Capabilities
 
@@ -283,114 +283,114 @@ below is an explicit Cargo test target under `apps/sift/e2e`.
 
 | Capability | ID | User promise | Sources |
 |---|---|---|---|
-| Signal ingest | `signal-ingest` | Send logs, metrics, and traces through standard telemetry protocols. | `apps/sift`<br>`external:opentelemetry`<br>`external:prometheus` |
-| Unified investigation | `unified-investigation` | Query and correlate every phase-one signal through one product API. | `apps/sift`<br>`core/index-text` |
-| Durable local data | `durable-local-data` | Keep accepted data in one private and versioned persistent root. | `apps/sift`<br>`core/storage-durable` |
-| Replicated availability | `replicated-availability` | Keep acknowledged data after one voter fails. | `apps/sift`<br>`core/raft-core`<br>`core/raft-runtime`<br>`core/peer-tls` |
-| Archive and restore | `archive-and-restore` | Commit immutable Parquet archives and restore their exact events. | `apps/sift`<br>`core/storage-segment`<br>`core/service-projection`<br>`core/service-backup`<br>`external:apache-parquet` |
-| Agent and CLI access | `agent-and-cli-access` | Let people and agents use the same read-only product schemas. | `apps/sift`<br>`core/cli-std`<br>`external:model-context-protocol` |
-| Kubernetes operation | `kubernetes-operation` | Run one Sift product as secure role-based GKE workloads. | `apps/sift`<br>`core/service-k8s`<br>`core/service-auth` |
-| Structured log collection | `structured-log-collection` | Resume file and CRI collection without silently skipping bytes. | `apps/sift`<br>`core/service-observability` |
+| Signal ingest | `signal-ingest` | Send logs, metrics, and traces through standard telemetry protocols. | `sift`<br>`external:opentelemetry`<br>`external:prometheus` |
+| Unified investigation | `unified-investigation` | Query and correlate every phase-one signal through one product API. | `sift`<br>`core/index-text` |
+| Durable local data | `durable-local-data` | Keep accepted data in one private and versioned persistent root. | `sift`<br>`core/storage-durable` |
+| Replicated availability | `replicated-availability` | Keep acknowledged data after one voter fails. | `sift`<br>`core/raft-core`<br>`core/raft-runtime`<br>`core/peer-tls` |
+| Archive and restore | `archive-and-restore` | Commit immutable Parquet archives and restore their exact events. | `sift`<br>`core/storage-segment`<br>`core/service-projection`<br>`core/service-backup`<br>`external:apache-parquet` |
+| Agent and CLI access | `agent-and-cli-access` | Let people and agents use the same read-only product schemas. | `sift`<br>`core/cli-std`<br>`external:model-context-protocol` |
+| Kubernetes operation | `kubernetes-operation` | Run one Sift product as secure role-based GKE workloads. | `sift`<br>`core/service-k8s`<br>`core/service-auth` |
+| Structured log collection | `structured-log-collection` | Resume file and CRI collection without silently skipping bytes. | `sift`<br>`core/service-observability` |
 
 ### Signal ingest
 
 - ID: `signal-ingest`
 - Promise: Accept official OTLP logs, metrics, and traces plus stable Prometheus Remote Write 1.0.
 - Sources:
-  - `apps/sift` owns validation, limits, partial success, routing, and durable admission.
+  - `sift` owns validation, limits, partial success, routing, and durable admission.
   - `external:opentelemetry` defines the official OTLP messages and collector services.
   - `external:prometheus` defines the stable Remote Write 1.0 wire contract.
-- Gate: `bash apps/sift/test.sh --test otlp_gcp_ingest`
-- Gate: `bash apps/sift/test.sh --test otlp_grpc`
-- Gate: `bash apps/sift/test.sh --test prometheus_api`
-- Gate: `bash apps/sift/e2e/prometheus_compliance.sh`
+- Gate: `bash ./test.sh --test otlp_gcp_ingest`
+- Gate: `bash ./test.sh --test otlp_grpc`
+- Gate: `bash ./test.sh --test prometheus_api`
+- Gate: `bash e2e/prometheus_compliance.sh`
 
 ### Unified investigation
 
 - ID: `unified-investigation`
 - Promise: Give logs, metrics, and traces one versioned query, correlation, service, and async-job surface.
 - Sources:
-  - `apps/sift` owns the public query AST, correlation rules, projections, and response contract.
+  - `sift` owns the public query AST, correlation rules, projections, and response contract.
   - `core/index-text` supplies the embedded and rebuildable log index primitives.
-- Gate: `bash apps/sift/test.sh --test text_index_migration`
-- Gate: `bash apps/sift/test.sh --test phase_one_api`
-- Gate: `bash apps/sift/test.sh --test trace_store`
+- Gate: `bash ./test.sh --test text_index_migration`
+- Gate: `bash ./test.sh --test phase_one_api`
+- Gate: `bash ./test.sh --test trace_store`
 
 ### Durable local data
 
 - ID: `durable-local-data`
 - Promise: Refuse unsafe roots and recover accepted signal data from private WAL and segments.
 - Sources:
-  - `apps/sift` owns the fixed layout, signal WAL, segments, lock, and startup checks.
+  - `sift` owns the fixed layout, signal WAL, segments, lock, and startup checks.
   - `core/storage-durable` supplies framed durable logs and torn-tail recovery behavior.
-- Gate: `bash apps/sift/test.sh --test persistent_data_dir`
-- Gate: `bash apps/sift/test.sh --test durable_signal_wal`
-- Gate: `bash apps/sift/test.sh --test local_backpressure`
-- Gate: `bash apps/sift/test.sh --test bounded_dedupe_window`
+- Gate: `bash ./test.sh --test persistent_data_dir`
+- Gate: `bash ./test.sh --test durable_signal_wal`
+- Gate: `bash ./test.sh --test local_backpressure`
+- Gate: `bash ./test.sh --test bounded_dedupe_window`
 
 ### Replicated availability
 
 - ID: `replicated-availability`
 - Promise: Acknowledge replicated batches through a three-voter quorum and keep them after leader loss.
 - Sources:
-  - `apps/sift` maps Sift batches into the shared Raft state machine and role topology.
+  - `sift` maps Sift batches into the shared Raft state machine and role topology.
   - `core/raft-core` supplies the consensus log and quorum rules.
   - `core/raft-runtime` supplies durable host, transport, apply, and snapshot behavior.
   - `core/peer-tls` supplies required mutual TLS for dedicated peer traffic.
-- Gate: `bash apps/sift/test.sh --test raft_batch`
-- Gate: `bash apps/sift/test.sh --test raft_failover`
-- Gate: `bash apps/sift/test.sh --test bounded_raft_state`
-- Gate: `bash apps/sift/test.sh --test raft_archive_checkpoint`
+- Gate: `bash ./test.sh --test raft_batch`
+- Gate: `bash ./test.sh --test raft_failover`
+- Gate: `bash ./test.sh --test bounded_raft_state`
+- Gate: `bash ./test.sh --test raft_archive_checkpoint`
 
 ### Archive and restore
 
 - ID: `archive-and-restore`
 - Promise: Write immutable signal segments before the manifest, preserve WAL on archive failure, and make every voter adopt the same retained prefix before Raft compaction.
 - Sources:
-  - `apps/sift` owns archive manifests, segment hashes, commit order, WAL compaction, and restore checks.
+  - `sift` owns archive manifests, segment hashes, commit order, WAL compaction, and restore checks.
   - `core/storage-segment` supplies immutable paged catalogs and bounded catalog readers.
   - `core/service-projection` rebuilds typed projections when the retained source generation changes.
   - `core/service-backup` supplies destination, upload, fetch, and retention behavior.
   - `external:apache-parquet` defines the immutable columnar segment file format.
-- Gate: `bash apps/sift/test.sh --test gcs_archive`
-- Gate: `bash apps/sift/test.sh --test cold_query_archive`
-- Gate: `bash apps/sift/test.sh --test retention_lifecycle`
-- Gate: `bash apps/sift/test.sh --test paged_archive_gc`
-- Gate: `bash apps/sift/test.sh --test raft_archive_checkpoint`
-- Gate: `bash apps/sift/test.sh --test live_backup`
+- Gate: `bash ./test.sh --test gcs_archive`
+- Gate: `bash ./test.sh --test cold_query_archive`
+- Gate: `bash ./test.sh --test retention_lifecycle`
+- Gate: `bash ./test.sh --test paged_archive_gc`
+- Gate: `bash ./test.sh --test raft_archive_checkpoint`
+- Gate: `bash ./test.sh --test live_backup`
 
 ### Agent and CLI access
 
 - ID: `agent-and-cli-access`
 - Promise: Expose the same phase-one contracts through HTTP, CLI, and read-only MCP tools.
 - Sources:
-  - `apps/sift` owns the CLI commands, OpenAPI schema, MCP tools, and client calls.
+  - `sift` owns the CLI commands, OpenAPI schema, MCP tools, and client calls.
   - `core/cli-std` supplies common terminal output and operational command behavior.
   - `external:model-context-protocol` defines the MCP transports and tool exchange contract.
-- Gate: `bash apps/sift/test.sh --test cli_contract`
-- Gate: `bash apps/sift/test.sh --test mcp_surface`
+- Gate: `bash ./test.sh --test cli_contract`
+- Gate: `bash ./test.sh --test mcp_surface`
 
 ### Kubernetes operation
 
 - ID: `kubernetes-operation`
 - Promise: Render durable role workloads with project authorization, peer TLS, and PVC recovery boundaries.
 - Sources:
-  - `apps/sift` owns the Sift resource, operator adapter, role images, and network policy.
+  - `sift` owns the Sift resource, operator adapter, role images, and network policy.
   - `core/service-k8s` supplies the shared reconcile and workload rendering framework.
   - `core/service-auth` supplies TokenReview, SubjectAccessReview, projected tokens, and fail-closed decisions.
-- Gate: `bash apps/sift/test.sh --test deployment_cli`
-- Gate: `bash apps/sift/test.sh --test persistent_deployment`
-- Gate: `bash apps/sift/test.sh --test kubernetes_auth`
+- Gate: `bash ./test.sh --test deployment_cli`
+- Gate: `bash ./test.sh --test persistent_deployment`
+- Gate: `bash ./test.sh --test kubernetes_auth`
 
 ### Structured log collection
 
 - ID: `structured-log-collection`
 - Promise: Collect JSONL and CRI logs with durable checkpoints, bounded retry, quarantine, and byte-loss evidence.
 - Sources:
-  - `apps/sift` owns source discovery, framing, retry, checkpoints, quarantine, and ingest mapping.
+  - `sift` owns source discovery, framing, retry, checkpoints, quarantine, and ingest mapping.
   - `core/service-observability` defines the structured service-log schema used by Axiom applications.
-- Gate: `bash apps/sift/test.sh --test collector_cri`
-- Gate: `bash apps/sift/test.sh --test structured_stdout_collector_e2e`
+- Gate: `bash ./test.sh --test collector_cri`
+- Gate: `bash ./test.sh --test structured_stdout_collector_e2e`
 
 ## Supporting documents
 

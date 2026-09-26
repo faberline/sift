@@ -102,7 +102,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: operator
-          image: ghcr.io/chrischeng-c4/sift:0.1.2
+          image: ghcr.io/faberline/sift:0.1.2
           imagePullPolicy: IfNotPresent
           args: ["k8s", "operator", "run"]
           resources:

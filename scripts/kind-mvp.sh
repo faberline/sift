@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIFT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$SIFT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SIFT_DIR" && pwd)"
 
 RUN_ID="${SIFT_KIND_RUN_ID:-$(date -u +%m%d%H%M%S)}"
 CLUSTER_NAME="${SIFT_KIND_CLUSTER:-sift-mvp-${RUN_ID}}"

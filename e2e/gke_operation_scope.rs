@@ -75,6 +75,14 @@ struct Harness {
     root: PathBuf,
 }
 
+/// The GCP acceptance scripts live in the faberline/workspace repository.
+fn workspace_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var_os("FABERLINE_WORKSPACE")
+            .expect("set FABERLINE_WORKSPACE to a faberline/workspace checkout for acceptance/gcp"),
+    )
+}
+
 impl Harness {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
@@ -86,7 +94,7 @@ impl Harness {
         fs::create_dir_all(temp.path().join("evidence/kubernetes")).unwrap();
         let harness = Self {
             temp,
-            root: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            root: workspace_root(),
         };
         for (name, value) in [
             (
@@ -225,6 +233,7 @@ impl Harness {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn existing_cluster_failure_never_runs_terraform() {
     let h = Harness::new();
     let output = h
@@ -247,6 +256,7 @@ fn existing_cluster_failure_never_runs_terraform() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn explicit_bootstrap_keeps_its_creation_contract() {
     let h = Harness::new();
     let output = h
@@ -265,6 +275,7 @@ fn explicit_bootstrap_keeps_its_creation_contract() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn valid_existing_cluster_is_read_only_and_has_exact_stdout() {
     let h = Harness::new();
     let output = h
@@ -285,6 +296,7 @@ fn valid_existing_cluster_is_read_only_and_has_exact_stdout() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn existing_cluster_rejects_wrong_identity_and_autopilot() {
     for (pointer, value) in [
         ("/name", json!("another-cluster")),
@@ -308,6 +320,7 @@ fn existing_cluster_rejects_wrong_identity_and_autopilot() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn run_reuse_path_is_existing_only_even_when_later_describe_fails() {
     let h = Harness::new();
     let source = fs::read_to_string(h.root.join("acceptance/gcp/scripts/run.sh")).unwrap();
@@ -327,6 +340,7 @@ fn run_reuse_path_is_existing_only_even_when_later_describe_fails() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn exact_run_vm_is_checked_twice_before_one_stop() {
     let h = Harness::new();
     let output = h.failover("");
@@ -347,6 +361,7 @@ fn exact_run_vm_is_checked_twice_before_one_stop() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn forged_node_labels_and_foreign_group_members_cannot_cordon_or_stop() {
     for (file, pointer, value) in [
         ("node", "/metadata/labels/cloud.google.com~1gke-nodepool", json!("another-pool")),
@@ -370,6 +385,7 @@ fn forged_node_labels_and_foreign_group_members_cannot_cordon_or_stop() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn unreadable_identity_never_mutates_a_node_or_vm() {
     for fail in [
         "node",
@@ -391,6 +407,7 @@ fn unreadable_identity_never_mutates_a_node_or_vm() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn a_valid_replacement_member_is_still_not_the_cordoned_instance() {
     let h = Harness::new();
     h.mutate("vm-after", "/id", json!("99999"));
@@ -402,6 +419,7 @@ fn a_valid_replacement_member_is_still_not_the_cordoned_instance() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn second_membership_read_failure_does_not_stop_the_vm() {
     let h = Harness::new();
     let output = h.failover("after:members");
@@ -416,6 +434,7 @@ fn second_membership_read_failure_does_not_stop_the_vm() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn leader_change_during_the_load_wait_prevents_stop() {
     let h = Harness::new();
     let output = h.failover("changed_leader_after_wait");
@@ -427,6 +446,7 @@ fn leader_change_during_the_load_wait_prevents_stop() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn removing_the_final_leader_check_reaches_an_invalid_failover_stop() {
     let h = Harness::new();
     let source = h.failover_source();
@@ -447,6 +467,7 @@ fn removing_the_final_leader_check_reaches_an_invalid_failover_stop() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn stop_requires_an_applied_cordon_receipt() {
     let h = Harness::new();
     let output = h
@@ -460,6 +481,7 @@ fn stop_requires_an_applied_cordon_receipt() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn uncordon_can_restore_a_valid_repaired_run_member() {
     let h = Harness::new();
     h.mutate("node", "/metadata/uid", json!("repaired-node"));
@@ -483,6 +505,7 @@ fn uncordon_can_restore_a_valid_repaired_run_member() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn removing_either_guard_is_detected_by_the_executed_operation_oracle() {
     for action in ["cordon", "stop"] {
         let h = Harness::new();
@@ -511,6 +534,7 @@ fn removing_either_guard_is_detected_by_the_executed_operation_oracle() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn removing_existing_only_from_the_real_run_call_exposes_the_unsafe_fallback() {
     let h = Harness::new();
     let source = fs::read_to_string(h.root.join("acceptance/gcp/scripts/run.sh")).unwrap();
@@ -538,6 +562,7 @@ fn removing_existing_only_from_the_real_run_call_exposes_the_unsafe_fallback() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn patch_double_rejects_non_mutating_or_missing_field_incompatible_operations() {
     for op in ["test", "replace"] {
         let h = Harness::new();
@@ -571,6 +596,7 @@ fn patch_double_rejects_non_mutating_or_missing_field_incompatible_operations() 
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn uncordon_also_requires_fresh_pool_membership() {
     let h = Harness::new();
     h.put("members", &json!([]));
@@ -602,6 +628,7 @@ fn uncordon_also_requires_fresh_pool_membership() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn replacement_or_membership_drift_after_cordon_prevents_stop() {
     for (file, pointer, value) in [
         ("node-after", "/metadata/uid", json!("replacement-node")),

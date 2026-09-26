@@ -56,6 +56,14 @@ elif 'scale' in args or 'rollout' in args: pass
 else: raise SystemExit('unexpected kubectl: ' + repr(args))
 "##;
 
+/// The GCP acceptance scripts live in the faberline/workspace repository.
+fn workspace_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var_os("FABERLINE_WORKSPACE")
+            .expect("set FABERLINE_WORKSPACE to a faberline/workspace checkout for acceptance/gcp"),
+    )
+}
+
 fn verify(app: &str, bad_patch: bool, get_mode: &str) -> (std::process::Output, tempfile::TempDir) {
     let temp = tempfile::tempdir().unwrap();
     for (name, contents) in [("kubectl", KUBECTL), ("sleep", "#!/bin/sh\nexit 0\n")] {
@@ -63,7 +71,7 @@ fn verify(app: &str, bad_patch: bool, get_mode: &str) -> (std::process::Output, 
         fs::write(&path, contents).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = workspace_root();
     let output = Command::new("bash")
         .arg(root.join("acceptance/gcp/scripts/verify-operator-cell.sh"))
         .arg(app)
@@ -86,6 +94,7 @@ fn verify(app: &str, bad_patch: bool, get_mode: &str) -> (std::process::Output, 
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn fast_reconcile_passes_before_and_after_leader_takeover() {
     for app in ["sift", "tape"] {
         let (output, temp) = verify(app, false, "stale_observed_generation");
@@ -112,6 +121,7 @@ fn fast_reconcile_passes_before_and_after_leader_takeover() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn patch_receipt_must_prove_that_drift_was_applied() {
     let (output, temp) = verify("sift", true, "stale_observed_generation");
     assert!(!output.status.success());
@@ -122,6 +132,7 @@ fn patch_receipt_must_prove_that_drift_was_applied() {
 }
 
 #[test]
+#[ignore = "needs FABERLINE_WORKSPACE: a faberline/workspace checkout"]
 fn reconcile_waits_for_the_same_object_and_a_newer_generation() {
     for mode in ["changed_uid", "same_generation"] {
         let (output, temp) = verify("sift", false, mode);

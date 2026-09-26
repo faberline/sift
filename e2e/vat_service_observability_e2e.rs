@@ -10,16 +10,23 @@ use serde_json::{json, Value};
 const SERVICES: [&str; 4] = ["lumen", "tape", "relay", "defer"];
 
 fn debug_binary(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_BIN_EXE_sift"))
-        .parent()
-        .expect("Sift debug binary directory")
-        .join(name)
+    if name == "sift" {
+        return PathBuf::from(env!("CARGO_BIN_EXE_sift"));
+    }
+    // The other services come from their own repositories, installed on PATH.
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| dir.join(name))
+                .find(|path| path.is_file())
+        })
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 fn require_binary(path: &Path) {
     assert!(
         path.is_file(),
-        "missing current-workspace binary {}; run `cargo build -p vat -p lumen -p tape -p relay -p defer -p sift --bins`",
+        "missing binary {}; install vat, lumen, tape, relay and defer from their faberline repositories",
         path.display()
     );
 }
@@ -33,23 +40,7 @@ fn jsonl(stdout: &[u8]) -> Vec<Value> {
 }
 
 #[test]
-fn applications_remain_sift_agnostic() {
-    for manifest in [
-        include_str!("../../../apps/tape/Cargo.toml"),
-        include_str!("../../../apps/relay/Cargo.toml"),
-        include_str!("../../../apps/defer/Cargo.toml"),
-    ] {
-        assert!(
-            !manifest.lines().any(|line| {
-                let line = line.trim_start();
-                line.starts_with("sift =") || line.starts_with("sift=")
-            }),
-            "applications must emit standard telemetry without linking Sift"
-        );
-    }
-}
-
-#[test]
+#[ignore = "needs vat, lumen, tape, relay and defer installed on PATH"]
 fn vat_managed_service_stdout_reaches_real_sift_query() {
     if std::env::var_os("VAT_SERVICE_OBSERVABILITY_PROBE").is_some() {
         return;

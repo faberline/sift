@@ -2,37 +2,37 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../../.." && pwd -P)"
+repo_root="$(cd "$script_dir/.." && pwd -P)"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/sift-candidate-root.XXXXXX")"
 trap 'rm -rf "$temporary_root"' EXIT
 
 outer_root="$temporary_root/outer"
 nested_root="$outer_root/candidate"
-mkdir -p "$nested_root/apps/sift"
+mkdir -p "$nested_root"
 git -c core.fsmonitor=false init -q "$outer_root"
 outer_root="$(cd "$outer_root" && pwd -P)"
 nested_root="$(cd "$nested_root" && pwd -P)"
-cp "$repo_root/apps/sift/test.sh" "$nested_root/apps/sift/test.sh"
+cp "$repo_root/test.sh" "$nested_root/test.sh"
 
 reported_root="$(env -u SIFT_REPO_ROOT \
-  bash "$nested_root/apps/sift/test.sh" --print-repo-root)"
+  bash "$nested_root/test.sh" --print-repo-root)"
 [[ "$reported_root" == "$nested_root" ]] || {
   echo "candidate test entrypoint selected an enclosing Git checkout" >&2
   exit 1
 }
 
 if SIFT_REPO_ROOT="$outer_root" \
-    bash "$nested_root/apps/sift/test.sh" --print-repo-root \
+    bash "$nested_root/test.sh" --print-repo-root \
     >"$temporary_root/mismatch.stdout" 2>"$temporary_root/mismatch.stderr"; then
   echo "candidate test entrypoint accepted a mismatched SIFT_REPO_ROOT" >&2
   exit 1
 fi
 grep -F \
-  "SIFT_REPO_ROOT must match the repository that contains apps/sift/test.sh" \
+  "SIFT_REPO_ROOT must match the repository that contains ./test.sh" \
   "$temporary_root/mismatch.stderr" >/dev/null
 
 SIFT_REPO_ROOT="$nested_root" \
-  bash "$nested_root/apps/sift/test.sh" --print-repo-root \
+  bash "$nested_root/test.sh" --print-repo-root \
   | grep -Fx "$nested_root" >/dev/null
 
 fake_sift="$temporary_root/old-sift"
@@ -41,7 +41,7 @@ chmod +x "$fake_sift"
 if SIFT_REPO_ROOT="$nested_root" \
     SIFT_BIN="$fake_sift" \
     SIFT_SOURCE_REVISION="0123456789abcdef0123456789abcdef01234567" \
-    bash "$nested_root/apps/sift/test.sh" --candidate \
+    bash "$nested_root/test.sh" --candidate \
     >"$temporary_root/sift-bin.stdout" 2>"$temporary_root/sift-bin.stderr"; then
   echo "candidate test entrypoint accepted a caller-supplied SIFT_BIN" >&2
   exit 1
@@ -79,7 +79,7 @@ if PATH="$temporary_root/fake-tools:$PATH" \
     SIFT_REPO_ROOT="$nested_root" \
     CARGO_TARGET_DIR="$fixed_target" \
     SIFT_EXPECTED_SOURCE_REVISION="0123456789abcdef0123456789abcdef01234567" \
-    bash "$repo_root/apps/sift/e2e/prometheus_compliance.sh" \
+    bash "$repo_root/e2e/prometheus_compliance.sh" \
     >"$temporary_root/revision.stdout" 2>"$temporary_root/revision.stderr"; then
   echo "Prometheus compliance accepted a stale fixed-path Sift binary" >&2
   exit 1

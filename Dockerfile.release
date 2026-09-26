@@ -32,7 +32,7 @@ RUN set -eux; \
       arm64) target="aarch64-unknown-linux-musl" ;; \
       *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    base="https://github.com/chrischeng-c4/axiom/releases/download/sift@${SIFT_VERSION}"; \
+    base="https://github.com/faberline/sift/releases/download/sift@${SIFT_VERSION}"; \
     asset="sift-${target}.tar.gz"; \
     cd /tmp; \
     curl -fsSL "${base}/${asset}" -o "${asset}"; \

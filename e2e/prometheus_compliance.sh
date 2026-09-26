@@ -107,7 +107,7 @@ done
 }
 
 suite_root="$work_root/compliance-${COMPLIANCE_COMMIT}"
-config="$repo_root/apps/sift/e2e/prometheus_compliance.yml"
+config="$repo_root/e2e/prometheus_compliance.yml"
 
 docker run --rm \
   --add-host host.docker.internal:host-gateway \

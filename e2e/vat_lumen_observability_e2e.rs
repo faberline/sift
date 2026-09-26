@@ -12,16 +12,23 @@ const PARENT_SPAN_ID: &str = "00f067aa0ba902b7";
 const TRACEPARENT: &str = "00-0af7651916cd43dd8448eb211c80319c-00f067aa0ba902b7-01";
 
 fn debug_binary(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_BIN_EXE_sift"))
-        .parent()
-        .expect("Sift debug binary directory")
-        .join(name)
+    if name == "sift" {
+        return PathBuf::from(env!("CARGO_BIN_EXE_sift"));
+    }
+    // The other services come from their own repositories, installed on PATH.
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| dir.join(name))
+                .find(|path| path.is_file())
+        })
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 fn require_binary(path: &Path) {
     assert!(
         path.is_file(),
-        "missing current-workspace binary {}; run `cargo build -p vat -p lumen -p sift --bins`",
+        "missing binary {}; install vat and lumen from their faberline repositories",
         path.display()
     );
 }
@@ -52,6 +59,7 @@ fn architecture_runbook_names_owned_boundaries_and_repro_command() {
 }
 
 #[test]
+#[ignore = "needs vat and lumen installed on PATH"]
 fn vat_managed_lumen_stdout_reaches_real_sift_query() {
     if std::env::var_os("VAT_OBSERVABILITY_PROBE").is_some() {
         return;

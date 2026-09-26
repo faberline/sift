@@ -4,8 +4,8 @@ name = "sift-operational"
 default_runner = "ec-stability"
 
 [workspace]
-base = "../.."
-workdir = "apps/sift"
+base = "."
+workdir = "."
 keep = "always"
 
 [env]

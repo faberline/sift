@@ -2,7 +2,7 @@ services:
   sift:
     build:
       context: ../..
-      dockerfile: apps/sift/Dockerfile
+      dockerfile: Dockerfile
     image: sift:dev
     ports:
       - "7380:7380"
