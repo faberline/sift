@@ -70,12 +70,12 @@ sync_sift_release_image_pins() {
   local version="$1"; shift
   local manifest matches
   for manifest in "$@"; do
-    matches="$(awk '/^[[:space:]]*image:[[:space:]]*ghcr\.io\/chrischeng-c4\/sift:[^[:space:]]+$/ { count++ } END { print count + 0 }' "$manifest")"
+    matches="$(awk '/^[[:space:]]*image:[[:space:]]*ghcr\.io\/faberline\/sift:[^[:space:]]+$/ { count++ } END { print count + 0 }' "$manifest")"
     if [[ "$matches" -ne 1 ]]; then
       echo "error: expected exactly one Sift GHCR image pin in ${manifest}; found ${matches}" >&2
       return 1
     fi
-    SIFT_RELEASE_IMAGE_VERSION="$version" perl -0pi -e 's#(^[[:space:]]*image:[[:space:]]*ghcr\.io/chrischeng-c4/sift:)\S+$#$1$ENV{SIFT_RELEASE_IMAGE_VERSION}#m' "$manifest"
+    SIFT_RELEASE_IMAGE_VERSION="$version" perl -0pi -e 's#(^[[:space:]]*image:[[:space:]]*ghcr\.io/faberline/sift:)\S+$#$1$ENV{SIFT_RELEASE_IMAGE_VERSION}#m' "$manifest"
     if ! grep -Fq "image: ghcr.io/faberline/sift:${version}" "$manifest"; then
       echo "error: failed to pin ${manifest} to Sift ${version}" >&2
       return 1
