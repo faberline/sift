@@ -43,7 +43,7 @@ if [[ "${1:-}" == "--candidate" ]]; then
     exit 1
   }
   export SIFT_SOURCE_REVISION="$candidate_revision"
-  bash e2e/candidate_root.sh
+  bash tests/candidate_root.sh
   cargo build --locked \
     -p vat -p lumen -p tape -p relay -p defer -p sift --bins
   bash scripts/faberline-core-test.sh build-stamp
@@ -54,8 +54,8 @@ if [[ "${1:-}" == "--candidate" ]]; then
     exit 1
   }
   SIFT_EXPECTED_SOURCE_REVISION="$candidate_revision" \
-    bash e2e/prometheus_compliance.sh
-  bash e2e/docker_named_volume.sh
+    bash tests/prometheus_compliance.sh
+  bash tests/docker_named_volume.sh
   exit 0
 fi
 

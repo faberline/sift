@@ -111,7 +111,7 @@ timeout_s = 30
 [[runners]]
 id = "observability"
 requires = ["lumen", "tape", "relay", "defer", "sift"]
-cmd = [{probe}, "--exact", "vat_runner_collects_every_service", "--nocapture"]
+cmd = [{probe}, "--exact", {probe_test}, "--nocapture"]
 timeout_s = 60
 artifacts = ["observability-proof.json"]
 "#,
@@ -121,6 +121,8 @@ artifacts = ["observability-proof.json"]
         defer = serde_json::to_string(&defer.to_string_lossy()).unwrap(),
         sift = serde_json::to_string(&sift.to_string_lossy()).unwrap(),
         probe = serde_json::to_string(&probe.to_string_lossy()).unwrap(),
+        probe_test = serde_json::to_string(&crate::support::test_name(module_path!(), "vat_runner_collects_every_service"))
+            .unwrap(),
     );
     std::fs::write(project.path().join("vat.toml"), config).unwrap();
 

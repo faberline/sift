@@ -17,7 +17,7 @@ e2e_tests:
     claim_id: ingest-query-replay-soak
     contract_id: sift.resilience.v1
     category: stability
-    command: "cargo test -p sift --test stability_e2e -- --nocapture"
+    command: "cargo test -p sift --test it -- stability_e2e:: --nocapture"
     assertions:
       - "A bounded burst of 128 valid events is durably acknowledged without an unbounded in-memory queue."
       - "Drain changes readiness to unavailable and the CRC-framed journal reopens with every acknowledged event."
@@ -37,16 +37,16 @@ tool_contracts:
       version: 1
       project: sift
       source_contract: sift-long-running-stability-resilience
-      scenarios_dir: e2e/rig/cases/resilience
+      scenarios_dir: tests/rig/cases/resilience
   - id: sift-meter-stability
     tool: meter
     manifest: meter-stability.toml
     category: stability
-    command: "meter test -- -p sift --test stability_e2e -- --nocapture"
+    command: "meter test -- -p sift --test it -- stability_e2e:: --nocapture"
     native:
       version: 1
       project: sift
       source_contract: sift-long-running-stability-resilience
-      delegate_command: "cargo test -p sift --test stability_e2e -- --nocapture"
+      delegate_command: "cargo test -p sift --test it -- stability_e2e:: --nocapture"
 ```
 <!-- HANDWRITE-END -->

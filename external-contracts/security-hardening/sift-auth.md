@@ -17,7 +17,7 @@ e2e_tests:
     claim_id: shared-bearer-token-auth
     contract_id: sift.bearer_auth.v1
     category: security
-    command: "cargo test -p sift --test runtime_security_e2e -- --nocapture"
+    command: "cargo test -p sift --test it -- runtime_security_e2e:: --nocapture"
     assertions:
       - "Required bearer authentication rejects unauthenticated data-plane requests and accepts an authorized write token."
       - "Health, readiness, metrics, OpenAPI, and docs probes remain reachable without a bearer token."

@@ -48,7 +48,7 @@ trap 'fail_hint "$MODE"' ERR
 # `src/deploy.rs`
 # substitutes the same `ghcr.io/faberline/sift:<CARGO_PKG_VERSION>` string
 # when it renders `--image` overrides, so a pin that drifts from Cargo.toml
-# silently disables those overrides; `cargo test -p sift --test deployment_cli`
+# silently disables those overrides; `cargo test -p sift --test it -- deployment_cli::`
 # is the tripwire and this sync is the fix.
 SIFT_IMAGE_PINS=(
   k8s/collector/daemonset.yaml

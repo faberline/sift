@@ -1,6 +1,6 @@
 use std::path::Path;
 
-const SCRIPT: &str = include_str!("../scripts/kind-mvp.sh");
+const SCRIPT: &str = include_str!("../../scripts/kind-mvp.sh");
 
 #[test]
 fn kind_gate_is_a_local_three_worker_preflight() {

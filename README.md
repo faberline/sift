@@ -300,10 +300,10 @@ below is an explicit Cargo test target under `e2e`.
   - `sift` owns validation, limits, partial success, routing, and durable admission.
   - `external:opentelemetry` defines the official OTLP messages and collector services.
   - `external:prometheus` defines the stable Remote Write 1.0 wire contract.
-- Gate: `bash ./test.sh --test otlp_gcp_ingest`
-- Gate: `bash ./test.sh --test otlp_grpc`
-- Gate: `bash ./test.sh --test prometheus_api`
-- Gate: `bash e2e/prometheus_compliance.sh`
+- Gate: `bash ./test.sh --test it -- otlp_gcp_ingest::`
+- Gate: `bash ./test.sh --test it -- otlp_grpc::`
+- Gate: `bash ./test.sh --test it -- prometheus_api::`
+- Gate: `bash tests/prometheus_compliance.sh`
 
 ### Unified investigation
 
@@ -312,9 +312,9 @@ below is an explicit Cargo test target under `e2e`.
 - Sources:
   - `sift` owns the public query AST, correlation rules, projections, and response contract.
   - `core/index-text` supplies the embedded and rebuildable log index primitives.
-- Gate: `bash ./test.sh --test text_index_migration`
-- Gate: `bash ./test.sh --test phase_one_api`
-- Gate: `bash ./test.sh --test trace_store`
+- Gate: `bash ./test.sh --test it -- text_index_migration::`
+- Gate: `bash ./test.sh --test it -- phase_one_api::`
+- Gate: `bash ./test.sh --test it -- trace_store::`
 
 ### Durable local data
 
@@ -323,10 +323,10 @@ below is an explicit Cargo test target under `e2e`.
 - Sources:
   - `sift` owns the fixed layout, signal WAL, segments, lock, and startup checks.
   - `core/storage-durable` supplies framed durable logs and torn-tail recovery behavior.
-- Gate: `bash ./test.sh --test persistent_data_dir`
-- Gate: `bash ./test.sh --test durable_signal_wal`
-- Gate: `bash ./test.sh --test local_backpressure`
-- Gate: `bash ./test.sh --test bounded_dedupe_window`
+- Gate: `bash ./test.sh --test it -- persistent_data_dir::`
+- Gate: `bash ./test.sh --test it -- durable_signal_wal::`
+- Gate: `bash ./test.sh --test it -- local_backpressure::`
+- Gate: `bash ./test.sh --test it -- bounded_dedupe_window::`
 
 ### Replicated availability
 
@@ -337,9 +337,9 @@ below is an explicit Cargo test target under `e2e`.
   - `core/raft-core` supplies the consensus log and quorum rules.
   - `core/raft-runtime` supplies durable host, transport, apply, and snapshot behavior.
   - `core/peer-tls` supplies required mutual TLS for dedicated peer traffic.
-- Gate: `bash ./test.sh --test raft_batch`
-- Gate: `bash ./test.sh --test raft_failover`
-- Gate: `bash ./test.sh --test bounded_raft_state`
+- Gate: `bash ./test.sh --test it -- raft_batch::`
+- Gate: `bash ./test.sh --test it -- raft_failover::`
+- Gate: `bash ./test.sh --test it -- bounded_raft_state::`
 - Gate: `bash ./test.sh --test raft_archive_checkpoint`
 
 ### Archive and restore
@@ -357,7 +357,7 @@ below is an explicit Cargo test target under `e2e`.
 - Gate: `bash ./test.sh --test retention_lifecycle`
 - Gate: `bash ./test.sh --test paged_archive_gc`
 - Gate: `bash ./test.sh --test raft_archive_checkpoint`
-- Gate: `bash ./test.sh --test live_backup`
+- Gate: `bash ./test.sh --test it -- live_backup::`
 
 ### Agent and CLI access
 
@@ -367,8 +367,8 @@ below is an explicit Cargo test target under `e2e`.
   - `sift` owns the CLI commands, OpenAPI schema, MCP tools, and client calls.
   - `core/cli-std` supplies common terminal output and operational command behavior.
   - `external:model-context-protocol` defines the MCP transports and tool exchange contract.
-- Gate: `bash ./test.sh --test cli_contract`
-- Gate: `bash ./test.sh --test mcp_surface`
+- Gate: `bash ./test.sh --test it -- cli_contract::`
+- Gate: `bash ./test.sh --test it -- mcp_surface::`
 
 ### Kubernetes operation
 
@@ -378,9 +378,9 @@ below is an explicit Cargo test target under `e2e`.
   - `sift` owns the Sift resource, operator adapter, role images, and network policy.
   - `core/service-k8s` supplies the shared reconcile and workload rendering framework.
   - `core/service-auth` supplies TokenReview, SubjectAccessReview, projected tokens, and fail-closed decisions.
-- Gate: `bash ./test.sh --test deployment_cli`
-- Gate: `bash ./test.sh --test persistent_deployment`
-- Gate: `bash ./test.sh --test kubernetes_auth`
+- Gate: `bash ./test.sh --test it -- deployment_cli::`
+- Gate: `bash ./test.sh --test it -- persistent_deployment::`
+- Gate: `bash ./test.sh --test it -- kubernetes_auth::`
 
 ### Structured log collection
 
@@ -389,8 +389,8 @@ below is an explicit Cargo test target under `e2e`.
 - Sources:
   - `sift` owns source discovery, framing, retry, checkpoints, quarantine, and ingest mapping.
   - `core/service-observability` defines the structured service-log schema used by Axiom applications.
-- Gate: `bash ./test.sh --test collector_cri`
-- Gate: `bash ./test.sh --test structured_stdout_collector_e2e`
+- Gate: `bash ./test.sh --test it -- collector_cri::`
+- Gate: `bash ./test.sh --test it -- structured_stdout_collector_e2e::`
 
 ## Supporting documents
 
