@@ -199,7 +199,7 @@ fn live_backup_http_transport_is_owned_by_service_backup() {
 fn logging_text_index_is_owned_by_index_text() {
     let source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/projection/logging.rs"
+        "/src/projection/infrastructure/logging_projection.rs"
     ))
     .expect("read Sift logging projection");
 
@@ -224,11 +224,17 @@ fn manifest_last_archive_flow_is_owned_by_storage_segment() {
 
 #[test]
 fn typed_projection_flow_is_owned_by_service_projection() {
-    let source = std::fs::read_to_string(concat!(
+    let runtime = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/projection/runtime.rs"
+        "/src/projection/application/projection_runtime.rs"
+    ))
+    .expect("read Sift projection runtime");
+    let adapter = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/projection/infrastructure/service_projection_adapter.rs"
     ))
     .expect("read Sift projection adapter");
+    let source = runtime + &adapter;
 
     assert!(source.contains("service_projection::ProjectionRegistry"));
     assert!(source.contains("ProjectionHandle<StoredEvent, LoggingProjection>"));

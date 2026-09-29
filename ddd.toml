@@ -186,3 +186,59 @@ rule = "B3"
 paths = ["src/collector/application/runtime.rs"]
 subject = "application->infrastructure"
 reason = "run opens its source with open_source and delivers through CollectorClient, SiftRecordDecoder maps each record with decode_service_log_enriched, and the truncated-file test seeds a CollectorCheckpoint; P1 moves runtime.rs whole. P2: the composition root opens the source and builds the client and passes them to run as service_collector's CollectorSource and BatchSink, the decoder takes the mapper injected, and the test moves with that wiring."
+
+# Projections: the logging, metric and trace read models Sift builds from the
+# journal and answers queries from. Besides the shared kernel they read the
+# journal through DurableJournal, still a crate-root item; the journal
+# becomes a context, and this one depends on it, in commit 6.
+[[contexts]]
+name = "projection"
+depends_on = []
+
+[contexts.layers]
+domain = "src/projection/domain"
+application = "src/projection/application"
+infrastructure = "src/projection/infrastructure"
+
+# Projection dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/projection/domain/log.rs",
+  "src/projection/domain/metric.rs",
+  "src/projection/domain/metric_aggregation.rs",
+  "src/projection/domain/metric_memory_size.rs",
+  "src/projection/domain/metric_series.rs",
+  "src/projection/domain/trace.rs",
+]
+subject = "anyhow"
+reason = "The query validators (LogQuery, TraceQuery, MetricQuery), histogram validation and merging, series identity, chunk and size checks and the rollups return anyhow errors whose text is the API's invalid_query message and the error apply and restore report, so converting them is not a move (E6). P2: a projection domain error (thiserror) with the same Display text, which the runtime and the API convert."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/projection/domain/log.rs",
+  "src/projection/domain/metric.rs",
+  "src/projection/domain/trace.rs",
+]
+subject = "utoipa"
+reason = "The *V1 records, the queries and the pages derive ToSchema because they are the API's OpenAPI wire as well as the snapshot bytes and the semantic digest's input; a mirror DTO would triple them and risk the digest drifting (E1). P2: approve utoipa for the *V1 projection records in the domain allowlist, with golden-bytes tests."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/projection/application/projection_runtime.rs"]
+subject = "application->infrastructure"
+reason = "ProjectionRuntime::open builds LoggingProjection, MetricProjection and TraceProjection, registers them with service_projection and reads the journal through JournalProjectionSource, and its fields hold handles to the three; P1 moves runtime.rs's runtime whole. P2: the composition root builds the projections and the journal source and passes them in, and the runtime holds them through a domain port."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/projection/infrastructure/logging_projection.rs",
+  "src/projection/infrastructure/metric_projection_apply.rs",
+  "src/projection/infrastructure/service_projection_adapter.rs",
+  "src/projection/infrastructure/trace_projection.rs",
+]
+subject = "infrastructure->application"
+reason = "The three projections implement the Projection trait, service_projection_adapter binds that trait to service_projection's, and LoggingProjection maps each event with normalize; §2.7 puts the trait and the normalizer in application, and P1 follows it. P2: move the Projection trait into the domain as a port and log_record_normalizer with it, so infrastructure depends only on the domain."
