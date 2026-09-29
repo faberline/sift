@@ -82,9 +82,9 @@ fn production_graph_points_from_sift_to_libs_only() {
 }
 
 #[test]
-fn every_direct_e2e_source_is_an_explicit_cargo_target() {
+fn every_integration_test_source_is_compiled() {
     let metadata = metadata();
-    // The shared packages' e2e targets are checked in faberline/core.
+    // The shared packages' test targets are checked in faberline/core.
     let package = metadata["packages"]
         .as_array()
         .unwrap()
@@ -92,7 +92,7 @@ fn every_direct_e2e_source_is_an_explicit_cargo_target() {
         .find(|package| package["name"] == "sift")
         .expect("Sift package");
     let manifest = Path::new(package["manifest_path"].as_str().unwrap());
-    let e2e = manifest.parent().unwrap().join("e2e");
+    let tests = manifest.parent().unwrap().join("tests");
     let targets = package["targets"]
         .as_array()
         .unwrap()
@@ -105,15 +105,54 @@ fn every_direct_e2e_source_is_an_explicit_cargo_target() {
         .filter_map(|target| target["src_path"].as_str())
         .map(|path| Path::new(path).to_path_buf())
         .collect::<BTreeSet<_>>();
-    for entry in
-        std::fs::read_dir(&e2e).unwrap_or_else(|error| panic!("read {}: {error}", e2e.display()))
-    {
-        let path = entry.unwrap().path();
-        if path.extension().and_then(|value| value.to_str()) == Some("rs") {
+    let rust_sources = |dir: &Path| {
+        std::fs::read_dir(dir)
+            .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("rs"))
+            .collect::<Vec<_>>()
+    };
+
+    // Process-isolated cases are their own `tests/<name>.rs` binaries.
+    for path in rust_sources(&tests) {
+        assert!(
+            targets.contains(&path),
+            "{} is not a Cargo test target",
+            path.display()
+        );
+    }
+
+    // Every other case is a module of the single `it` binary.
+    let it = tests.join("it");
+    let main = it.join("main.rs");
+    assert!(
+        targets.contains(&main),
+        "{} is not a Cargo test target",
+        main.display()
+    );
+    let main_source = std::fs::read_to_string(&main)
+        .unwrap_or_else(|error| panic!("read {}: {error}", main.display()));
+    let cases = main_source
+        .lines()
+        .filter_map(|line| line.strip_prefix("mod ")?.strip_suffix(';'))
+        .collect::<BTreeSet<_>>();
+    for path in rust_sources(&it) {
+        let case = path.file_stem().unwrap().to_str().unwrap();
+        assert!(
+            case == "main" || cases.contains(case),
+            "{} is not a module of {}",
+            path.display(),
+            main.display()
+        );
+    }
+
+    // `--test it -- <case>::` is a substring filter, so no case name may end
+    // with another case name.
+    for case in &cases {
+        for other in &cases {
             assert!(
-                targets.contains(&path),
-                "{} is not an explicit Cargo test target",
-                path.display()
+                case == other || !case.ends_with(other),
+                "`{other}::` also selects `{case}::`"
             );
         }
     }

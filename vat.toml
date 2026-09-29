@@ -20,12 +20,12 @@ timeout_s = 600
 [[runners]]
 id = "ec-security"
 requires = ["sift"]
-cmd = ["sh", "-c", "export CARGO_TARGET_DIR=\"$VAT_WORKSPACE_BASE/target\" && exec cargo test -p sift --test runtime_security_e2e -- --nocapture"]
+cmd = ["sh", "-c", "export CARGO_TARGET_DIR=\"$VAT_WORKSPACE_BASE/target\" && exec cargo test -p sift --test it -- runtime_security_e2e:: --nocapture"]
 timeout_s = 600
 
 [[runners]]
 id = "ec-stability"
 requires = ["sift"]
-cmd = ["sh", "-c", "export CARGO_TARGET_DIR=\"$VAT_WORKSPACE_BASE/target\" && exec cargo test -p sift --test stability_e2e -- --nocapture"]
+cmd = ["sh", "-c", "export CARGO_TARGET_DIR=\"$VAT_WORKSPACE_BASE/target\" && exec cargo test -p sift --test it -- stability_e2e:: --nocapture"]
 timeout_s = 600
 # HANDWRITE-END

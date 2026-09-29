@@ -2,7 +2,7 @@
 # CODEGEN-BEGIN
 # AW-EC-TOOL-BEGIN
 project = "sift"
-scenarios_dir = "e2e/rig/cases/resilience"
+scenarios_dir = "tests/rig/cases/resilience"
 source_contract = "sift-long-running-stability-resilience"
 version = 1
 # AW-EC-TOOL-END

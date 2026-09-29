@@ -1,3 +1,8 @@
+//! Own test binary: this case points `STORAGE_EMULATOR_HOST` at a per-test
+//! Cloud Storage emulator with `std::env::set_var`, and `storage-object` reads
+//! that variable whenever it builds a GCS client, so inside the shared `it`
+//! binary concurrent cases would reach each other's emulator.
+
 use std::{sync::Arc, time::Duration};
 
 use axum::{

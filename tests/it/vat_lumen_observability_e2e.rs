@@ -43,7 +43,7 @@ fn jsonl(stdout: &[u8]) -> Vec<Value> {
 
 #[test]
 fn architecture_runbook_names_owned_boundaries_and_repro_command() {
-    let runbook = include_str!("../observability/structured-stdout.md");
+    let runbook = include_str!("../../observability/structured-stdout.md");
     for required in [
         "axiom.service.log.v1",
         "W3C `traceparent`",
@@ -52,7 +52,7 @@ fn architecture_runbook_names_owned_boundaries_and_repro_command() {
         "CRI/GKE source adapter",
         "cargo build -p vat -p lumen -p sift --bins",
         "vat_managed_lumen_stdout_reaches_real_sift_query",
-        "cargo test -p sift --test collector_cri",
+        "cargo test -p sift --test it -- collector_cri::",
     ] {
         assert!(runbook.contains(required), "runbook missing {required:?}");
     }
@@ -107,13 +107,15 @@ timeout_s = 20
 [[runners]]
 id = "observability"
 requires = ["lumen", "sift"]
-cmd = [{probe}, "--exact", "vat_runner_observability_probe", "--nocapture"]
+cmd = [{probe}, "--exact", {probe_test}, "--nocapture"]
 timeout_s = 30
 artifacts = ["observability-proof.json"]
 "#,
         lumen = serde_json::to_string(&lumen.to_string_lossy()).unwrap(),
         sift = serde_json::to_string(&sift.to_string_lossy()).unwrap(),
         probe = serde_json::to_string(&probe.to_string_lossy()).unwrap(),
+        probe_test = serde_json::to_string(&crate::support::test_name(module_path!(), "vat_runner_observability_probe"))
+            .unwrap(),
     );
     std::fs::write(project.path().join("vat.toml"), config).unwrap();
 

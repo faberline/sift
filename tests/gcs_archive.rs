@@ -1,4 +1,9 @@
 // HANDWRITE-BEGIN gap="sift-vat-gcs-archive-tests" tracker="1659" reason="Run Vat Cloud Storage emulator with real service-backup GCS requests and verify archive/restore hash equality."
+//! Own test binary: this case points `STORAGE_EMULATOR_HOST` at a per-test
+//! Cloud Storage emulator with `std::env::set_var`, and `storage-object` reads
+//! that variable whenever it builds a GCS client, so inside the shared `it`
+//! binary concurrent cases would reach each other's emulator.
+
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};

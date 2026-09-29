@@ -79,7 +79,7 @@ if PATH="$temporary_root/fake-tools:$PATH" \
     SIFT_REPO_ROOT="$nested_root" \
     CARGO_TARGET_DIR="$fixed_target" \
     SIFT_EXPECTED_SOURCE_REVISION="0123456789abcdef0123456789abcdef01234567" \
-    bash "$repo_root/e2e/prometheus_compliance.sh" \
+    bash "$repo_root/tests/prometheus_compliance.sh" \
     >"$temporary_root/revision.stdout" 2>"$temporary_root/revision.stderr"; then
   echo "Prometheus compliance accepted a stale fixed-path Sift binary" >&2
   exit 1

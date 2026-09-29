@@ -66,7 +66,7 @@ contract_id = "sift.resilience.v1"
 category = "stability"
 td_ref = "external-contracts/long-running-stability/sift-resilience.md#sift-long-running-stability-resilience"
 test_path = "e2e/stability_sift_long_running_stability_resilience.rs"
-command = "cargo test -p sift --test stability_e2e -- --nocapture"
+command = "cargo test -p sift --test it -- stability_e2e:: --nocapture"
 required_for_production = true
 assertions = [
     "A bounded burst of 128 valid events is durably acknowledged without an unbounded in-memory queue.",
@@ -81,7 +81,7 @@ contract_id = "sift.bearer_auth.v1"
 category = "security"
 td_ref = "external-contracts/security-hardening/sift-auth.md#sift-security-hardening-bearer-auth"
 test_path = "e2e/security_sift_security_hardening_bearer_auth.rs"
-command = "cargo test -p sift --test runtime_security_e2e -- --nocapture"
+command = "cargo test -p sift --test it -- runtime_security_e2e:: --nocapture"
 required_for_production = true
 assertions = [
     "Required bearer authentication rejects unauthenticated data-plane requests and accepts an authorized write token.",
@@ -103,7 +103,7 @@ tool = "meter"
 path = "meter-stability.toml"
 td_ref = "external-contracts/long-running-stability/sift-resilience.md#sift-meter-stability"
 content_digest = "sha256:a1edddb2f5ae495e0f46a16d61fa99c2574579d797db7afd940088f37d9b680d"
-command = "meter test -- -p sift --test stability_e2e -- --nocapture"
+command = "meter test -- -p sift --test it -- stability_e2e:: --nocapture"
 category = "stability"
 
 [[aw.ec.generated.tool_manifests]]

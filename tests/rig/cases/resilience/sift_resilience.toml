@@ -11,6 +11,6 @@ required = true
 [[steps]]
 type = "exec"
 name = "bounded_ingest_drain_recovery"
-cmd = ["cargo", "test", "-p", "sift", "--test", "stability_e2e", "--", "--nocapture"]
+cmd = ["cargo", "test", "-p", "sift", "--test", "it", "--", "stability_e2e::", "--nocapture"]
 timeout_secs = 180
 # HANDWRITE-END
