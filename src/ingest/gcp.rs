@@ -5,8 +5,8 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use service_observability::SERVICE_LOG_SCHEMA_V1;
-use sha2::{Digest, Sha256};
 
+use crate::shared_kernel::cloud_logging_event_id::stable_id;
 use crate::{AttributeValue, OperationalEventV2, SignalKind};
 
 pub fn looks_like_structured_log(value: &Value) -> bool {
@@ -226,76 +226,6 @@ fn trace_id(value: &str) -> Option<String> {
     let value = value.rsplit('/').next().unwrap_or(value);
     (!value.is_empty()).then(|| value.to_string())
 }
-
-// <HANDWRITE gap="missing-generator:logic" tracker="1675" reason="Share the insertId-free Cloud Logging identity with CRI collection.">
-pub(crate) fn stable_id(
-    project: &str,
-    resource_type: &str,
-    timestamp: &str,
-    resource: &BTreeMap<String, String>,
-    payload: &Value,
-) -> String {
-    let mut digest = Sha256::new();
-    digest.update(project.as_bytes());
-    digest.update([0]);
-    digest.update(resource_type.as_bytes());
-    digest.update([0]);
-    digest.update(timestamp.as_bytes());
-    digest.update([0]);
-    for key in [
-        "gcp.resource.label.project_id",
-        "gcp.resource.label.location",
-        "gcp.resource.label.cluster_name",
-        "gcp.resource.label.namespace_name",
-        "gcp.resource.label.pod_name",
-        "gcp.resource.label.container_name",
-    ] {
-        digest.update(key.as_bytes());
-        digest.update([0]);
-        digest.update(resource.get(key).map(String::as_bytes).unwrap_or_default());
-        digest.update([0]);
-    }
-    digest.update(canonical_json(payload));
-    format!("gcp-log-{}", hex::encode(&digest.finalize()[..16]))
-}
-
-fn canonical_json(value: &Value) -> Vec<u8> {
-    fn write(value: &Value, output: &mut Vec<u8>) {
-        match value {
-            Value::Object(object) => {
-                output.push(b'{');
-                let mut keys = object.keys().collect::<Vec<_>>();
-                keys.sort_unstable();
-                for (index, key) in keys.into_iter().enumerate() {
-                    if index > 0 {
-                        output.push(b',');
-                    }
-                    serde_json::to_writer(&mut *output, key)
-                        .expect("JSON object key serialization");
-                    output.push(b':');
-                    write(&object[key], output);
-                }
-                output.push(b'}');
-            }
-            Value::Array(values) => {
-                output.push(b'[');
-                for (index, value) in values.iter().enumerate() {
-                    if index > 0 {
-                        output.push(b',');
-                    }
-                    write(value, output);
-                }
-                output.push(b']');
-            }
-            _ => serde_json::to_writer(output, value).expect("JSON scalar serialization"),
-        }
-    }
-
-    let mut output = Vec::new();
-    write(value, &mut output);
-    output
-}
-// </HANDWRITE>
 
 fn scalar(value: &Value) -> Option<String> {
     match value {

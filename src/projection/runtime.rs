@@ -5,7 +5,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::{DurableJournal, StoredEvent};
+use crate::{shared_kernel::stored_event::StoredEvent, DurableJournal};
 
 use super::{
     logging::{LogPage, LogQuery, LoggingProjection, PROJECTION_LOGGING_STORE},

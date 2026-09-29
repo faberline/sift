@@ -107,7 +107,7 @@ pub(crate) fn decode_service_log_enriched(
             .resource
             .get("gcp.resource.type")
             .context("CRI enrichment requires gcp.resource.type")?;
-        event.event_id = crate::ingest::gcp::stable_id(
+        event.event_id = crate::shared_kernel::cloud_logging_event_id::stable_id(
             project,
             resource_type,
             &event.occurred_at,

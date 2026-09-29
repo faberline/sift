@@ -1,4 +1,6 @@
-// HANDWRITE-BEGIN gap="sift-operational-event-v2-model" tracker="1657" reason="Define the phase-one operational-event model and validated wire decode."
+//! The versioned operational event (schema v2) every signal is ingested,
+//! journaled, archived and queried as, and its validated wire decode.
+
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
@@ -10,6 +12,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 
 pub const EVENT_SCHEMA_VERSION: u16 = 2;
+
 pub const EVENT_SCHEMA_URL: &str = "https://cclab.dev/sift/schemas/operational-event/v2";
 
 /// Phase-one signal kinds. Other SRE data is added only through a later
@@ -370,5 +373,3 @@ fn decode_event_value(value: Value) -> Result<OperationalEventV2> {
     event.validate()?;
     Ok(event)
 }
-
-// HANDWRITE-END

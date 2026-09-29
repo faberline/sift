@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
-use crate::{AttributeValue, SignalKind, StoredEvent};
+use crate::{shared_kernel::stored_event::StoredEvent, AttributeValue, SignalKind};
 
 use super::{model::ProjectionDescriptor, runtime::Projection};
 

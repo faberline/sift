@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::{ContentBlobRef, OperationalEventV2, SignalKind, StoredEvent};
+use crate::{
+    shared_kernel::stored_event::StoredEvent, ContentBlobRef, OperationalEventV2, SignalKind,
+};
 
 pub use blob::BlobStore;
 pub use capacity::{CapacityLevel, LocalCapacity, LocalCapacityError};

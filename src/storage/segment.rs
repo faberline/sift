@@ -12,7 +12,7 @@ use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::StoredEvent;
+use crate::shared_kernel::stored_event::StoredEvent;
 
 use super::shard::{bucket_for, Route};
 

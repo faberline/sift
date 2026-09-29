@@ -23,12 +23,14 @@ use parquet::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{ContentBlobRef, SignalKind, StoredEvent};
+use crate::{shared_kernel::stored_event::StoredEvent, ContentBlobRef, SignalKind};
 
 use super::{
     blob::BlobStore, dedupe::DedupeReceipt, shard, BlobHashSet, DataLayout, EpochMap, RawStorage,
     SegmentManifest, StorageRole,
 };
+
+pub use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 const ARCHIVE_FORMAT_VERSION: u16 = 10;
 const ARCHIVE_COMMIT_FORMAT_VERSION: u16 = 3;
@@ -186,47 +188,6 @@ struct ArchiveUploadIntent {
     source_cluster_id: String,
     source_manifest_uri: Option<String>,
     source_manifest_sha256: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ArchiveWatermarks {
-    pub logs: u64,
-    pub metrics: u64,
-    pub traces: u64,
-}
-
-impl ArchiveWatermarks {
-    pub(crate) fn through(self, signal: SignalKind) -> u64 {
-        match signal {
-            SignalKind::Log => self.logs,
-            SignalKind::Metric => self.metrics,
-            SignalKind::Span => self.traces,
-        }
-    }
-
-    pub(crate) fn covers(self, signal: SignalKind, cursor: u64) -> bool {
-        cursor <= self.through(signal)
-    }
-
-    fn include(&mut self, signal: SignalKind, cursor: u64) {
-        match signal {
-            SignalKind::Log => self.logs = self.logs.max(cursor),
-            SignalKind::Metric => self.metrics = self.metrics.max(cursor),
-            SignalKind::Span => self.traces = self.traces.max(cursor),
-        }
-    }
-
-    fn merge(self, other: Self) -> Self {
-        Self {
-            logs: self.logs.max(other.logs),
-            metrics: self.metrics.max(other.metrics),
-            traces: self.traces.max(other.traces),
-        }
-    }
-
-    pub(crate) fn max_cursor(self) -> u64 {
-        self.logs.max(self.metrics).max(self.traces)
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

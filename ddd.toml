@@ -1,0 +1,151 @@
+# Sift's bounded contexts and layers, checked by the workspace's
+# rust-arch contract (scripts/meta/rust_arch_contract.py). The [policy] table
+# is copied verbatim from the canonical policy.toml; everything after it is
+# Sift's own.
+schema = 1
+
+# Report only while the DDD split (P1) is in progress.
+[migration]
+enforce = false
+
+[policy]
+version = 1
+size_warn = 400
+size_error = 1000
+root_md = [
+  "README.md",
+  "CONTRIBUTING.md",
+  "LICENSE.md",
+  "CHANGELOG.md",
+  "SECURITY.md",
+  "CODE_OF_CONDUCT.md",
+  "CLAUDE.md",
+  "AGENTS.md",
+  # Temporary: the current project docs contract requires these at the root.
+  "STATUS.md",
+  "ROADMAP.md",
+]
+docs_required = [
+  "docs/README.md",
+  "docs/architecture.md",
+  "docs/glossary.md",
+  "docs/domain/",
+  "docs/adr/",
+  "docs/operations/",
+]
+layers = ["domain", "application", "infrastructure", "interfaces"]
+# The layer held to the [policy.domain] purity rules and kept free of other contexts.
+domain_layer = "domain"
+# Layers another context may use. A context without any of them exposes its whole public API.
+public_layers = ["application"]
+# <ctx>/domain/events(.rs|/) is the only domain module other contexts may use.
+domain_events = "events"
+# A tests/<name>.rs binary may stand alone only when it is the crate's single test
+# target, contains one of these markers, or its leading //! block carries
+# `//! isolation: <reason>`. Everything else lives in tests/it/.
+test_isolation_markers = ["set_var(", "remove_var(", "#[global_allocator]"]
+# tests/<dir>/ names holding .rs data (fixtures, trybuild cases), not test targets.
+test_data_dirs = ["fixtures", "compile_fail", "ui"]
+# false: one crate may hold several contexts (B3/B4 still guard each boundary).
+# true: B1 requires every crate to belong to exactly one context.
+one_context_per_crate = false
+
+# Layers each layer may use inside one context. The shared kernel is usable by
+# every layer; assembly code (lib.rs, main.rs, src/bin) is unrestricted. A
+# multi-file binary is src/bin/<name>/main.rs plus sibling modules: B6 keeps
+# the entry file thin and does not apply to those modules.
+[policy.layer_deps]
+domain = []
+application = ["domain"]
+infrastructure = ["domain"]
+interfaces = ["application"]
+
+[policy.domain]
+# Applies to every domain layer, and to the shared kernel when shared_kernel_pure.
+allowed_crates = [
+  "std",
+  "core",
+  "alloc",
+  "thiserror",
+  "serde",
+  "serde_json",
+  "chrono",
+  "time",
+  "uuid",
+  "sha2",
+  "hex",
+  "regex",
+  "bytes",
+]
+denied_paths = [
+  "std::fs",
+  "std::net",
+  "std::process",
+  "std::env",
+  "std::os",
+  "std::io::stdin",
+  "std::io::stdout",
+  "std::io::stderr",
+  "std::thread::spawn",
+  "std::thread::sleep",
+  "std::time::SystemTime::now",
+  "std::time::Instant::now",
+  "chrono::Utc::now",
+  "chrono::Local::now",
+  "chrono::offset::Utc::now",
+  "chrono::offset::Local::now",
+  "time::OffsetDateTime::now_utc",
+  "time::OffsetDateTime::now_local",
+  "time::Instant::now",
+  "uuid::Uuid::now_v7",
+  "uuid::Uuid::new_v4",
+]
+denied_macros = ["println", "print", "eprintln", "eprint", "dbg"]
+shared_kernel_pure = true
+
+[policy.naming]
+crates_dir = "crates"
+domain_crate = "{repo}-{context}-domain"
+context_crate = "{repo}-{context}"
+shared_kernel_crate = "{repo}-shared-kernel"
+
+# Module layout (no mod.rs) is enforced by clippy, not by this checker.
+[policy.lints.clippy]
+mod_module_files = "deny"
+
+# The published language every context shares: the versioned operational
+# event, the stored event a cursor points at, and the digests, watermarks and
+# ids that journal, archive and query agree on.
+[shared_kernel]
+path = "src/shared_kernel"
+
+# Kernel dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/shared_kernel/event.rs", "src/shared_kernel/stored_event.rs"]
+subject = "utoipa"
+reason = "OperationalEventV2, its parts and StoredEvent derive ToSchema because they are the published language: one serde shape is the WAL, segment, Raft and snapshot bytes, the digest input and the OpenAPI wire (E1). A mirror DTO would triple about 40 types and clone on every append and replay, and any drift in field order or skip rules changes the digest. P2: approve them as the published language individually and pin the bytes with golden tests."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/shared_kernel/event.rs",
+  "src/shared_kernel/event_content_digest.rs",
+  "src/shared_kernel/single_signal_batch.rs",
+]
+subject = "anyhow"
+reason = "Event validation, digest decode and the single-signal check return anyhow errors whose text reaches HTTP 400 bodies and that tests match by substring, so converting them is not a move (E6). P2: a kernel error type (thiserror) with the same Display text, which the callers convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/shared_kernel/event.rs"]
+subject = "clap"
+reason = "SignalKind derives clap::ValueEnum so the CLI's --signal flags parse straight into it; the mapping keeps the derive (Q9). P2: approve it individually, or give the bin its own ValueEnum that maps onto SignalKind if the kernel must drop clap."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/shared_kernel/event.rs"]
+subject = "chrono::Utc::now"
+reason = "OperationalEventV2::for_project (and ::new through it) stamps occurred_at and observed_at with Utc::now; P1 moves the constructors without rewriting them (E7). P2: a for_project_at(now) constructor in the kernel and a Clock port the callers pass the time through."

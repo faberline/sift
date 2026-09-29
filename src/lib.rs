@@ -1,4 +1,3 @@
-// HANDWRITE-BEGIN gap="sift-service-core" tracker="1576" reason="Implement the versioned operational-event envelope, durable raw journal, idempotency, query, and replay core."
 //! Sift's service core for logs, metrics, and traces. The canonical per-signal
 //! WAL is fsynced before acknowledgement. Rebuildable indexes are never a
 //! second source of truth.
@@ -17,8 +16,10 @@ pub mod operator;
 pub mod projection;
 pub mod prometheus;
 pub mod proxy;
+mod shared_kernel;
 pub mod storage;
 
+pub use crate::shared_kernel::stored_event::StoredEvent;
 pub use event::{
     decode_event_json, AttributeValue, ContentBlobRef, EventEnvelope, GovernancePolicy,
     GovernancePolicySet, IncomingEvent, InstrumentationScope, MetricExemplar, MetricPoint,
@@ -47,41 +48,16 @@ use axum::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Duration, Utc};
 use metrics_prometheus::{Counter, Sample};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use service_auth::{Role, RoleMapPrincipal};
 use service_http::{DetailedErrorEnvelope as ErrorEnvelope, ProjectionMetadata};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt as _;
 use utoipa::{OpenApi, ToSchema};
 
-#[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
-pub struct StoredEvent {
-    pub cursor: u64,
-    /// Sift acceptance time. Exact event-id idempotency starts from this time.
-    pub acknowledged_at: String,
-    pub event: EventEnvelope,
-}
-
-#[derive(Deserialize)]
-struct StoredEventWire {
-    cursor: u64,
-    acknowledged_at: String,
-    event: IncomingEvent,
-}
-
-impl<'de> Deserialize<'de> for StoredEvent {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = StoredEventWire::deserialize(deserializer)?;
-        Ok(Self {
-            cursor: wire.cursor,
-            acknowledged_at: wire.acknowledged_at,
-            event: wire.event.into_inner(),
-        })
-    }
-}
+use crate::shared_kernel::event_content_digest::{decode_digest, xor_digest};
+use crate::shared_kernel::retention_boundary::retention_rejection_at;
+use crate::shared_kernel::single_signal_batch::ensure_single_signal;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 pub struct AppendResult {
@@ -194,26 +170,11 @@ fn xor_event_content_digest(accumulator: &mut [u8; 32], event: &EventEnvelope) -
     Ok(())
 }
 
-fn xor_digest(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
-    let mut combined = left;
-    for (slot, byte) in combined.iter_mut().zip(right) {
-        *slot ^= byte;
-    }
-    combined
-}
-
-fn decode_digest(value: &str) -> Result<[u8; 32]> {
-    hex::decode(value)
-        .context("decode Sift SHA-256 digest")?
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("Sift SHA-256 digest must be 32 bytes"))
-}
-
 struct CanonicalRecoveryReader<'a> {
     storage: &'a storage::RawStorage,
     segments: storage::RawStorageReader,
     wal: storage::SignalWalReader,
-    archived: storage::archive::ArchiveWatermarks,
+    archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     repair_segments: bool,
     segment_next: Option<StoredEvent>,
     wal_next: Option<StoredEvent>,
@@ -224,7 +185,7 @@ impl<'a> CanonicalRecoveryReader<'a> {
     fn open(
         storage: &'a storage::RawStorage,
         wal: &'a storage::SignalWal,
-        archived: storage::archive::ArchiveWatermarks,
+        archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
         after: u64,
         repair_segments: bool,
     ) -> Result<Self> {
@@ -337,7 +298,7 @@ fn rebuild_dedupe_index(
     storage: &storage::RawStorage,
     wal: &storage::SignalWal,
     dedupe: &storage::DedupeIndex,
-    archived: storage::archive::ArchiveWatermarks,
+    archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     expected_last_cursor: u64,
 ) -> Result<()> {
     dedupe.reset()?;
@@ -375,7 +336,7 @@ fn rebuild_dedupe_index(
 
     let remote_watermarks = remote
         .map(|_| archived)
-        .unwrap_or_else(storage::archive::ArchiveWatermarks::default);
+        .unwrap_or_else(crate::shared_kernel::archive_watermarks::ArchiveWatermarks::default);
     let mut local_reader = CanonicalRecoveryReader::open(storage, wal, archived, 0, false)?;
     loop {
         let local = local_reader.read_page()?;
@@ -1076,7 +1037,7 @@ impl DurableJournal {
 
     pub(crate) fn compact_archived_wal(
         &self,
-        watermarks: storage::archive::ArchiveWatermarks,
+        watermarks: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     ) -> Result<()> {
         self.wal.compact_through(watermarks)
     }
@@ -2796,17 +2757,6 @@ fn split_governed_batches(events: Vec<EventEnvelope>) -> Result<Vec<Vec<EventEnv
         chunks.push(batch);
     }
     Ok(chunks)
-}
-
-fn ensure_single_signal(events: &[EventEnvelope]) -> Result<()> {
-    let signal = events
-        .first()
-        .context("Sift batch must not be empty")?
-        .signal;
-    if events.iter().any(|event| event.signal != signal) {
-        bail!("Sift batch must contain exactly one signal");
-    }
-    Ok(())
 }
 
 pub struct ProjectionWorker {
@@ -5546,15 +5496,3 @@ pub fn openapi_json() -> Result<String> {
 pub(crate) fn retention_rejection(event: &EventEnvelope) -> Option<String> {
     retention_rejection_at(event, Utc::now())
 }
-
-fn retention_rejection_at(event: &EventEnvelope, decision_time: DateTime<Utc>) -> Option<String> {
-    let occurred = DateTime::parse_from_rfc3339(&event.occurred_at).ok()?;
-    let cutoff = decision_time - chrono::Duration::days(180);
-    (occurred.with_timezone(&Utc) < cutoff).then(|| {
-        format!(
-            "event `{}` occurred before Sift's 180-day retention boundary",
-            event.event_id
-        )
-    })
-}
-// HANDWRITE-END

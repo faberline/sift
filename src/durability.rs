@@ -20,8 +20,8 @@ use sha2::Digest;
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::{
-    storage::SegmentManifest, AppendResult, DurableJournal, EventEnvelope, EventQuery, SignalKind,
-    StoredEvent,
+    shared_kernel::stored_event::StoredEvent, storage::SegmentManifest, AppendResult,
+    DurableJournal, EventEnvelope, EventQuery, SignalKind,
 };
 
 const CONTROL_STATE_FILE: &str = "sift-control-state.json";
@@ -65,7 +65,7 @@ struct ArchiveCheckpointV1 {
     applied_index: u64,
     raw_cursor: u64,
     archive_snapshot_index: u64,
-    watermarks: crate::storage::archive::ArchiveWatermarks,
+    watermarks: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     manifest_uri: String,
     manifest_sha256: String,
     retention_generation: u64,
@@ -95,7 +95,7 @@ struct LocalCheckpointV1 {
     applied_index: u64,
     raw_cursor: u64,
     local_snapshot_index: u64,
-    watermarks: crate::storage::archive::ArchiveWatermarks,
+    watermarks: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     pending_retention: Option<RetentionFenceV1>,
 }
 

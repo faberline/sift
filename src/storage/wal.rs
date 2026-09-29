@@ -9,9 +9,9 @@ use std::{
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{SignalKind, StoredEvent};
+use crate::{shared_kernel::stored_event::StoredEvent, SignalKind};
 
-use super::archive::ArchiveWatermarks;
+use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 pub struct SignalWal {
     logs: WalFile,

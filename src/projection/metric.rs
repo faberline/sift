@@ -20,7 +20,8 @@ use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
 use crate::{
-    AttributeValue, MetricExemplar, MetricPoint, MetricTemporality, SignalKind, StoredEvent,
+    shared_kernel::stored_event::StoredEvent, AttributeValue, MetricExemplar, MetricPoint,
+    MetricTemporality, SignalKind,
 };
 
 use super::{model::ProjectionDescriptor, runtime::Projection};

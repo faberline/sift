@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::StoredEvent;
+use crate::shared_kernel::stored_event::StoredEvent;
 
 const SHARD_COUNT: usize = 4096;
 const ENTRY_BYTES: usize = 48;
