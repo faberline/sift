@@ -4,8 +4,15 @@
 fn sift_keeps_tools_while_service_mcp_owns_transports_and_security() {
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
         .expect("read Sift manifest");
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mcp.rs"))
-        .expect("read Sift MCP adapter");
+    let source = ["sift_mcp_server.rs", "mcp_transport.rs"]
+        .map(|file| {
+            std::fs::read_to_string(format!(
+                "{}/src/query/interfaces/mcp/{file}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("read Sift MCP adapter")
+        })
+        .concat();
 
     assert!(manifest.contains("service-mcp ="));
     assert!(source.contains("impl service_mcp::McpApplication for SiftMcpServer"));

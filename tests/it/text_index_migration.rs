@@ -46,7 +46,7 @@ fn sift_has_no_production_dependency_on_an_app_index() {
         .expect("production manifest section");
     let source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/projection/logging.rs"
+        "/src/projection/infrastructure/logging_projection.rs"
     ))
     .expect("read logging projection source");
 

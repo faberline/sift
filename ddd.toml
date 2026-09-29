@@ -1,0 +1,966 @@
+# Sift's bounded contexts and layers, checked by the workspace's
+# rust-arch contract (scripts/meta/rust_arch_contract.py). The [policy] table
+# is copied verbatim from the canonical policy.toml; everything after it is
+# Sift's own.
+schema = 1
+
+# Enforced since the DDD split's first phase (P1) finished: the check fails on
+# any error that no [[exceptions]] entry below records. The ratchet never lets
+# this go back to false.
+[migration]
+enforce = true
+
+[policy]
+version = 1
+size_warn = 400
+size_error = 1000
+root_md = [
+  "README.md",
+  "CONTRIBUTING.md",
+  "LICENSE.md",
+  "CHANGELOG.md",
+  "SECURITY.md",
+  "CODE_OF_CONDUCT.md",
+  "CLAUDE.md",
+  "AGENTS.md",
+  # Temporary: the current project docs contract requires these at the root.
+  "STATUS.md",
+  "ROADMAP.md",
+]
+docs_required = [
+  "docs/README.md",
+  "docs/architecture.md",
+  "docs/glossary.md",
+  "docs/domain/",
+  "docs/adr/",
+  "docs/operations/",
+]
+layers = ["domain", "application", "infrastructure", "interfaces"]
+# The layer held to the [policy.domain] purity rules and kept free of other contexts.
+domain_layer = "domain"
+# Layers another context may use. A context without any of them exposes its whole public API.
+public_layers = ["application"]
+# <ctx>/domain/events(.rs|/) is the only domain module other contexts may use.
+domain_events = "events"
+# A tests/<name>.rs binary may stand alone only when it is the crate's single test
+# target, contains one of these markers, or its leading //! block carries
+# `//! isolation: <reason>`. Everything else lives in tests/it/.
+test_isolation_markers = ["set_var(", "remove_var(", "#[global_allocator]"]
+# tests/<dir>/ names holding .rs data (fixtures, trybuild cases), not test targets.
+test_data_dirs = ["fixtures", "compile_fail", "ui"]
+# false: one crate may hold several contexts (B3/B4 still guard each boundary).
+# true: B1 requires every crate to belong to exactly one context.
+one_context_per_crate = false
+
+# Layers each layer may use inside one context. The shared kernel is usable by
+# every layer; assembly code (lib.rs, main.rs, src/bin) is unrestricted. A
+# multi-file binary is src/bin/<name>/main.rs plus sibling modules: B6 keeps
+# the entry file thin and does not apply to those modules.
+[policy.layer_deps]
+domain = []
+application = ["domain"]
+infrastructure = ["domain"]
+interfaces = ["application"]
+
+[policy.domain]
+# Applies to every domain layer, and to the shared kernel when shared_kernel_pure.
+allowed_crates = [
+  "std",
+  "core",
+  "alloc",
+  "thiserror",
+  "serde",
+  "serde_json",
+  "chrono",
+  "time",
+  "uuid",
+  "sha2",
+  "hex",
+  "regex",
+  "bytes",
+]
+denied_paths = [
+  "std::fs",
+  "std::net",
+  "std::process",
+  "std::env",
+  "std::os",
+  "std::io::stdin",
+  "std::io::stdout",
+  "std::io::stderr",
+  "std::thread::spawn",
+  "std::thread::sleep",
+  "std::time::SystemTime::now",
+  "std::time::Instant::now",
+  "chrono::Utc::now",
+  "chrono::Local::now",
+  "chrono::offset::Utc::now",
+  "chrono::offset::Local::now",
+  "time::OffsetDateTime::now_utc",
+  "time::OffsetDateTime::now_local",
+  "time::Instant::now",
+  "uuid::Uuid::now_v7",
+  "uuid::Uuid::new_v4",
+]
+denied_macros = ["println", "print", "eprintln", "eprint", "dbg"]
+shared_kernel_pure = true
+
+[policy.naming]
+crates_dir = "crates"
+domain_crate = "{repo}-{context}-domain"
+context_crate = "{repo}-{context}"
+shared_kernel_crate = "{repo}-shared-kernel"
+
+# Module layout (no mod.rs) is enforced by clippy, not by this checker.
+[policy.lints.clippy]
+mod_module_files = "deny"
+
+# The published language every context shares: the versioned operational
+# event, the stored event a cursor points at, and the digests, watermarks and
+# ids that journal, archive and query agree on.
+[shared_kernel]
+path = "src/shared_kernel"
+
+# Kernel dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/shared_kernel/event.rs", "src/shared_kernel/stored_event.rs"]
+subject = "utoipa"
+reason = "OperationalEventV2, its parts and StoredEvent derive ToSchema because they are the published language: one serde shape is the WAL, segment, Raft and snapshot bytes, the digest input and the OpenAPI wire (E1). A mirror DTO would triple about 40 types and clone on every append and replay, and any drift in field order or skip rules changes the digest. P2: approve them as the published language individually and pin the bytes with golden tests."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/shared_kernel/event.rs",
+  "src/shared_kernel/event_content_digest.rs",
+  "src/shared_kernel/single_signal_batch.rs",
+]
+subject = "anyhow"
+reason = "Event validation, digest decode and the single-signal check return anyhow errors whose text reaches HTTP 400 bodies and that tests match by substring, so converting them is not a move (E6). P2: a kernel error type (thiserror) with the same Display text, which the callers convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/shared_kernel/event.rs"]
+subject = "clap"
+reason = "SignalKind derives clap::ValueEnum so the CLI's --signal flags parse straight into it; the mapping keeps the derive (Q9). P2: approve it individually, or give the bin its own ValueEnum that maps onto SignalKind if the kernel must drop clap."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/shared_kernel/event.rs"]
+subject = "chrono::Utc::now"
+reason = "OperationalEventV2::for_project (and ::new through it) stamps occurred_at and observed_at with Utc::now; P1 moves the constructors without rewriting them (E7). P2: a for_project_at(now) constructor in the kernel and a Clock port the callers pass the time through."
+
+# The assembly root: the service state every context's handlers share, the
+# readiness and metrics hooks, and the HTTP router, API error and OpenAPI
+# document. Like lib.rs and the bin it wires the contexts together, so the
+# layer and context rules do not apply to it.
+[assembly]
+modules = ["src/app"]
+
+# The collector: the agent that reads service logs from a file, stdin or a
+# node's CRI log root and delivers them to Sift over OTLP. It reads nothing
+# of Sift's but the shared kernel.
+[[contexts]]
+name = "collector"
+depends_on = []
+
+[contexts.layers]
+domain = "src/collector/domain"
+application = "src/collector/application"
+infrastructure = "src/collector/infrastructure"
+
+# Collector dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/collector/domain/config.rs",
+  "src/collector/domain/cri.rs",
+  "src/collector/domain/service_log.rs",
+]
+subject = "anyhow"
+reason = "CollectorConfig::validate, parse_cri_frame, parse_workload_path and the service-log validators return anyhow errors whose text is the CLI's error for a bad flag and the error a quarantine entry records for a rejected line, so converting them is not a move (E6). P2: a collector domain error (thiserror) with the same Display text, which the runtime and the bin convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/collector/domain/service_log.rs"]
+subject = "service_observability"
+reason = "validate checks a StructuredServiceLogV1 against its schema id and the core crate's bounds (MAX_EVENT_BYTES, MAX_ATTRIBUTES and the rest): the log shape is the core library's published contract, not Sift's (E14). P2: approve service_observability in the domain allowlist, or wrap the log in a collector newtype if review wants the domain free of it."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/collector/application/runtime.rs"]
+subject = "application->infrastructure"
+reason = "run opens its source with open_source and delivers through CollectorClient, SiftRecordDecoder maps each record with decode_service_log_enriched, and the truncated-file test seeds a CollectorCheckpoint; P1 moves runtime.rs whole. P2: the composition root opens the source and builds the client and passes them to run as service_collector's CollectorSource and BatchSink, the decoder takes the mapper injected, and the test moves with that wiring."
+
+# Projections: the logging, metric and trace read models Sift builds from the
+# journal and answers queries from. Besides the shared kernel they read the
+# journal they are built from.
+[[contexts]]
+name = "projection"
+depends_on = ["journal"]
+
+[contexts.layers]
+domain = "src/projection/domain"
+application = "src/projection/application"
+infrastructure = "src/projection/infrastructure"
+interfaces = "src/projection/interfaces"
+
+# Projection dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/projection/domain/log.rs",
+  "src/projection/domain/metric.rs",
+  "src/projection/domain/metric_aggregation.rs",
+  "src/projection/domain/metric_memory_size.rs",
+  "src/projection/domain/metric_series.rs",
+  "src/projection/domain/trace.rs",
+]
+subject = "anyhow"
+reason = "The query validators (LogQuery, TraceQuery, MetricQuery), histogram validation and merging, series identity, chunk and size checks and the rollups return anyhow errors whose text is the API's invalid_query message and the error apply and restore report, so converting them is not a move (E6). P2: a projection domain error (thiserror) with the same Display text, which the runtime and the API convert."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/projection/domain/log.rs",
+  "src/projection/domain/metric.rs",
+  "src/projection/domain/trace.rs",
+]
+subject = "utoipa"
+reason = "The *V1 records, the queries and the pages derive ToSchema because they are the API's OpenAPI wire as well as the snapshot bytes and the semantic digest's input; a mirror DTO would triple them and risk the digest drifting (E1). P2: approve utoipa for the *V1 projection records in the domain allowlist, with golden-bytes tests."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/projection/application/projection_runtime.rs"]
+subject = "application->infrastructure"
+reason = "ProjectionRuntime::open builds LoggingProjection, MetricProjection and TraceProjection, registers them with service_projection and reads the journal through JournalProjectionSource, and its fields hold handles to the three; P1 moves runtime.rs's runtime whole. P2: the composition root builds the projections and the journal source and passes them in, and the runtime holds them through a domain port."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/projection/infrastructure/logging_projection.rs",
+  "src/projection/infrastructure/metric_projection_apply.rs",
+  "src/projection/infrastructure/service_projection_adapter.rs",
+  "src/projection/infrastructure/trace_projection.rs",
+]
+subject = "infrastructure->application"
+reason = "The three projections implement the Projection trait, service_projection_adapter binds that trait to service_projection's, and LoggingProjection maps each event with normalize; §2.7 puts the trait and the normalizer in application, and P1 follows it. P2: move the Projection trait into the domain as a port and log_record_normalizer with it, so infrastructure depends only on the domain."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/projection/application/projection_runtime.rs",
+  "src/projection/infrastructure/service_projection_adapter.rs",
+  "src/projection/interfaces/projection_worker.rs",
+]
+subject = "journal.infrastructure"
+reason = "ProjectionRuntime::open, ProjectionWorker and JournalProjectionSource hold an Arc<DurableJournal>, and JournalProjectionSource reads it through JournalProjectionReadSession; §2 keeps DurableJournal as the journal's infrastructure facade under its old name, and P1 moves the projections' side as-is. P2: journal's application exposes a projection-source read use case (read_projection_source) that the projections call, and the composition root passes it in instead of the DurableJournal."
+
+# Queries: the versioned query API over logs, metrics and traces, its async
+# jobs, the Prometheus-compatible endpoints, the query role and the
+# read-only MCP tools. It reads the projections it answers from, the journal
+# for the services it lists, the archive for cold queries, access for the
+# project checks its handlers run, and operations for the router that forwards
+# the query role's other routes to the store role.
+[[contexts]]
+name = "query"
+depends_on = ["projection", "journal", "archive", "access", "operations"]
+
+[contexts.layers]
+domain = "src/query/domain"
+application = "src/query/application"
+infrastructure = "src/query/infrastructure"
+interfaces = "src/query/interfaces"
+
+# Query dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/query/domain/filter_evaluator.rs",
+  "src/query/domain/filter_expression.rs",
+  "src/query/domain/promql.rs",
+  "src/query/domain/promql_evaluator.rs",
+  "src/query/domain/query_cursor.rs",
+  "src/query/domain/query_job.rs",
+  "src/query/domain/query_time.rs",
+]
+subject = "anyhow"
+reason = "QueryExpressionV1::validate, validate_field, evaluate_filter, parse_promql, split_matchers, parse_decimal_seconds_nanos and validate_id return anyhow errors whose text is the API's invalid_query and Prometheus bad_data message that tests match by substring, and the cursor, time and PromQL budget helpers spell Result<_, ApiError> through anyhow::Result; converting them is not a move (E6). P2: a query domain error (thiserror) with the same Display text, which the handlers convert, and std Result for the ApiError helpers."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/query/domain/query_cursor.rs"]
+subject = "base64"
+reason = "encode_query_cursor and decode_query_cursor write the opaque page cursor as base64url (URL_SAFE_NO_PAD) JSON; the cursor text is the API's wire and clients hand it back, so P1 moves the codec as-is. P2: the domain keeps the cursor as a typed value and an interfaces codec writes and reads the base64url text, or base64 is approved in the domain allowlist."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/query/domain/query_time.rs"]
+subject = "chrono::Utc::now"
+reason = "cold_query_requested compares the query's start with Utc::now minus 30 days to decide whether the archive is read; P1 moves it without rewriting it (E7). P2: it takes now as an argument and the application reads it from a Clock port."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/domain/query_job.rs",
+  "src/query/domain/query_time.rs",
+]
+subject = "domain->interfaces"
+reason = "QueryJobV1 stores the job's QueryRequestV1 and its Option<QueryResponseV1>, and cold_query_requested reads a QueryRequestV1's time range; §2 puts QueryRequestV1 and QueryResponseV1 in interfaces/http as the API's wire schemas and wins over layer_deps here. P2: a domain query and result model the V1 wire types map to and from at the HTTP edge, or QueryRequestV1 and QueryResponseV1 approved as the query's published language in the domain."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/application/archive_query_status.rs",
+  "src/query/application/execute_query.rs",
+]
+subject = "application->interfaces"
+reason = "execute_query_v1 takes a QueryRequestV1 and matches its QuerySignalV1 and MetricFunctionV1, and it and apply_archive_query_status build a QueryResponseV1; §2 puts those wire schemas in interfaces/http and wins over layer_deps here. P2: the use case takes and returns the domain query and result model, and the handler maps the V1 wire types onto it."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/infrastructure/file_query_job_store.rs",
+  "src/query/infrastructure/sift_api_client.rs",
+  "src/query/infrastructure/store_query_client.rs",
+]
+subject = "infrastructure->interfaces"
+reason = "QueryJobStore::create takes a QueryRequestV1 and succeed (and its JobState impl) a QueryResponseV1, forward_query_to_store and decode_store_query_response send a QueryRequestV1 and decode a QueryResponseV1, and SiftApiClient sends QueryRequestV1 (checking its QueryModeV1), CorrelationRequestV1 and LogTailRequestV1 and decodes QueryResponseV1; §2 puts those wire schemas in interfaces/http and wins over layer_deps here. P2: the store and the store client hold the domain query and result model, and the API client's wire types become its own or the published language."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/interfaces/http/correlate_v1.rs",
+  "src/query/interfaces/http/phase_one.rs",
+  "src/query/interfaces/http/prom_query_params.rs",
+  "src/query/interfaces/http/prometheus_query.rs",
+  "src/query/interfaces/http/query_request_v1.rs",
+  "src/query/interfaces/http/query_role_router.rs",
+  "src/query/interfaces/http/query_v1.rs",
+]
+subject = "interfaces->domain"
+reason = "The handlers and wire types P1 moves whole read the domain directly: QueryRequestV1 and the phase-one requests embed QueryExpressionV1 and validate with validate_field and MAX_FILTER_ARGUMENTS, correlate_v1 parses times with parse_query_time_nanos, query_v1 encodes cursors with encode_query_cursor and reads QueryJobV1 as query_role_router does, prom_query_params parses with parse_decimal_seconds_nanos, and the Prometheus handlers run parse_promql, PromFunction and the promql_evaluator helpers (PROM_LOOKBACK_NANOS, PROM_MAX_RANGE_EVALUATIONS, prom_latest_values, prom_rate_values and the rest) inline. P2: the instant and range evaluation, correlation, tail and job lookup move behind application use cases the handlers call, and the V1 wire types map QueryExpressionV1 at the edge or it is approved as published language."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/interfaces/http/query_role_router.rs",
+  "src/query/interfaces/mcp/mcp_transport.rs",
+  "src/query/interfaces/mcp/sift_mcp_server.rs",
+]
+subject = "interfaces->infrastructure"
+reason = "query_role_query_v1 calls forward_query_to_store and decode_store_query_response, and serve_stdio and http_router build the SiftApiClient that SiftMcpServer holds and calls; P1 moves the handlers and the MCP server whole. P2: application ports for forwarding a query to the store and for reaching the Sift API, with the composition root injecting store_query_client and SiftApiClient behind them."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/domain/promql_evaluator.rs"]
+subject = "projection.domain"
+reason = "ensure_complete_prom_metric_page, prom_series_labels, prom_latest_values and prom_rate_values evaluate over projection's MetricPage, MetricSeriesResultV1 and MetricPointV1 and read MAX_METRIC_QUERY_LIMIT; P1 moves the evaluator as-is. P2: the evaluator works on query-owned series and points that the application maps from projection's published query results."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/query/application/execute_query.rs",
+  "src/query/application/prom_query.rs",
+  "src/query/interfaces/http/correlate_v1.rs",
+  "src/query/interfaces/http/get_trace.rs",
+  "src/query/interfaces/http/phase_one.rs",
+  "src/query/interfaces/http/prometheus_query.rs",
+]
+subject = "projection.domain"
+reason = "Queries are answered by the projections: execute_query_v1, prom_metric_query and correlate_v1 build LogQuery, MetricQuery and TraceQuery with the MAX_*_QUERY_LIMIT bounds, catch up on PROJECTION_LOGGING_STORE, PROJECTION_METRIC_STORE and PROJECTION_TRACE_STORE, and the responses carry LogRecordV1, MetricSeriesResultV1 and TraceResultV1; P1 moves them as-is. P2: projection's application exposes the read use cases with the queries, pages and *V1 records as its published language, and query calls through them."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/application/execute_query.rs"]
+subject = "projection.infrastructure"
+reason = "execute_query_v1 replays the archive into fresh LoggingProjection, MetricProjection and TraceProjection instances to answer a cold query; P1 moves it whole. P2: projection's application offers an archive-replay read use case, and the cold path calls it instead of building the projections."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/interfaces/http/list_services_v1.rs"]
+subject = "journal.domain"
+reason = "list_services_v1 scans recent events through ServiceState's journal with an EventQuery; P1 moves the handler whole. P2: journal's application publishes query_events with EventQuery as its input, and the handler calls it through a query use case, or the listing reads a projection instead."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/interfaces/http/query_role_router.rs"]
+subject = "operations.interfaces"
+reason = "query_role_router falls back to query_router, the gateway proxy's reverse-proxy router to the store role, for every route the query role does not answer itself; P1 moves proxy.rs to operations' interfaces and the query role router keeps calling it. P2: the composition root builds the store-forwarding router and passes it to query_role_router, so query no longer names operations and drops it from depends_on."
+
+# Ingest: telemetry admitted within bounded limits, decoded from OTLP, Cloud
+# Logging structured JSON and Prometheus remote write into operational
+# events, governed, and appended through the group-commit queue to the
+# journal. Besides the shared kernel it appends to the journal, runs access's
+# project checks, and runs on the app's ServiceState and ApiError, which are
+# assembly code the context rules do not cover.
+[[contexts]]
+name = "ingest"
+depends_on = ["journal", "access"]
+
+[contexts.layers]
+domain = "src/ingest/domain"
+application = "src/ingest/application"
+infrastructure = "src/ingest/infrastructure"
+interfaces = "src/ingest/interfaces"
+
+# Ingest dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/batch.rs"]
+subject = "src/ingest/batch"
+reason = "Compat facade: sift::ingest::batch was a public module, and batch.rs now only re-exports the event batch schemas, decode_item and event_id_hint from interfaces/http/batch.rs so the public path keeps compiling. P2: drop the facade once callers use the ingest root re-exports or the layer paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/gcp.rs"]
+subject = "src/ingest/gcp"
+reason = "Compat facade: sift::ingest::gcp was a public module, and gcp.rs now only re-exports looks_like_structured_log and normalize_structured_log from infrastructure/gcp.rs so the public path keeps compiling. P2: drop the facade once callers use the layer path or an ingest root re-export."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/limits.rs"]
+subject = "src/ingest/limits"
+reason = "Compat facade: sift::ingest::limits was a public module, and limits.rs now only re-exports AdmissionController, AdmissionPermit, AdmissionError and IngestLimits from their layers so the public path keeps compiling. P2: drop the facade; the ingest root already re-exports all four."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/otlp.rs"]
+subject = "src/ingest/otlp"
+reason = "Compat facade: sift::ingest::otlp was a public module, and otlp.rs now only re-exports the OTLP codec from interfaces/otlp/otlp_codec.rs and transport_otlp's proto (as wire), OtlpMediaType and OtlpSignal; the bin's acceptance payloads and tests/it/acceptance_payload_cli.rs still name sift::ingest::otlp::wire. P2: those callers use transport_otlp::proto directly and the facade goes."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/ingest/domain/governance_policy.rs",
+  "src/ingest/domain/ingest_limits.rs",
+  "src/ingest/domain/raft_batch_splitter.rs",
+]
+subject = "anyhow"
+reason = "GovernancePolicy's and GovernancePolicySet's validate, GovernancePolicySet::govern, IngestLimits::validate and split_governed_batches return anyhow errors whose text is the startup error for a bad policy file or limit and the append failure the API reports, so converting them is not a move (E6). P2: an ingest domain error (thiserror) with the same Display text, which the application and the bin convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/ingest/domain/admission_error.rs"]
+subject = "axum"
+reason = "AdmissionError carries the axum StatusCode each refusal answers with (400, 413, 429, 503), which the admission controller and the body decoder set and ApiError::from_admission copies into the response; P1 moves it as-is. P2: AdmissionError holds a domain refusal kind and the interfaces map the kind to an HTTP status and a gRPC code."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/ingest/application/append_events.rs"]
+subject = "application->infrastructure"
+reason = "ServiceState::append_events wraps each governed chunk in an IngestBatchRequest and submits it to the group-commit queue that ingest_batch_queue starts on IngestBatchCoordinator; P1 moves the use case whole. P2: an application port for submitting a batch, with the composition root injecting the coordinator behind it."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/ingest/interfaces/http/batch.rs"]
+subject = "interfaces->infrastructure"
+reason = "decode_item routes a Cloud Logging structured entry through gcp::looks_like_structured_log and gcp::normalize_structured_log before the plain event path; P1 moves the batch schemas and decode_item whole. P2: an application use case that decodes a batch item, with the GCP normalizer injected behind a port."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/ingest/interfaces/http/prometheus_remote_write.rs",
+  "src/ingest/interfaces/http/request_body_decoder.rs",
+  "src/ingest/interfaces/otlp/json_logs_decoder.rs",
+  "src/ingest/interfaces/otlp/json_metrics_decoder.rs",
+  "src/ingest/interfaces/otlp/json_traces_decoder.rs",
+  "src/ingest/interfaces/otlp/proto_logs_decoder.rs",
+  "src/ingest/interfaces/otlp/proto_metrics_decoder.rs",
+  "src/ingest/interfaces/otlp/proto_traces_decoder.rs",
+]
+subject = "interfaces->domain"
+reason = "The remote-write handler and AdmissionController::decode_body build AdmissionError refusals, and the OTLP decoders derive each event's id with stable_id; P1 moves the handler and the decoders whole. P2: the application re-exports AdmissionError and an event-id service the decoders call, or decoding moves behind an application use case, so the interfaces reach the domain only through the application."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/ingest/application/append_events.rs",
+  "src/ingest/domain/raft_batch_splitter.rs",
+  "src/ingest/infrastructure/ingest_batch_coordinator.rs",
+]
+subject = "journal.domain"
+reason = "Ingest sizes and commits its batches in the journal's terms: split_governed_batches and the batch coordinator bound a batch by SiftCommandV1::append_events_size_bound, RAFT_BATCH_MAX_ITEMS and RAFT_BATCH_MAX_BYTES, ingest_batch_queue tunes the group-commit queue with RAFT_BATCH_MAX_DELAY and the rest, and the queue and the append use cases return AppendResult; P1 moves them as-is. P2: journal's application publishes the batch limits, the command size bound and AppendResult, ingest reads them there, and the splitter in ingest's domain takes the limits and the bound as arguments."
+
+# The journal: Sift's durable, replicated event log. It accepts governed
+# batches through Raft, deduplicates them inside the idempotency window,
+# recovers from the WAL and sealed segments, adopts archive checkpoints and
+# retention, and serves reads to the projections and queries. It opens its
+# data root through the node. Besides the shared kernel and the node it
+# reaches the archive and ingest's governance, as the exceptions below say.
+[[contexts]]
+name = "journal"
+depends_on = ["node"]
+
+[contexts.layers]
+domain = "src/journal/domain"
+application = "src/journal/application"
+infrastructure = "src/journal/infrastructure"
+interfaces = "src/journal/interfaces"
+
+# Journal dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/journal/domain/append_policy.rs",
+  "src/journal/domain/event_content_digest.rs",
+  "src/journal/domain/idempotency_window.rs",
+  "src/journal/domain/recent_cursor.rs",
+  "src/journal/domain/shard_route.rs",
+]
+subject = "anyhow"
+reason = "validate_events, append_decision_time, validate_retention_fence, merge_pending_retention, xor_event_content_digest, acknowledged_generation, acknowledged_nanos, event_is_active_at, RecentCursor::from_stored, recent_cursor_map and validate_epochs return anyhow errors whose text is the append failure the API reports and the startup, apply and recovery errors a bad batch, fence, receipt or epoch history raises, so converting them is not a move (E6). P2: a journal domain error (thiserror) with the same Display text, which the application and the state machine convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/journal/domain/append_result.rs"]
+subject = "utoipa"
+reason = "AppendResult derives ToSchema and is re-exported as sift::AppendResult; no OpenAPI path registers it today, but dropping a derive from a public type is not a move (E1). P2: drop the derive if nothing registers the schema, or approve AppendResult as published language in the domain allowlist."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/journal/domain/sift_command.rs"]
+subject = "chrono::Utc::now"
+reason = "SiftCommandV1::append_events_now stamps acknowledged_at with Utc::now for the diagnostics encoders; P1 moves it without rewriting it (E7). P2: the diagnostics take the time from a Clock port and pass it to append_events_at, and append_events_now goes."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/journal/application/adopt_archive.rs",
+  "src/journal/application/append_durable_batch.rs",
+  "src/journal/application/apply_retention_expiration.rs",
+  "src/journal/application/checkpoint_identity.rs",
+  "src/journal/application/commit_append_batch.rs",
+  "src/journal/application/dedupe_window.rs",
+  "src/journal/application/query_events.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/application/restore_journal.rs",
+]
+subject = "application->infrastructure"
+reason = "§2 splits durability.rs and lib.rs's DurableJournal so the use cases (recover, append_durable_batch, the dedupe window upkeep and rebuild, adopt_archive_*, retention expiration, checkpoint_identity, restore and query_events) stay impl DurableJournal blocks over the infrastructure facade, reading its RawStorage, SignalWal, DedupeIndex, JournalHead file and CanonicalRecoveryReader, and CommitContext holds the DurableJournal and the SiftStateMachine; §2 wins over layer_deps here. P2: the use cases become application services over domain ports (event store, dedupe index, recovery reader, command committer) that durable_journal, the storage and the Raft state machine implement."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/journal/infrastructure/raft/command_committer.rs"]
+subject = "infrastructure->application"
+reason = "command_committer is an impl CommitContext block whose commit_command proposes a SiftCommandV1 through Raft or applies it locally; §2 puts CommitContext in application with commit_append_batch and command_committer in infrastructure, and wins over layer_deps here. P2: a command-committer port in the domain that the Raft infrastructure implements and CommitContext holds."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/journal/interfaces/journal_metrics.rs"]
+subject = "interfaces->infrastructure"
+reason = "metrics_text is an impl DurableJournal block that renders the accepted, duplicate and fsync counters and the resident-event gauge; §2 puts journal_metrics in interfaces, and P1 moves it as-is. P2: the application exposes a journal metrics snapshot, and the interface renders it."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/commit_append_batch.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/infrastructure/durable_journal.rs",
+]
+subject = "ingest.domain"
+reason = "DurableJournal holds the GovernancePolicySet it governs every appended event with (open reads it from the environment and recover validates it), and append_governed_batch reserves local capacity with ingest's storage_reservation; declaring ingest in depends_on would close a journal-ingest cycle, since ingest appends to the journal. P2: ingest governs events before the append, or governance reaches the journal through a domain port, and storage_reservation moves to the journal or node, which breaks the cycle."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/adopt_archive.rs",
+  "src/journal/application/append_durable_batch.rs",
+  "src/journal/application/apply_retention_expiration.rs",
+  "src/journal/application/dedupe_window.rs",
+  "src/journal/application/query_events.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/infrastructure/blob_reference_scan.rs",
+  "src/journal/infrastructure/journal_projection_read_session.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
+  "src/journal/infrastructure/raft/local_checkpoint.rs",
+  "src/journal/infrastructure/raft/raft_state_machine_impl.rs",
+  "src/journal/infrastructure/raft/sift_state_machine.rs",
+  "src/journal/infrastructure/raft/sift_state_machine_checkpoints.rs",
+]
+subject = "archive.application"
+reason = "The journal reads the archive's committed state throughout: recovery, append, the dedupe window, retention expiration, query_events, the blob reference scan and the state machine read committed_watermarks, committed_status, local_committed_status and remote_retained_state; recovery reconciles retention (reconcile_committed_retention) and resumes local blob GC (resume_local_blob_gc_batch, finish_local_blob_gc); the dedupe window replays archived receipts (replay_recent_committed_events, replay_recent_committed_receipts); query_events and the projection read session read archived events (read_committed_events_after, CommittedEventReader); and the Raft state machine archives locally, evicts, expires, restores and adopts archive checkpoints (archive_journal_local, evict_committed_cold_segments_at, expire_committed_events_at, restore_gcs, ArchiveReceipt, ExpirationReceipt). declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: an archive port in the journal's domain (committed watermarks and status, archived-event reader, checkpoint adoption) that the archive implements, which breaks the cycle."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/adopt_archive.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
+]
+subject = "archive.infrastructure"
+reason = "Recovery and the archive-checkpoint adoption and install run the archive's control-record steps directly: adopt_verified_archive_receipt, cleanup_orphan_spills, reconcile_staged_archive_gc, install_archive_gc_plan and withhold_archive_gc_plan; declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: the same archive port exposes these steps from the archive's application, and the journal stops reaching its infrastructure."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/restore_journal.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
+]
+subject = "archive.domain"
+reason = "Restore and the Raft archive-checkpoint install hold the ArchiveManifest they adopt and check it with validate_archive_manifest; declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: the archive port validates and adopts the manifest, or ArchiveManifest becomes shared kernel as the journal-archive published language."
+
+# The archive: Sift's cold tier. It uploads the journal's sealed segments,
+# blobs and dedupe receipts to GCS or a local archive under a verified
+# manifest, evicts archived segments from the hot tier, expires events past
+# retention, garbage-collects blobs once every voter has checkpointed, restores
+# an empty node from the archive, and replays archived events to cold queries.
+# Its workers run the archive and lifecycle ticks. Besides the shared kernel
+# it reads the journal it archives and restores into the node's data root.
+[[contexts]]
+name = "archive"
+depends_on = ["journal", "node"]
+
+[contexts.layers]
+domain = "src/archive/domain"
+application = "src/archive/application"
+infrastructure = "src/archive/infrastructure"
+interfaces = "src/archive/interfaces"
+
+# Archive dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/archive/domain/archive_event_time.rs",
+  "src/archive/domain/archive_manifest_validator.rs",
+  "src/archive/domain/blob_hash_set.rs",
+  "src/archive/domain/event_set_digest.rs",
+]
+subject = "anyhow"
+reason = "validate_archive_manifest, validate_dedupe_receipt, parse_optional_archive_time, event_time_unix_nano, acknowledgement_time_unix_nano, acknowledgement_time_bounds, decode_event_id_digest and decode_event_content_digest return anyhow errors whose text is the restore, checkpoint-install and replay failure an invalid manifest, receipt, timestamp or digest raises, and BlobHashSet's insert_hash and contains_hash return anyhow::Result because SpillCatalog's implementation reads spill files; converting them is not a move (E6). P2: an archive domain error (thiserror) with the same Display text, which the application converts, and BlobHashSet takes an associated error type."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/archive/domain/archive_manifest.rs",
+  "src/archive/domain/archive_manifest_validator.rs",
+]
+subject = "storage_segment"
+reason = "ArchiveManifest stores catalog_root and gc_plan_root as storage_segment::CatalogRoot, the serialized manifest's own field type, and validate_archive_manifest checks page_bytes_limit against storage_segment::DEFAULT_CATALOG_PAGE_BYTES; the manifest JSON is the archive's format in GCS and on disk, so P1 moves it as-is. P2: approve CatalogRoot as published language in the domain allowlist, or the domain holds its own catalog-root value that the infrastructure maps to and from CatalogRoot, with the page limit passed in."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/archive/domain/archive_manifest_validator.rs"]
+subject = "service_backup"
+reason = "validate_archive_manifest parses each gc_object_uris entry with service_backup::GcsSink::from_exact_uri, the parser the upload uses; P1 moves it as-is. P2: the domain checks the gs:// URI shape itself, and the application runs the GcsSink parse after the domain validation."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/archive/application/archive_journal_local.rs",
+  "src/archive/application/archive_journal_to_gcs.rs",
+  "src/archive/application/archive_status_queries.rs",
+  "src/archive/application/committed_event_reader.rs",
+  "src/archive/application/evict_cold_segments.rs",
+  "src/archive/application/expire_committed_events.rs",
+  "src/archive/application/finalize_archive_gc.rs",
+  "src/archive/application/inspect_archive_catalog.rs",
+  "src/archive/application/reconcile_committed_retention.rs",
+  "src/archive/application/replay_committed_events.rs",
+  "src/archive/application/replay_recent_committed.rs",
+  "src/archive/application/restore_gcs.rs",
+  "src/archive/application/restore_into_empty.rs",
+  "src/archive/application/resume_local_blob_gc.rs",
+  "src/archive/application/retention_catalog_ops.rs",
+  "src/archive/application/retention_due.rs",
+  "src/archive/application/retention_manifest_commit.rs",
+  "src/archive/application/run_lifecycle_attempt.rs",
+  "src/archive/application/upload_archive_snapshot.rs",
+]
+subject = "application->infrastructure"
+reason = "§2 splits storage/archive.rs into use cases over the archive's control records and codecs: the upload, eviction, expiration, GC, restore, replay, retention and status use cases read and write ArchiveCommitState (read_commit_state, record_archive_commit), ArchiveUploadIntent, ArchiveGcPending, LocalBlobGcPending, LocalSegmentCommitState, RestoreState and the local blob live index; walk the catalog through SpillCatalog, load_archive_catalog and the GC plan builder; fetch the verified manifest and cache segments; and encode, decode and verify segments through SiftParquetCodec, ArchiveSignalStream and the integrity checks, with the control paths and private_fs_mode for the files they create. §2 wins over layer_deps here. P2: domain ports (commit store, upload-intent store, GC-plan store, catalog, manifest fetcher, segment codec) that these infrastructure modules implement, and the use cases take them."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/archive/infrastructure/archive_commit_state.rs",
+  "src/archive/infrastructure/archive_gc_pending_store.rs",
+  "src/archive/infrastructure/archive_upload_intent.rs",
+  "src/archive/infrastructure/local_blob_gc_store.rs",
+]
+subject = "infrastructure->application"
+reason = "The commit-state, upload-intent, GC-pending and local-blob-GC stores persist or rebuild an ArchiveReceipt (record_archive_commit, adopt_verified_archive_receipt, the upload intent's recovery, archive_gc_pending_for_receipt, install_archive_gc_plan, local_blob_gc_pending_for_receipt), and §2.1 puts ArchiveReceipt in application with the other receipt DTOs; §2 wins over layer_deps here. P2: ArchiveReceipt moves to the archive domain as the committed-archive value the stores persist, and the application re-exports it with the other receipts."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/archive/interfaces/lifecycle_worker.rs"]
+subject = "interfaces->domain"
+reason = "start_lifecycle_worker paces the all-voter checkpoint with ALL_VOTER_CHECKPOINT_ATTEMPT and bounds each GC batch with ARCHIVE_GC_BATCH_OBJECTS, which §2 puts in the domain's lifecycle_settings; §2 wins over layer_deps here. P2: the tick moves into the application (run_lifecycle_tick, E9), which reads the settings, and the worker only schedules it."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/archive/application/archive_journal_local.rs",
+  "src/archive/application/archive_journal_to_gcs.rs",
+  "src/archive/application/archive_raw_storage_to_gcs.rs",
+  "src/archive/application/expire_committed_events.rs",
+  "src/archive/application/prepare_retention_fence.rs",
+  "src/archive/application/replay_cold_query.rs",
+  "src/archive/application/replay_recent_committed.rs",
+  "src/archive/application/retention_due.rs",
+  "src/archive/application/run_lifecycle_attempt.rs",
+  "src/archive/application/upload_archive_snapshot.rs",
+  "src/archive/infrastructure/dedupe_receipt_archive.rs",
+  "src/archive/infrastructure/local_segment_commit_state.rs",
+  "src/archive/interfaces/lifecycle_worker.rs",
+]
+subject = "journal.domain"
+reason = "The archive stores the journal's own records: the uploads and the local commit state read the journal's SegmentManifest, the dedupe-receipt archive and replay hold DedupeReceipt, expiration and retention_due keep IDEMPOTENCY_WINDOW_SECONDS of receipts, the retention fence and the lifecycle build RetentionFenceV1 and propose SiftCommandV1 barriers, and replay_cold_query builds an EventQuery; P1 moves them as-is. P2: the journal's application publishes the segment manifest, dedupe receipt, idempotency window, retention fence and the commands the archive proposes, or they become shared kernel as the journal-archive published language."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/archive/domain/archive_manifest.rs",
+  "src/archive/domain/portable_manifest.rs",
+]
+subject = "journal.domain"
+reason = "ArchiveManifest carries the journal's SegmentManifest list and EpochMap history as serialized fields, and portable_manifest rewrites a SegmentManifest's paths for the archive; the manifest JSON is the archive's format, so P1 moves it as-is. P2: SegmentManifest and EpochMap move to the shared kernel as the journal-archive published language."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/archive/application/archive_journal_local.rs",
+  "src/archive/application/archive_journal_to_gcs.rs",
+  "src/archive/application/archive_raw_storage_to_gcs.rs",
+  "src/archive/application/compact_journal.rs",
+  "src/archive/application/evict_cold_segments.rs",
+  "src/archive/application/expire_committed_events.rs",
+  "src/archive/application/prepare_retention_fence.rs",
+  "src/archive/application/reconcile_committed_retention.rs",
+  "src/archive/application/restore_into_empty.rs",
+  "src/archive/application/resume_local_blob_gc.rs",
+  "src/archive/application/retention_manifest_commit.rs",
+  "src/archive/application/run_lifecycle_attempt.rs",
+  "src/archive/application/upload_archive_snapshot.rs",
+]
+subject = "journal.infrastructure"
+reason = "The archive use cases act on the journal's live stores: they take DurableJournal to capture, evict, expire, compact, reconcile and restore sealed segments, read segments and blobs through RawStorage and BlobStore, restore writes the epoch maps with write_epoch_maps, and the lifecycle, retention fence and compaction propose and apply through SiftStateMachine; P1 moves them as-is. P2: the journal's application exposes the snapshot, eviction, expiration, compaction and restore operations the archive needs, and the archive holds that port instead of DurableJournal, RawStorage and SiftStateMachine."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/archive/application/replay_cold_query.rs"]
+subject = "query.application"
+reason = "replay_cold_query, which §2.1 puts in the archive, returns ArchiveQueryStatus, the query's own cold-query outcome; declaring query in depends_on would close an archive-query cycle, since query reads the archive for cold queries. §2 wins over the dependency direction here. P2: replay_cold_query moves to query's application, which calls the archive's replay_committed_events and builds ArchiveQueryStatus itself."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/archive/application/replay_cold_query.rs"]
+subject = "query.interfaces"
+reason = "replay_cold_query, which §2.1 puts in the archive, reads the project, environment and time range from QueryRequestV1, the query's HTTP request; declaring query in depends_on would close an archive-query cycle. P2: replay_cold_query moves to query's application, and the archive's replay_committed_events keeps taking the project, environment and time range as plain arguments."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/archive/application/replay_cold_query.rs"]
+subject = "projection.application"
+reason = "replay_cold_query, which §2.1 puts in the archive, applies each replayed event to the query's &dyn Projection (apply_idempotent); P1 moves it as-is. P2: replay_cold_query moves to query's application, so the archive's replay only hands events to a callback and the archive no longer names the Projection trait."
+
+# The node: one Sift process's own data root. It owns the private, versioned
+# data directory with its layout manifest, the role the process runs as, and
+# the local disk-capacity guard. It has no application layer, so the journal
+# and the archive use its domain and infrastructure directly.
+[[contexts]]
+name = "node"
+depends_on = []
+
+[contexts.layers]
+domain = "src/node/domain"
+infrastructure = "src/node/infrastructure"
+
+# Access: who may call Sift, and for which project. It owns the auth
+# configuration, the verifier that checks a bearer token against a static role
+# map or the Kubernetes API server, the scoped bearer middleware, and the
+# project and admin checks handlers run. It has no application layer, so
+# ingest and query use its interfaces directly.
+[[contexts]]
+name = "access"
+depends_on = []
+
+[contexts.layers]
+domain = "src/access/domain"
+infrastructure = "src/access/infrastructure"
+interfaces = "src/access/interfaces"
+
+# Access dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/access/domain/route_role.rs"]
+subject = "axum"
+reason = "http_role reads the request's axum::http::Method to decide whether a route needs Read or Write; P1 moves it from auth.rs as-is. P2: the domain takes a route kind (method and path as plain values) and the interfaces map the axum request onto it, or http's Method is approved in the domain allowlist."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/access/domain/route_role.rs"]
+subject = "service_auth"
+reason = "http_role returns and role_verb takes service_auth::Role, the Read, Write and Admin roles the shared bearer middleware and RoleMapPrincipal enforce; the role is the shared auth crate's published contract, and P1 moves both as-is. P2: approve service_auth::Role in the domain allowlist, or give access a domain role that the interfaces map onto service_auth::Role."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/access/interfaces/http/scoped_authorization.rs"]
+subject = "interfaces->domain"
+reason = "SiftVerifier's ScopedAuthorization impl calls http_role to pick the role a route needs before it authenticates the project; P1 moves the impl from auth.rs as-is. P2: access gets an application layer with an authorize_request use case that owns the route-to-role decision, and the middleware adapter calls it."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/access/interfaces/http/scoped_authorization.rs"]
+subject = "interfaces->infrastructure"
+reason = "service_auth::ScopedAuthorization is implemented directly for SiftVerifier, the infrastructure verifier, and the impl calls its is_kubernetes and authenticate_project; the orphan rule keeps the impl beside a local type, and P1 moves it as-is. P2: the impl moves to a thin interfaces wrapper over an application authorize_request use case that holds the verifier behind a domain port."
+
+# Operations: running Sift as a service. It owns the Sift custom resource and
+# the operator that reconciles it, the deployment artifacts rendered offline
+# from checked-in templates, off-node snapshot backup and restore, the
+# gateway's reverse-proxy route policy, the OTLP/gRPC proxy, and the admin
+# backup and integrity endpoints. It reads the journal for snapshots and
+# integrity reports, the archive for its committed state, and the node's
+# layout manifest, runs access's admin checks, and borrows ingest's gRPC
+# project check for the OTLP/gRPC proxy.
+[[contexts]]
+name = "operations"
+depends_on = ["journal", "archive", "node", "access", "ingest"]
+
+[contexts.layers]
+domain = "src/operations/domain"
+application = "src/operations/application"
+infrastructure = "src/operations/infrastructure"
+interfaces = "src/operations/interfaces"
+
+# Operations dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/operations/domain/image_reference.rs",
+  "src/operations/domain/namespace_name.rs",
+]
+subject = "anyhow"
+reason = "validate_namespace, validate_manifest_value and validate_image return anyhow::Result and reject with bail!; P1 moves them from deploy.rs as-is. P2 (E6): the domain returns a thiserror ManifestValueError, and the manifest bundle converts it at its anyhow boundary."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/operations/infrastructure/k8s/agent_workloads.rs",
+  "src/operations/infrastructure/k8s/backup_cron_job.rs",
+  "src/operations/infrastructure/k8s/managed_service.rs",
+  "src/operations/infrastructure/k8s/network_policy.rs",
+  "src/operations/infrastructure/k8s/role_workloads.rs",
+]
+subject = "infrastructure->interfaces"
+reason = "The Kubernetes renderers read the Sift custom resource they reconcile: Sift, SiftSpec, AuthMode and BackupSpec, which kube's CustomResource derive generates in the interfaces' crd module, and the ManagedService impl is for Sift; P1 moves operator.rs's renderers as-is. P2: the renderers take a domain InstanceSpec (roles, auth mode, storage, backup and placement) that the interfaces map the CRD onto, and the ManagedService impl moves to a thin interfaces adapter."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/operations/interfaces/http/gateway_proxy.rs"]
+subject = "interfaces->domain"
+reason = "SiftRolePolicy's select_upstream calls is_query_path to send query routes to the query role; P1 moves proxy.rs as-is and §2 puts is_query_path in the domain. P2: operations' application gets a route_upstream use case that owns the route-class decision, and the proxy policy calls it."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/operations/application/journal_backup.rs",
+  "src/operations/interfaces/http/admin_backup.rs",
+]
+subject = "journal.infrastructure"
+reason = "backup_journal and restore_journal take the DurableJournal, and admin_backup labels the snapshot with the journal's SNAPSHOT_CONTENT_TYPE; P1 moves backup.rs and lib.rs's admin endpoint as-is. P2: journal's application publishes snapshot_journal and restore_journal_from_bytes use cases that return and take the snapshot bytes with their content type, and operations calls them."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/operations/interfaces/grpc/otlp_proxy.rs"]
+subject = "ingest.interfaces"
+reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project check its direct server runs, before it forwards an export to the store role; P1 moves the proxy out of grpc.rs and leaves the check where commit 5 put it. P2: the gRPC project check moves to access's interfaces, both the server and the proxy call it there, and operations drops ingest from depends_on."
+
+# The crate's old public modules. Each is now a compatibility facade that only
+# re-exports its items from the context that owns them, so every public path
+# from before the DDD split keeps compiling. They sit outside every context and
+# layer, so B1 reports each one; P2 drops a facade once its callers use the
+# crate-root re-exports or the context paths.
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/api.rs"]
+subject = "src/api"
+reason = "Compat facade: sift::api was a public module, and api.rs now only re-exports the query requests and responses, the filter expression and evaluator, and the query job types from the query context so the public path keeps compiling. P2: drop the facade once callers use the query context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/auth.rs"]
+subject = "src/auth"
+reason = "Compat facade: sift::auth was a public module, and auth.rs now only re-exports SiftAuthConfig, SiftVerifier and auth_middleware from the access context so the public path keeps compiling. P2: drop the facade once callers use the access context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/backup.rs"]
+subject = "src/backup"
+reason = "Compat facade: sift::backup was a public module, and backup.rs now only re-exports backup_journal, restore_journal and the live snapshot client functions from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/deploy.rs"]
+subject = "src/deploy"
+reason = "Compat facade: sift::deploy was a public module, and deploy.rs now only re-exports the manifest bundle's renderers, DockerfileVariant, InstanceProfile and DEFAULT_OPERATOR_IMAGE from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/durability.rs"]
+subject = "src/durability"
+reason = "Compat facade: sift::durability was a public module, and durability.rs now only re-exports the Raft batch limits, the diagnostics encoders, SiftStateMachine and SNAPSHOT_CONTENT_TYPE from the journal context so the public path keeps compiling. P2: drop the facade once callers use the journal context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/event.rs"]
+subject = "src/event"
+reason = "Compat facade: sift::event was a public module, and event.rs now only re-exports the event model from the shared kernel and GovernancePolicy and GovernancePolicySet from ingest so the public path keeps compiling. The crate root's own event re-exports also go through it. P2: point the crate-root re-exports at the shared kernel, and drop the facade once callers use them."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/grpc.rs"]
+subject = "src/grpc"
+reason = "Compat facade: sift::grpc was a public module, and grpc.rs now only re-exports ingest's OTLP/gRPC serve and operations' serve_proxy so the public path keeps compiling. P2: drop the facade once callers use the ingest and operations paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/mcp.rs"]
+subject = "src/mcp"
+reason = "Compat facade: sift::mcp was a public module, and mcp.rs now only re-exports SiftApiClient, http_router, serve_stdio and tool_names from the query context so the public path keeps compiling. P2: drop the facade once callers use the query context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/operator.rs"]
+subject = "src/operator"
+reason = "Compat facade: sift::operator was a public module, and operator.rs now only re-exports the Sift custom resource types and the operator's run from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/prometheus.rs"]
+subject = "src/prometheus"
+reason = "Compat facade: sift::prometheus was a public module, and prometheus.rs now only re-exports PromQL and the query parameters from the query context, remote-write decoding from ingest, and the metrics_remote_write proto and PROMETHEUS_STALE_NAN_BITS so the public path keeps compiling. P2: drop the facade once callers use the query and ingest paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/proxy.rs"]
+subject = "src/proxy"
+reason = "Compat facade: sift::proxy was a public module, and proxy.rs now only re-exports gateway_router and query_router from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/storage.rs"]
+subject = "src/storage"
+reason = "Compat facade: sift::storage was a public module, and storage.rs now only declares storage::archive and re-exports the journal's storage types and the node's layout and capacity types, and storage/archive.rs only re-exports the archive's use cases, receipts and manifest types, so the public paths keep compiling. P2: drop the facade once callers use the journal, node and archive paths."
