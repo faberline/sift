@@ -10,6 +10,7 @@ use crate::event::EventEnvelope;
 use crate::ingest::domain::storage_reservation::storage_reservation;
 use crate::journal::domain::append_result::AppendResult;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::node::infrastructure::local_capacity::LocalCapacity;
 
 #[derive(Clone)]
 pub(crate) struct CommitContext {
@@ -18,7 +19,7 @@ pub(crate) struct CommitContext {
     pub(crate) state_machine:
         Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     pub(crate) local_command: Arc<tokio::sync::Mutex<()>>,
-    pub(crate) local_capacity: Arc<crate::storage::LocalCapacity>,
+    pub(crate) local_capacity: Arc<LocalCapacity>,
 }
 
 impl CommitContext {

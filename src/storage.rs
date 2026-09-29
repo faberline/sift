@@ -2,9 +2,6 @@
 //! CRC-framed per-signal segments.
 
 pub mod archive;
-mod capacity;
-mod layout;
-
 pub(crate) use crate::journal::domain::dedupe_receipt::DedupeReceipt;
 pub use crate::journal::domain::journal_head::JournalHead;
 pub use crate::journal::domain::retained_prefix_reconcile_stats::RetainedPrefixReconcileStats;
@@ -18,5 +15,10 @@ pub use crate::journal::{
     domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
     infrastructure::storage::dedupe_index::DedupeIndex,
 };
-pub use capacity::{CapacityLevel, LocalCapacity, LocalCapacityError};
-pub use layout::{DataLayout, LayoutManifest, StorageRole, DEFAULT_DATA_DIR};
+pub use crate::node::infrastructure::local_capacity::{
+    CapacityLevel, LocalCapacity, LocalCapacityError,
+};
+pub use crate::node::{
+    domain::storage_role::StorageRole,
+    infrastructure::data_layout::{DataLayout, LayoutManifest, DEFAULT_DATA_DIR},
+};

@@ -1,17 +1,19 @@
 //! Sift policy for the shared private, versioned data-root mechanism.
 
-use std::{
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use storage_durable::{DataRoot, DataRootPolicy};
 
+use crate::node::domain::storage_role::StorageRole;
+
 pub const DEFAULT_DATA_DIR: &str = "/var/lib/sift";
+
 const FORMAT_VERSION: u32 = 1;
+
 const LEGACY_MARKERS: &[&str] = &[
     "raw-events.framed",
     "raw-events.snapshot.json",
@@ -19,6 +21,7 @@ const LEGACY_MARKERS: &[&str] = &[
     "blobs",
     "epochs.json",
 ];
+
 const DIRECTORIES: &[&str] = &[
     "control",
     "wal/logs",
@@ -35,31 +38,6 @@ const DIRECTORIES: &[&str] = &[
     "agent",
     "tmp",
 ];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StorageRole {
-    All,
-    Agent,
-    Gateway,
-    Query,
-    Store,
-    Control,
-    Operator,
-}
-
-impl StorageRole {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::Agent => "agent",
-            Self::Gateway => "gateway",
-            Self::Query => "query",
-            Self::Store => "store",
-            Self::Control => "control",
-            Self::Operator => "operator",
-        }
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -176,7 +154,8 @@ impl DataLayout {
 
 #[cfg(test)]
 mod tests {
-    use super::{DataLayout, StorageRole};
+    use super::DataLayout;
+    use crate::node::domain::storage_role::StorageRole;
 
     #[test]
     fn one_process_owns_one_root() {

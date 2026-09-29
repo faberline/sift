@@ -14,6 +14,7 @@ pub mod grpc;
 pub mod ingest;
 mod journal;
 pub mod mcp;
+mod node;
 pub mod operator;
 pub mod projection;
 pub mod prometheus;
@@ -72,6 +73,8 @@ use crate::ingest::interfaces::http::otlp_handlers::{
 };
 use crate::ingest::interfaces::http::prometheus_remote_write::prometheus_remote_write;
 use crate::journal::infrastructure::raft::sift_membership_policy::SiftMembershipPolicy;
+use crate::node::domain::storage_role::StorageRole;
+use crate::node::infrastructure::local_capacity::LocalCapacity;
 use crate::query::infrastructure::file_query_job_store::QueryJobStore;
 use crate::query::interfaces::http::correlate_v1::correlate_v1;
 use crate::query::interfaces::http::get_trace::get_trace;
@@ -95,17 +98,17 @@ pub struct ServiceState {
     local_command: Arc<tokio::sync::Mutex<()>>,
     projections: Arc<projection::ProjectionRuntime>,
     admission: Arc<AdmissionController>,
-    local_capacity: Arc<storage::LocalCapacity>,
+    local_capacity: Arc<LocalCapacity>,
     query_jobs: Arc<QueryJobStore>,
     batch_coordinator: Arc<std::sync::Mutex<IngestBatchCoordinator>>,
 }
 
 impl ServiceState {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_role(data_dir, storage::StorageRole::All)
+        Self::open_with_role(data_dir, StorageRole::All)
     }
 
-    pub fn open_with_role(data_dir: impl AsRef<Path>, role: storage::StorageRole) -> Result<Self> {
+    pub fn open_with_role(data_dir: impl AsRef<Path>, role: StorageRole) -> Result<Self> {
         Self::open_with_ingest_limits_and_role(data_dir, IngestLimits::from_env()?, role)
     }
 
@@ -113,17 +116,17 @@ impl ServiceState {
         data_dir: impl AsRef<Path>,
         limits: IngestLimits,
     ) -> Result<Self> {
-        Self::open_with_ingest_limits_and_role(data_dir, limits, storage::StorageRole::All)
+        Self::open_with_ingest_limits_and_role(data_dir, limits, StorageRole::All)
     }
 
     pub fn open_with_ingest_limits_and_role(
         data_dir: impl AsRef<Path>,
         limits: IngestLimits,
-        role: storage::StorageRole,
+        role: StorageRole,
     ) -> Result<Self> {
         let data_dir = data_dir.as_ref();
         let journal = Arc::new(DurableJournal::open_with_role(data_dir, role)?);
-        let local_capacity = Arc::new(storage::LocalCapacity::open(
+        let local_capacity = Arc::new(LocalCapacity::open(
             data_dir,
             limits.max_local_storage_bytes,
             limits.min_local_free_bytes,

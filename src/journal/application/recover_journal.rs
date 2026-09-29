@@ -16,6 +16,8 @@ use crate::journal::domain::journal_state::JournalState;
 use crate::journal::domain::recent_cursor::{recent_cursor_at, RecentCursor};
 use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::node::domain::storage_role::StorageRole;
+use crate::node::infrastructure::data_layout::DataLayout;
 use crate::shared_kernel::event_content_digest::xor_digest;
 use crate::shared_kernel::stored_event::StoredEvent;
 
@@ -23,14 +25,14 @@ impl DurableJournal {
     pub(in crate::journal) fn open_configured(
         data_dir: impl AsRef<Path>,
         governance: GovernancePolicySet,
-        role: crate::storage::StorageRole,
+        role: StorageRole,
         resident_limit: usize,
     ) -> Result<Self> {
         governance.validate()?;
         if resident_limit == 0 {
             bail!("resident journal event limit must be greater than zero");
         }
-        let layout = crate::storage::DataLayout::open(data_dir, role)?;
+        let layout = DataLayout::open(data_dir, role)?;
         let data_dir = layout.root().to_path_buf();
         crate::archive::infrastructure::spill_catalog::cleanup_orphan_spills(&data_dir)?;
         crate::archive::infrastructure::archive_gc_pending_store::reconcile_staged_archive_gc(

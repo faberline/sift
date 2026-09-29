@@ -477,12 +477,12 @@ reason = "Ingest sizes and commits its batches in the journal's terms: split_gov
 # The journal: Sift's durable, replicated event log. It accepts governed
 # batches through Raft, deduplicates them inside the idempotency window,
 # recovers from the WAL and sealed segments, adopts archive checkpoints and
-# retention, and serves reads to the projections and queries. Besides the
-# shared kernel it reaches the archive, the node layout (a crate-root module
-# until commit 8) and ingest's governance, as the exceptions below say.
+# retention, and serves reads to the projections and queries. It opens its
+# data root through the node. Besides the shared kernel and the node it
+# reaches the archive and ingest's governance, as the exceptions below say.
 [[contexts]]
 name = "journal"
-depends_on = []
+depends_on = ["node"]
 
 [contexts.layers]
 domain = "src/journal/domain"
@@ -603,10 +603,10 @@ reason = "Restore and the Raft archive-checkpoint install hold the ArchiveManife
 # retention, garbage-collects blobs once every voter has checkpointed, restores
 # an empty node from the archive, and replays archived events to cold queries.
 # Its workers run the archive and lifecycle ticks. Besides the shared kernel
-# it reads the journal it archives.
+# it reads the journal it archives and restores into the node's data root.
 [[contexts]]
 name = "archive"
-depends_on = ["journal"]
+depends_on = ["journal", "node"]
 
 [contexts.layers]
 domain = "src/archive/domain"
@@ -752,3 +752,15 @@ rule = "B4"
 paths = ["src/archive/application/replay_cold_query.rs"]
 subject = "projection.application"
 reason = "replay_cold_query, which §2.1 puts in the archive, applies each replayed event to the query's &dyn Projection (apply_idempotent); P1 moves it as-is. P2: replay_cold_query moves to query's application, so the archive's replay only hands events to a callback and the archive no longer names the Projection trait."
+
+# The node: one Sift process's own data root. It owns the private, versioned
+# data directory with its layout manifest, the role the process runs as, and
+# the local disk-capacity guard. It has no application layer, so the journal
+# and the archive use its domain and infrastructure directly.
+[[contexts]]
+name = "node"
+depends_on = []
+
+[contexts.layers]
+domain = "src/node/domain"
+infrastructure = "src/node/infrastructure"

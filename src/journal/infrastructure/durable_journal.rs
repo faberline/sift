@@ -12,11 +12,13 @@ use crate::event::EventEnvelope;
 use crate::ingest::domain::governance_policy::GovernancePolicySet;
 use crate::journal::domain::journal_limits::DEFAULT_RESIDENT_JOURNAL_EVENTS;
 use crate::journal::domain::journal_state::JournalState;
+use crate::node::domain::storage_role::StorageRole;
+use crate::node::infrastructure::data_layout::DataLayout;
 
 /// Append-only JSONL journal. State is updated only after `sync_data` succeeds,
 /// making a successful [`append`](Self::append) acknowledgement durable.
 pub struct DurableJournal {
-    pub(in crate::journal) _layout: crate::storage::DataLayout,
+    pub(in crate::journal) _layout: DataLayout,
     pub(in crate::journal) wal: crate::storage::SignalWal,
     pub(in crate::journal) storage:
         crate::journal::infrastructure::storage::raw_storage::RawStorage,
@@ -68,13 +70,10 @@ impl DurableJournal {
     }
 
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_role(data_dir, crate::storage::StorageRole::All)
+        Self::open_with_role(data_dir, StorageRole::All)
     }
 
-    pub fn open_with_role(
-        data_dir: impl AsRef<Path>,
-        role: crate::storage::StorageRole,
-    ) -> Result<Self> {
+    pub fn open_with_role(data_dir: impl AsRef<Path>, role: StorageRole) -> Result<Self> {
         Self::open_with_governance_and_role(data_dir, GovernancePolicySet::from_env()?, role)
     }
 
@@ -82,13 +81,13 @@ impl DurableJournal {
         data_dir: impl AsRef<Path>,
         governance: GovernancePolicySet,
     ) -> Result<Self> {
-        Self::open_with_governance_and_role(data_dir, governance, crate::storage::StorageRole::All)
+        Self::open_with_governance_and_role(data_dir, governance, StorageRole::All)
     }
 
     pub fn open_with_governance_and_role(
         data_dir: impl AsRef<Path>,
         governance: GovernancePolicySet,
-        role: crate::storage::StorageRole,
+        role: StorageRole,
     ) -> Result<Self> {
         Self::open_configured(data_dir, governance, role, DEFAULT_RESIDENT_JOURNAL_EVENTS)
     }
@@ -100,7 +99,7 @@ impl DurableJournal {
         Self::open_configured(
             data_dir,
             GovernancePolicySet::from_env()?,
-            crate::storage::StorageRole::All,
+            StorageRole::All,
             resident_limit,
         )
     }

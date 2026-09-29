@@ -23,9 +23,10 @@ use crate::archive::infrastructure::restore_state::require_empty_restore_target;
 use crate::archive::infrastructure::spill_catalog::SpillCatalog;
 use crate::journal::infrastructure::storage::blob_store::BlobStore;
 use crate::journal::infrastructure::storage::shard_router::write_epoch_maps;
+use crate::node::domain::storage_role::StorageRole;
+use crate::node::infrastructure::data_layout::DataLayout;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 use crate::shared_kernel::stored_event::StoredEvent;
-use crate::storage::{DataLayout, StorageRole};
 use crate::SignalKind;
 
 pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Result<ArchiveManifest> {
