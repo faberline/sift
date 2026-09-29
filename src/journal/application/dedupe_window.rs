@@ -24,14 +24,19 @@ pub(super) fn rebuild_dedupe_index(
     let now = Utc::now();
 
     let cutoff = now - Duration::seconds(crate::storage::IDEMPOTENCY_WINDOW_SECONDS);
-    let remote = crate::storage::archive::replay_recent_committed_events(root, cutoff, |event| {
-        page.push(event);
-        if page.len() == RECOVERY_PAGE_EVENTS {
-            append_unique_dedupe_page_at(dedupe, &mut page, now)?;
-            dedupe.maintain_at(now, false)?;
-        }
-        Ok(())
-    })?;
+    let remote =
+        crate::archive::application::replay_recent_committed::replay_recent_committed_events(
+            root,
+            cutoff,
+            |event| {
+                page.push(event);
+                if page.len() == RECOVERY_PAGE_EVENTS {
+                    append_unique_dedupe_page_at(dedupe, &mut page, now)?;
+                    dedupe.maintain_at(now, false)?;
+                }
+                Ok(())
+            },
+        )?;
     if !page.is_empty() {
         append_unique_dedupe_page_at(dedupe, &mut page, now)?;
         dedupe.maintain_at(now, false)?;
@@ -39,15 +44,19 @@ pub(super) fn rebuild_dedupe_index(
 
     let mut receipt_page =
         Vec::<crate::storage::DedupeReceipt>::with_capacity(RECOVERY_PAGE_EVENTS);
-    crate::storage::archive::replay_recent_committed_receipts(root, cutoff, |receipt| {
-        receipt_page.push(receipt);
-        if receipt_page.len() == RECOVERY_PAGE_EVENTS {
-            dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
-            receipt_page.clear();
-            dedupe.maintain_at(now, false)?;
-        }
-        Ok(())
-    })?;
+    crate::archive::application::replay_recent_committed::replay_recent_committed_receipts(
+        root,
+        cutoff,
+        |receipt| {
+            receipt_page.push(receipt);
+            if receipt_page.len() == RECOVERY_PAGE_EVENTS {
+                dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
+                receipt_page.clear();
+                dedupe.maintain_at(now, false)?;
+            }
+            Ok(())
+        },
+    )?;
     if !receipt_page.is_empty() {
         dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
         dedupe.maintain_at(now, false)?;
@@ -126,7 +135,10 @@ impl DurableJournal {
         match self.dedupe.maintain_applied(force) {
             Ok(flushed) => Ok(flushed),
             Err(maintenance_error) => {
-                let archived = crate::storage::archive::committed_watermarks(self.data_dir())?;
+                let archived =
+                    crate::archive::application::archive_status_queries::committed_watermarks(
+                        self.data_dir(),
+                    )?;
                 let expected_last_cursor = self.last_cursor();
                 rebuild_dedupe_index(
                     self.data_dir(),

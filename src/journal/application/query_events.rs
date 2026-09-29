@@ -110,13 +110,18 @@ impl DurableJournal {
         self.ensure_recovered()?;
         let limit = limit.clamp(1, 10_000);
         let mut by_cursor = BTreeMap::<u64, StoredEvent>::new();
-        let archive_status = crate::storage::archive::committed_status(self.data_dir())?;
+        let archive_status =
+            crate::archive::application::archive_status_queries::committed_status(self.data_dir())?;
         if archive_status
             .as_ref()
             .is_some_and(|status| after < status.snapshot_index)
         {
             if let Some(events) =
-                crate::storage::archive::read_committed_events_after(self.data_dir(), after, limit)?
+                crate::archive::application::replay_committed_events::read_committed_events_after(
+                    self.data_dir(),
+                    after,
+                    limit,
+                )?
             {
                 for event in events {
                     by_cursor.insert(event.cursor, event);

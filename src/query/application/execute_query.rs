@@ -16,7 +16,9 @@ use crate::query::interfaces::http::query_request_v1::{
     MetricFunctionV1, QueryRequestV1, QuerySignalV1,
 };
 use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
-use crate::{projection, replay_cold_query, ApiError, ServiceState};
+use crate::{
+    archive::application::replay_cold_query::replay_cold_query, projection, ApiError, ServiceState,
+};
 
 pub(in crate::query) fn execute_query_v1(
     state: &ServiceState,

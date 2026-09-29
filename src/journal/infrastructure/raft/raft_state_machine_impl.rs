@@ -101,8 +101,10 @@ impl RaftStateMachine for SiftStateMachine {
             } => {
                 if retention_generation == 0
                     || self.journal.retention_generation() < retention_generation
-                    || crate::storage::archive::committed_status(self.journal.data_dir())?
-                        .is_some_and(|status| status.retention_scan_pending)
+                    || crate::archive::application::archive_status_queries::committed_status(
+                        self.journal.data_dir(),
+                    )?
+                    .is_some_and(|status| status.retention_scan_pending)
                 {
                     bail!("Sift retention fence clear is not covered by committed retention");
                 }

@@ -130,10 +130,12 @@ pub(super) fn restore_archive_checkpoint(
     if actual_hash != checkpoint.manifest_sha256 {
         bail!("Sift archive checkpoint manifest failed its SHA-256 check");
     }
-    let expected_manifest: crate::storage::archive::ArchiveManifest =
+    let expected_manifest: crate::archive::domain::archive_manifest::ArchiveManifest =
         serde_json::from_slice(&manifest_bytes)
             .context("decode Sift archive checkpoint manifest")?;
-    crate::storage::archive::validate_archive_manifest(&expected_manifest)?;
+    crate::archive::domain::archive_manifest_validator::validate_archive_manifest(
+        &expected_manifest,
+    )?;
     if expected_manifest.raft_snapshot_index != checkpoint.archive_snapshot_index
         || expected_manifest.watermarks != checkpoint.watermarks
         || expected_manifest.raft_snapshot_index != checkpoint.raw_cursor
@@ -143,7 +145,7 @@ pub(super) fn restore_archive_checkpoint(
     }
 
     let install_mode = archive_checkpoint_install_mode(journal, checkpoint, &expected_manifest)?;
-    let receipt = crate::storage::archive::ArchiveReceipt {
+    let receipt = crate::archive::application::archive_receipts::ArchiveReceipt {
         manifest_uri: checkpoint.manifest_uri.clone(),
         manifest_sha256: checkpoint.manifest_sha256.clone(),
         manifest: expected_manifest.clone(),
@@ -166,7 +168,7 @@ pub(super) fn restore_archive_checkpoint(
                         restore_parent.display()
                     )
                 })?;
-                let restored_manifest = crate::storage::archive::restore_gcs(
+                let restored_manifest = crate::archive::application::restore_gcs::restore_gcs(
                     &checkpoint.manifest_uri,
                     restored_root.path(),
                 )
@@ -186,15 +188,23 @@ pub(super) fn restore_archive_checkpoint(
         journal.adopt_archive_coverage(&receipt, checkpoint.raw_cursor)?;
     }
     if checkpoint.archive_gc_authorized {
-        crate::storage::archive::install_archive_gc_plan(journal.data_dir(), &receipt)?;
+        crate::archive::infrastructure::archive_gc_pending_store::install_archive_gc_plan(
+            journal.data_dir(),
+            &receipt,
+        )?;
         // Every voter must finish its local content-addressed blob plan before
         // it acknowledges this all-voter checkpoint. The leader can then
         // delete the remote plan pages without stranding a follower.
-        crate::storage::archive::finish_local_blob_gc(journal)?;
+        crate::archive::application::resume_local_blob_gc::finish_local_blob_gc(journal)?;
     } else {
-        crate::storage::archive::withhold_archive_gc_plan(journal.data_dir())?;
+        crate::archive::infrastructure::archive_gc_pending_store::withhold_archive_gc_plan(
+            journal.data_dir(),
+        )?;
     }
-    crate::storage::archive::evict_committed_cold_segments_at(journal, chrono::Utc::now())?;
+    crate::archive::application::evict_cold_segments::evict_committed_cold_segments_at(
+        journal,
+        chrono::Utc::now(),
+    )?;
     Ok(SnapshotMetadata {
         applied_index: checkpoint.applied_index,
         last_cursor: expected_manifest.raft_snapshot_index,

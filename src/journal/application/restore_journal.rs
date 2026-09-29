@@ -120,7 +120,7 @@ impl DurableJournal {
 
     pub(crate) fn set_restored_archive_head(
         &self,
-        manifest: &crate::storage::archive::ArchiveManifest,
+        manifest: &crate::archive::domain::archive_manifest::ArchiveManifest,
     ) -> Result<()> {
         self.dedupe
             .mark_rebuilt_through(manifest.raft_snapshot_index)?;

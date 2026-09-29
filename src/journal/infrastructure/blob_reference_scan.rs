@@ -17,7 +17,9 @@ impl DurableJournal {
         if limit == 0 {
             bail!("blob reference scan limit must be greater than zero");
         }
-        let archived = crate::storage::archive::committed_watermarks(self.data_dir())?;
+        let archived = crate::archive::application::archive_status_queries::committed_watermarks(
+            self.data_dir(),
+        )?;
         let mut reader =
             CanonicalRecoveryReader::open(&self.storage, &self.wal, archived, after, true)?;
         let (page, exhausted) = reader.read_page_with_limits(limit, RECOVERY_PAGE_BYTES)?;

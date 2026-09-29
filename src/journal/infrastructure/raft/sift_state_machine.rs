@@ -112,8 +112,10 @@ impl SiftStateMachine {
         &self,
         retention_generation: u64,
     ) -> Result<()> {
-        if crate::storage::archive::committed_status(self.journal.data_dir())?
-            .is_some_and(|status| status.retention_scan_pending)
+        if crate::archive::application::archive_status_queries::committed_status(
+            self.journal.data_dir(),
+        )?
+        .is_some_and(|status| status.retention_scan_pending)
         {
             return Ok(());
         }
@@ -200,8 +202,11 @@ impl SiftStateMachine {
     pub(crate) fn expire_current_archive_at(
         &self,
         now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Option<crate::storage::archive::ExpirationReceipt>> {
-        let Some(remote) = crate::storage::archive::remote_retained_state(self.journal.data_dir())?
+    ) -> Result<Option<crate::archive::application::archive_receipts::ExpirationReceipt>> {
+        let Some(remote) =
+            crate::archive::application::archive_status_queries::remote_retained_state(
+                self.journal.data_dir(),
+            )?
         else {
             return Ok(None);
         };
@@ -216,7 +221,11 @@ impl SiftStateMachine {
         let recovery_pending = self.journal.recovery_required()
             || self.journal.total_event_count() != expected_local_events
             || self.journal.retention_generation() != remote.retention_generation;
-        let receipt = crate::storage::archive::expire_committed_events_at(&self.journal, now)?;
+        let receipt =
+            crate::archive::application::expire_committed_events::expire_committed_events_at(
+                &self.journal,
+                now,
+            )?;
         if receipt.expired_events > 0 || recovery_pending {
             Ok(Some(receipt))
         } else {

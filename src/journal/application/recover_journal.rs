@@ -32,13 +32,15 @@ impl DurableJournal {
         }
         let layout = crate::storage::DataLayout::open(data_dir, role)?;
         let data_dir = layout.root().to_path_buf();
-        crate::storage::archive::cleanup_orphan_spills(&data_dir)?;
-        crate::storage::archive::reconcile_staged_archive_gc(&data_dir)?;
+        crate::archive::infrastructure::spill_catalog::cleanup_orphan_spills(&data_dir)?;
+        crate::archive::infrastructure::archive_gc_pending_store::reconcile_staged_archive_gc(
+            &data_dir,
+        )?;
         let wal = crate::storage::SignalWal::open(&data_dir)?;
         let storage =
             crate::journal::infrastructure::storage::raw_storage::RawStorage::open(&data_dir)?;
         let stored_head = crate::storage::JournalHead::load(&data_dir)?;
-        crate::storage::archive::reconcile_committed_retention(
+        crate::archive::application::reconcile_committed_retention::reconcile_committed_retention(
             &data_dir,
             &storage,
             stored_head
@@ -46,12 +48,14 @@ impl DurableJournal {
                 .map(|head| head.retention_generation)
                 .unwrap_or_default(),
         )?;
-        let archived = crate::storage::archive::committed_watermarks(&data_dir)?;
+        let archived =
+            crate::archive::application::archive_status_queries::committed_watermarks(&data_dir)?;
         // A committed manifest is the durable authority for this prefix. Retry
         // compaction before comparing local segments with WAL bytes so a crash
         // after archive reconciliation cannot resurrect an older WAL copy.
         wal.compact_through(archived)?;
-        let remote_retained = crate::storage::archive::remote_retained_state(&data_dir)?;
+        let remote_retained =
+            crate::archive::application::archive_status_queries::remote_retained_state(&data_dir)?;
         let mut state = JournalState::default();
         let (dedupe, dedupe_stats) = crate::storage::DedupeIndex::open(&data_dir)?;
         let recovery_time = Utc::now();
@@ -163,7 +167,9 @@ impl DurableJournal {
         };
         journal.accepted.add(accepted);
         if let Err(error) =
-            crate::storage::archive::resume_local_blob_gc_batch(&journal, 128, 1_280_000)
+            crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
+                &journal, 128, 1_280_000,
+            )
         {
             tracing::warn!(%error, "resume local blob GC after restart failed; durable progress is retained");
         }

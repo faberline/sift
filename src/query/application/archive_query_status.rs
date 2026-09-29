@@ -5,7 +5,7 @@ use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
 #[derive(Debug)]
 pub(crate) enum ArchiveQueryStatus {
     NotRequired,
-    Ready(crate::storage::archive::ArchiveReplay),
+    Ready(crate::archive::application::archive_receipts::ArchiveReplay),
     Unavailable(String),
 }
 

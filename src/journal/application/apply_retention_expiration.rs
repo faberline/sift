@@ -40,10 +40,13 @@ impl DurableJournal {
         retained_prefix_digest: [u8; 32],
         repair_dedupe: bool,
     ) -> Result<()> {
-        let retention_status = crate::storage::archive::committed_status(self.data_dir())?
-            .context("expiration requires a committed archive")?;
+        let retention_status =
+            crate::archive::application::archive_status_queries::committed_status(self.data_dir())?
+                .context("expiration requires a committed archive")?;
         let retention_generation = retention_status.retention_generation;
-        let archived = crate::storage::archive::committed_watermarks(self.data_dir())?;
+        let archived = crate::archive::application::archive_status_queries::committed_watermarks(
+            self.data_dir(),
+        )?;
         let mut state = self.state.write().expect("journal state lock poisoned");
         if !repair_dedupe && state.total_events < archived_prefix_events {
             bail!("journal contains fewer events than its prior archive prefix");

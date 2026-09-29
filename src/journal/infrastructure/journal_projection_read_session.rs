@@ -14,7 +14,7 @@ use crate::shared_kernel::stored_event::StoredEvent;
 #[doc(hidden)]
 pub struct JournalProjectionReadSession {
     journal: Arc<DurableJournal>,
-    archive: Option<crate::storage::archive::CommittedEventReader>,
+    archive: Option<crate::archive::application::committed_event_reader::CommittedEventReader>,
     archive_through: u64,
     cursor: u64,
     local: VecDeque<StoredEvent>,
@@ -99,10 +99,11 @@ impl JournalProjectionReadSession {
     }
 
     fn refresh_archive(&mut self) -> Result<bool> {
-        let Some(reader) = crate::storage::archive::CommittedEventReader::open(
-            self.journal.data_dir(),
-            self.cursor,
-        )?
+        let Some(reader) =
+            crate::archive::application::committed_event_reader::CommittedEventReader::open(
+                self.journal.data_dir(),
+                self.cursor,
+            )?
         else {
             return Ok(false);
         };
@@ -119,10 +120,14 @@ impl DurableJournal {
         after: u64,
     ) -> Result<JournalProjectionReadSession> {
         self.ensure_recovered()?;
-        let archive = crate::storage::archive::CommittedEventReader::open(self.data_dir(), after)?;
+        let archive =
+            crate::archive::application::committed_event_reader::CommittedEventReader::open(
+                self.data_dir(),
+                after,
+            )?;
         let archive_through = archive
             .as_ref()
-            .map(crate::storage::archive::CommittedEventReader::snapshot_index)
+            .map(crate::archive::application::committed_event_reader::CommittedEventReader::snapshot_index)
             .unwrap_or(after);
         Ok(JournalProjectionReadSession {
             journal: self.clone(),

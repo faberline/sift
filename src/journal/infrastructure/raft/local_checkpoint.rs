@@ -107,7 +107,8 @@ pub(super) fn restore_local_checkpoint(
             checkpoint.raw_cursor
         );
     }
-    let receipt = crate::storage::archive::archive_journal_local(journal)?;
+    let receipt =
+        crate::archive::application::archive_journal_local::archive_journal_local(journal)?;
     if receipt.snapshot_index < checkpoint.local_snapshot_index
         || receipt.watermarks.logs < checkpoint.watermarks.logs
         || receipt.watermarks.metrics < checkpoint.watermarks.metrics

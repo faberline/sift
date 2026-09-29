@@ -255,11 +255,11 @@ reason = "ProjectionRuntime::open, ProjectionWorker and JournalProjectionSource 
 
 # Queries: the versioned query API over logs, metrics and traces, its async
 # jobs, the Prometheus-compatible endpoints, the query role and the
-# read-only MCP tools. It reads the projections it answers from, and the
-# journal for the services it lists.
+# read-only MCP tools. It reads the projections it answers from, the journal
+# for the services it lists, and the archive for cold queries.
 [[contexts]]
 name = "query"
-depends_on = ["projection", "journal"]
+depends_on = ["projection", "journal", "archive"]
 
 [contexts.layers]
 domain = "src/query/domain"
@@ -478,9 +478,8 @@ reason = "Ingest sizes and commits its batches in the journal's terms: split_gov
 # batches through Raft, deduplicates them inside the idempotency window,
 # recovers from the WAL and sealed segments, adopts archive checkpoints and
 # retention, and serves reads to the projections and queries. Besides the
-# shared kernel it reaches the archive and the node layout, crate-root
-# modules until commits 7 and 8, and ingest's governance as the exceptions
-# below say.
+# shared kernel it reaches the archive, the node layout (a crate-root module
+# until commit 8) and ingest's governance, as the exceptions below say.
 [[contexts]]
 name = "journal"
 depends_on = []
@@ -555,3 +554,201 @@ paths = [
 ]
 subject = "ingest.domain"
 reason = "DurableJournal holds the GovernancePolicySet it governs every appended event with (open reads it from the environment and recover validates it), and append_governed_batch reserves local capacity with ingest's storage_reservation; declaring ingest in depends_on would close a journal-ingest cycle, since ingest appends to the journal. P2: ingest governs events before the append, or governance reaches the journal through a domain port, and storage_reservation moves to the journal or node, which breaks the cycle."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/adopt_archive.rs",
+  "src/journal/application/append_durable_batch.rs",
+  "src/journal/application/apply_retention_expiration.rs",
+  "src/journal/application/dedupe_window.rs",
+  "src/journal/application/query_events.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/infrastructure/blob_reference_scan.rs",
+  "src/journal/infrastructure/journal_projection_read_session.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
+  "src/journal/infrastructure/raft/local_checkpoint.rs",
+  "src/journal/infrastructure/raft/raft_state_machine_impl.rs",
+  "src/journal/infrastructure/raft/sift_state_machine.rs",
+  "src/journal/infrastructure/raft/sift_state_machine_checkpoints.rs",
+]
+subject = "archive.application"
+reason = "The journal reads the archive's committed state throughout: recovery, append, the dedupe window, retention expiration, query_events, the blob reference scan and the state machine read committed_watermarks, committed_status, local_committed_status and remote_retained_state; recovery reconciles retention (reconcile_committed_retention) and resumes local blob GC (resume_local_blob_gc_batch, finish_local_blob_gc); the dedupe window replays archived receipts (replay_recent_committed_events, replay_recent_committed_receipts); query_events and the projection read session read archived events (read_committed_events_after, CommittedEventReader); and the Raft state machine archives locally, evicts, expires, restores and adopts archive checkpoints (archive_journal_local, evict_committed_cold_segments_at, expire_committed_events_at, restore_gcs, ArchiveReceipt, ExpirationReceipt). declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: an archive port in the journal's domain (committed watermarks and status, archived-event reader, checkpoint adoption) that the archive implements, which breaks the cycle."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/adopt_archive.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
+]
+subject = "archive.infrastructure"
+reason = "Recovery and the archive-checkpoint adoption and install run the archive's control-record steps directly: adopt_verified_archive_receipt, cleanup_orphan_spills, reconcile_staged_archive_gc, install_archive_gc_plan and withhold_archive_gc_plan; declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: the same archive port exposes these steps from the archive's application, and the journal stops reaching its infrastructure."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/restore_journal.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint.rs",
+  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
+]
+subject = "archive.domain"
+reason = "Restore and the Raft archive-checkpoint install hold the ArchiveManifest they adopt and check it with validate_archive_manifest; declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: the archive port validates and adopts the manifest, or ArchiveManifest becomes shared kernel as the journal-archive published language."
+
+# The archive: Sift's cold tier. It uploads the journal's sealed segments,
+# blobs and dedupe receipts to GCS or a local archive under a verified
+# manifest, evicts archived segments from the hot tier, expires events past
+# retention, garbage-collects blobs once every voter has checkpointed, restores
+# an empty node from the archive, and replays archived events to cold queries.
+# Its workers run the archive and lifecycle ticks. Besides the shared kernel
+# it reads the journal it archives.
+[[contexts]]
+name = "archive"
+depends_on = ["journal"]
+
+[contexts.layers]
+domain = "src/archive/domain"
+application = "src/archive/application"
+infrastructure = "src/archive/infrastructure"
+interfaces = "src/archive/interfaces"
+
+# Archive dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/archive/domain/archive_event_time.rs",
+  "src/archive/domain/archive_manifest_validator.rs",
+  "src/archive/domain/blob_hash_set.rs",
+  "src/archive/domain/event_set_digest.rs",
+]
+subject = "anyhow"
+reason = "validate_archive_manifest, validate_dedupe_receipt, parse_optional_archive_time, event_time_unix_nano, acknowledgement_time_unix_nano, acknowledgement_time_bounds, decode_event_id_digest and decode_event_content_digest return anyhow errors whose text is the restore, checkpoint-install and replay failure an invalid manifest, receipt, timestamp or digest raises, and BlobHashSet's insert_hash and contains_hash return anyhow::Result because SpillCatalog's implementation reads spill files; converting them is not a move (E6). P2: an archive domain error (thiserror) with the same Display text, which the application converts, and BlobHashSet takes an associated error type."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/archive/domain/archive_manifest.rs",
+  "src/archive/domain/archive_manifest_validator.rs",
+]
+subject = "storage_segment"
+reason = "ArchiveManifest stores catalog_root and gc_plan_root as storage_segment::CatalogRoot, the serialized manifest's own field type, and validate_archive_manifest checks page_bytes_limit against storage_segment::DEFAULT_CATALOG_PAGE_BYTES; the manifest JSON is the archive's format in GCS and on disk, so P1 moves it as-is. P2: approve CatalogRoot as published language in the domain allowlist, or the domain holds its own catalog-root value that the infrastructure maps to and from CatalogRoot, with the page limit passed in."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/archive/domain/archive_manifest_validator.rs"]
+subject = "service_backup"
+reason = "validate_archive_manifest parses each gc_object_uris entry with service_backup::GcsSink::from_exact_uri, the parser the upload uses; P1 moves it as-is. P2: the domain checks the gs:// URI shape itself, and the application runs the GcsSink parse after the domain validation."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/archive/application/archive_journal_local.rs",
+  "src/archive/application/archive_journal_to_gcs.rs",
+  "src/archive/application/archive_status_queries.rs",
+  "src/archive/application/committed_event_reader.rs",
+  "src/archive/application/evict_cold_segments.rs",
+  "src/archive/application/expire_committed_events.rs",
+  "src/archive/application/finalize_archive_gc.rs",
+  "src/archive/application/inspect_archive_catalog.rs",
+  "src/archive/application/reconcile_committed_retention.rs",
+  "src/archive/application/replay_committed_events.rs",
+  "src/archive/application/replay_recent_committed.rs",
+  "src/archive/application/restore_gcs.rs",
+  "src/archive/application/restore_into_empty.rs",
+  "src/archive/application/resume_local_blob_gc.rs",
+  "src/archive/application/retention_catalog_ops.rs",
+  "src/archive/application/retention_due.rs",
+  "src/archive/application/retention_manifest_commit.rs",
+  "src/archive/application/run_lifecycle_attempt.rs",
+  "src/archive/application/upload_archive_snapshot.rs",
+]
+subject = "application->infrastructure"
+reason = "§2 splits storage/archive.rs into use cases over the archive's control records and codecs: the upload, eviction, expiration, GC, restore, replay, retention and status use cases read and write ArchiveCommitState (read_commit_state, record_archive_commit), ArchiveUploadIntent, ArchiveGcPending, LocalBlobGcPending, LocalSegmentCommitState, RestoreState and the local blob live index; walk the catalog through SpillCatalog, load_archive_catalog and the GC plan builder; fetch the verified manifest and cache segments; and encode, decode and verify segments through SiftParquetCodec, ArchiveSignalStream and the integrity checks, with the control paths and private_fs_mode for the files they create. §2 wins over layer_deps here. P2: domain ports (commit store, upload-intent store, GC-plan store, catalog, manifest fetcher, segment codec) that these infrastructure modules implement, and the use cases take them."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/archive/infrastructure/archive_commit_state.rs",
+  "src/archive/infrastructure/archive_gc_pending_store.rs",
+  "src/archive/infrastructure/archive_upload_intent.rs",
+  "src/archive/infrastructure/local_blob_gc_store.rs",
+]
+subject = "infrastructure->application"
+reason = "The commit-state, upload-intent, GC-pending and local-blob-GC stores persist or rebuild an ArchiveReceipt (record_archive_commit, adopt_verified_archive_receipt, the upload intent's recovery, archive_gc_pending_for_receipt, install_archive_gc_plan, local_blob_gc_pending_for_receipt), and §2.1 puts ArchiveReceipt in application with the other receipt DTOs; §2 wins over layer_deps here. P2: ArchiveReceipt moves to the archive domain as the committed-archive value the stores persist, and the application re-exports it with the other receipts."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/archive/interfaces/lifecycle_worker.rs"]
+subject = "interfaces->domain"
+reason = "start_lifecycle_worker paces the all-voter checkpoint with ALL_VOTER_CHECKPOINT_ATTEMPT and bounds each GC batch with ARCHIVE_GC_BATCH_OBJECTS, which §2 puts in the domain's lifecycle_settings; §2 wins over layer_deps here. P2: the tick moves into the application (run_lifecycle_tick, E9), which reads the settings, and the worker only schedules it."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/archive/application/archive_journal_local.rs",
+  "src/archive/application/archive_journal_to_gcs.rs",
+  "src/archive/application/archive_raw_storage_to_gcs.rs",
+  "src/archive/application/expire_committed_events.rs",
+  "src/archive/application/prepare_retention_fence.rs",
+  "src/archive/application/replay_cold_query.rs",
+  "src/archive/application/replay_recent_committed.rs",
+  "src/archive/application/retention_due.rs",
+  "src/archive/application/run_lifecycle_attempt.rs",
+  "src/archive/application/upload_archive_snapshot.rs",
+  "src/archive/infrastructure/dedupe_receipt_archive.rs",
+  "src/archive/infrastructure/local_segment_commit_state.rs",
+  "src/archive/interfaces/lifecycle_worker.rs",
+]
+subject = "journal.domain"
+reason = "The archive stores the journal's own records: the uploads and the local commit state read the journal's SegmentManifest, the dedupe-receipt archive and replay hold DedupeReceipt, expiration and retention_due keep IDEMPOTENCY_WINDOW_SECONDS of receipts, the retention fence and the lifecycle build RetentionFenceV1 and propose SiftCommandV1 barriers, and replay_cold_query builds an EventQuery; P1 moves them as-is. P2: the journal's application publishes the segment manifest, dedupe receipt, idempotency window, retention fence and the commands the archive proposes, or they become shared kernel as the journal-archive published language."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/archive/domain/archive_manifest.rs",
+  "src/archive/domain/portable_manifest.rs",
+]
+subject = "journal.domain"
+reason = "ArchiveManifest carries the journal's SegmentManifest list and EpochMap history as serialized fields, and portable_manifest rewrites a SegmentManifest's paths for the archive; the manifest JSON is the archive's format, so P1 moves it as-is. P2: SegmentManifest and EpochMap move to the shared kernel as the journal-archive published language."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/archive/application/archive_journal_local.rs",
+  "src/archive/application/archive_journal_to_gcs.rs",
+  "src/archive/application/archive_raw_storage_to_gcs.rs",
+  "src/archive/application/compact_journal.rs",
+  "src/archive/application/evict_cold_segments.rs",
+  "src/archive/application/expire_committed_events.rs",
+  "src/archive/application/prepare_retention_fence.rs",
+  "src/archive/application/reconcile_committed_retention.rs",
+  "src/archive/application/restore_into_empty.rs",
+  "src/archive/application/resume_local_blob_gc.rs",
+  "src/archive/application/retention_manifest_commit.rs",
+  "src/archive/application/run_lifecycle_attempt.rs",
+  "src/archive/application/upload_archive_snapshot.rs",
+]
+subject = "journal.infrastructure"
+reason = "The archive use cases act on the journal's live stores: they take DurableJournal to capture, evict, expire, compact, reconcile and restore sealed segments, read segments and blobs through RawStorage and BlobStore, restore writes the epoch maps with write_epoch_maps, and the lifecycle, retention fence and compaction propose and apply through SiftStateMachine; P1 moves them as-is. P2: the journal's application exposes the snapshot, eviction, expiration, compaction and restore operations the archive needs, and the archive holds that port instead of DurableJournal, RawStorage and SiftStateMachine."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/archive/application/replay_cold_query.rs"]
+subject = "query.application"
+reason = "replay_cold_query, which §2.1 puts in the archive, returns ArchiveQueryStatus, the query's own cold-query outcome; declaring query in depends_on would close an archive-query cycle, since query reads the archive for cold queries. §2 wins over the dependency direction here. P2: replay_cold_query moves to query's application, which calls the archive's replay_committed_events and builds ArchiveQueryStatus itself."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/archive/application/replay_cold_query.rs"]
+subject = "query.interfaces"
+reason = "replay_cold_query, which §2.1 puts in the archive, reads the project, environment and time range from QueryRequestV1, the query's HTTP request; declaring query in depends_on would close an archive-query cycle. P2: replay_cold_query moves to query's application, and the archive's replay_committed_events keeps taking the project, environment and time range as plain arguments."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/archive/application/replay_cold_query.rs"]
+subject = "projection.application"
+reason = "replay_cold_query, which §2.1 puts in the archive, applies each replayed event to the query's &dyn Projection (apply_idempotent); P1 moves it as-is. P2: replay_cold_query moves to query's application, so the archive's replay only hands events to a callback and the archive no longer names the Projection trait."

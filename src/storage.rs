@@ -20,8 +20,3 @@ pub use crate::journal::{
 };
 pub use capacity::{CapacityLevel, LocalCapacity, LocalCapacityError};
 pub use layout::{DataLayout, LayoutManifest, StorageRole, DEFAULT_DATA_DIR};
-
-pub(crate) trait BlobHashSet {
-    fn insert_hash(&mut self, hash: &str) -> anyhow::Result<()>;
-    fn contains_hash(&self, hash: &str) -> anyhow::Result<bool>;
-}

@@ -152,7 +152,10 @@ impl DurableJournal {
                 );
             }
             if let Err(append_error) = self.dedupe.append_batch_at(&staged, acknowledged_at) {
-                let archived = crate::storage::archive::committed_watermarks(self.data_dir())?;
+                let archived =
+                    crate::archive::application::archive_status_queries::committed_watermarks(
+                        self.data_dir(),
+                    )?;
                 let expected_last_cursor = staged
                     .last()
                     .map(|stored| stored.cursor)

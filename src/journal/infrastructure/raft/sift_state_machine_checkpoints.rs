@@ -39,8 +39,10 @@ impl SiftStateMachine {
         if applied_index == 0 {
             bail!("cannot checkpoint an empty Sift Raft prefix");
         }
-        let status = crate::storage::archive::committed_status(self.journal.data_dir())?
-            .context("Sift Raft checkpoint requires a committed remote archive")?;
+        let status = crate::archive::application::archive_status_queries::committed_status(
+            self.journal.data_dir(),
+        )?
+        .context("Sift Raft checkpoint requires a committed remote archive")?;
         let archive_snapshot_index = status.snapshot_index;
         if archive_snapshot_index != raw_cursor {
             bail!(
@@ -80,8 +82,10 @@ impl SiftStateMachine {
         if applied_index == 0 {
             bail!("cannot checkpoint an empty Sift Raft prefix");
         }
-        let status = crate::storage::archive::local_committed_status(self.journal.data_dir())?
-            .context("Sift Raft checkpoint requires a committed local segment set")?;
+        let status = crate::archive::application::archive_status_queries::local_committed_status(
+            self.journal.data_dir(),
+        )?
+        .context("Sift Raft checkpoint requires a committed local segment set")?;
         if status.snapshot_index != raw_cursor {
             bail!(
                 "committed local cursor {} does not equal Raft prefix cursor {raw_cursor}",
@@ -167,8 +171,10 @@ impl SiftStateMachine {
         if applied_index != index {
             return Ok(None);
         }
-        if crate::storage::archive::committed_status(self.journal.data_dir())?
-            .is_none_or(|status| status.snapshot_index != raw_cursor)
+        if crate::archive::application::archive_status_queries::committed_status(
+            self.journal.data_dir(),
+        )?
+        .is_none_or(|status| status.snapshot_index != raw_cursor)
         {
             return Ok(None);
         }
@@ -193,8 +199,10 @@ impl SiftStateMachine {
         }
         let (applied_index, raw_cursor) = self.checkpoint_position();
         if applied_index != index
-            || crate::storage::archive::local_committed_status(self.journal.data_dir())?
-                .is_none_or(|status| status.snapshot_index != raw_cursor)
+            || crate::archive::application::archive_status_queries::local_committed_status(
+                self.journal.data_dir(),
+            )?
+            .is_none_or(|status| status.snapshot_index != raw_cursor)
         {
             return Ok(None);
         }
