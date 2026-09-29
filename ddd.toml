@@ -189,11 +189,10 @@ reason = "run opens its source with open_source and delivers through CollectorCl
 
 # Projections: the logging, metric and trace read models Sift builds from the
 # journal and answers queries from. Besides the shared kernel they read the
-# journal through DurableJournal, still a crate-root item; the journal
-# becomes a context, and this one depends on it, in commit 6.
+# journal they are built from.
 [[contexts]]
 name = "projection"
-depends_on = []
+depends_on = ["journal"]
 
 [contexts.layers]
 domain = "src/projection/domain"
@@ -244,12 +243,23 @@ paths = [
 subject = "infrastructure->application"
 reason = "The three projections implement the Projection trait, service_projection_adapter binds that trait to service_projection's, and LoggingProjection maps each event with normalize; §2.7 puts the trait and the normalizer in application, and P1 follows it. P2: move the Projection trait into the domain as a port and log_record_normalizer with it, so infrastructure depends only on the domain."
 
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/projection/application/projection_runtime.rs",
+  "src/projection/infrastructure/service_projection_adapter.rs",
+  "src/projection/interfaces/projection_worker.rs",
+]
+subject = "journal.infrastructure"
+reason = "ProjectionRuntime::open, ProjectionWorker and JournalProjectionSource hold an Arc<DurableJournal>, and JournalProjectionSource reads it through JournalProjectionReadSession; §2 keeps DurableJournal as the journal's infrastructure facade under its old name, and P1 moves the projections' side as-is. P2: journal's application exposes a projection-source read use case (read_projection_source) that the projections call, and the composition root passes it in instead of the DurableJournal."
+
 # Queries: the versioned query API over logs, metrics and traces, its async
 # jobs, the Prometheus-compatible endpoints, the query role and the
-# read-only MCP tools. It reads the projections it answers from.
+# read-only MCP tools. It reads the projections it answers from, and the
+# journal for the services it lists.
 [[contexts]]
 name = "query"
-depends_on = ["projection"]
+depends_on = ["projection", "journal"]
 
 [contexts.layers]
 domain = "src/query/domain"
@@ -363,14 +373,20 @@ paths = ["src/query/application/execute_query.rs"]
 subject = "projection.infrastructure"
 reason = "execute_query_v1 replays the archive into fresh LoggingProjection, MetricProjection and TraceProjection instances to answer a cold query; P1 moves it whole. P2: projection's application offers an archive-replay read use case, and the cold path calls it instead of building the projections."
 
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/interfaces/http/list_services_v1.rs"]
+subject = "journal.domain"
+reason = "list_services_v1 scans recent events through ServiceState's journal with an EventQuery; P1 moves the handler whole. P2: journal's application publishes query_events with EventQuery as its input, and the handler calls it through a query use case, or the listing reads a projection instead."
+
 # Ingest: telemetry admitted within bounded limits, decoded from OTLP, Cloud
 # Logging structured JSON and Prometheus remote write into operational
 # events, governed, and appended through the group-commit queue to the
-# journal. Besides the shared kernel it appends through DurableJournal and
-# ServiceState, still crate-root items until commits 6 and 11.
+# journal. Besides the shared kernel it appends to the journal, and it
+# reaches ServiceState, a crate-root item until commit 11.
 [[contexts]]
 name = "ingest"
-depends_on = []
+depends_on = ["journal"]
 
 [contexts.layers]
 domain = "src/ingest/domain"
@@ -447,3 +463,95 @@ paths = [
 ]
 subject = "interfaces->domain"
 reason = "The remote-write handler and AdmissionController::decode_body build AdmissionError refusals, and the OTLP decoders derive each event's id with stable_id; P1 moves the handler and the decoders whole. P2: the application re-exports AdmissionError and an event-id service the decoders call, or decoding moves behind an application use case, so the interfaces reach the domain only through the application."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/ingest/application/append_events.rs",
+  "src/ingest/domain/raft_batch_splitter.rs",
+  "src/ingest/infrastructure/ingest_batch_coordinator.rs",
+]
+subject = "journal.domain"
+reason = "Ingest sizes and commits its batches in the journal's terms: split_governed_batches and the batch coordinator bound a batch by SiftCommandV1::append_events_size_bound, RAFT_BATCH_MAX_ITEMS and RAFT_BATCH_MAX_BYTES, ingest_batch_queue tunes the group-commit queue with RAFT_BATCH_MAX_DELAY and the rest, and the queue and the append use cases return AppendResult; P1 moves them as-is. P2: journal's application publishes the batch limits, the command size bound and AppendResult, ingest reads them there, and the splitter in ingest's domain takes the limits and the bound as arguments."
+
+# The journal: Sift's durable, replicated event log. It accepts governed
+# batches through Raft, deduplicates them inside the idempotency window,
+# recovers from the WAL and sealed segments, adopts archive checkpoints and
+# retention, and serves reads to the projections and queries. Besides the
+# shared kernel it reaches the archive and the node layout, crate-root
+# modules until commits 7 and 8, and ingest's governance as the exceptions
+# below say.
+[[contexts]]
+name = "journal"
+depends_on = []
+
+[contexts.layers]
+domain = "src/journal/domain"
+application = "src/journal/application"
+infrastructure = "src/journal/infrastructure"
+interfaces = "src/journal/interfaces"
+
+# Journal dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/journal/domain/append_policy.rs",
+  "src/journal/domain/event_content_digest.rs",
+  "src/journal/domain/idempotency_window.rs",
+  "src/journal/domain/recent_cursor.rs",
+  "src/journal/domain/shard_route.rs",
+]
+subject = "anyhow"
+reason = "validate_events, append_decision_time, validate_retention_fence, merge_pending_retention, xor_event_content_digest, acknowledged_generation, acknowledged_nanos, event_is_active_at, RecentCursor::from_stored, recent_cursor_map and validate_epochs return anyhow errors whose text is the append failure the API reports and the startup, apply and recovery errors a bad batch, fence, receipt or epoch history raises, so converting them is not a move (E6). P2: a journal domain error (thiserror) with the same Display text, which the application and the state machine convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/journal/domain/append_result.rs"]
+subject = "utoipa"
+reason = "AppendResult derives ToSchema and is re-exported as sift::AppendResult; no OpenAPI path registers it today, but dropping a derive from a public type is not a move (E1). P2: drop the derive if nothing registers the schema, or approve AppendResult as published language in the domain allowlist."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/journal/domain/sift_command.rs"]
+subject = "chrono::Utc::now"
+reason = "SiftCommandV1::append_events_now stamps acknowledged_at with Utc::now for the diagnostics encoders; P1 moves it without rewriting it (E7). P2: the diagnostics take the time from a Clock port and pass it to append_events_at, and append_events_now goes."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/journal/application/adopt_archive.rs",
+  "src/journal/application/append_durable_batch.rs",
+  "src/journal/application/apply_retention_expiration.rs",
+  "src/journal/application/checkpoint_identity.rs",
+  "src/journal/application/commit_append_batch.rs",
+  "src/journal/application/dedupe_window.rs",
+  "src/journal/application/query_events.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/application/restore_journal.rs",
+]
+subject = "application->infrastructure"
+reason = "§2 splits durability.rs and lib.rs's DurableJournal so the use cases (recover, append_durable_batch, the dedupe window upkeep and rebuild, adopt_archive_*, retention expiration, checkpoint_identity, restore and query_events) stay impl DurableJournal blocks over the infrastructure facade, reading its RawStorage, SignalWal, DedupeIndex, JournalHead file and CanonicalRecoveryReader, and CommitContext holds the DurableJournal and the SiftStateMachine; §2 wins over layer_deps here. P2: the use cases become application services over domain ports (event store, dedupe index, recovery reader, command committer) that durable_journal, the storage and the Raft state machine implement."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/journal/infrastructure/raft/command_committer.rs"]
+subject = "infrastructure->application"
+reason = "command_committer is an impl CommitContext block whose commit_command proposes a SiftCommandV1 through Raft or applies it locally; §2 puts CommitContext in application with commit_append_batch and command_committer in infrastructure, and wins over layer_deps here. P2: a command-committer port in the domain that the Raft infrastructure implements and CommitContext holds."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/journal/interfaces/journal_metrics.rs"]
+subject = "interfaces->infrastructure"
+reason = "metrics_text is an impl DurableJournal block that renders the accepted, duplicate and fsync counters and the resident-event gauge; §2 puts journal_metrics in interfaces, and P1 moves it as-is. P2: the application exposes a journal metrics snapshot, and the interface renders it."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/journal/application/commit_append_batch.rs",
+  "src/journal/application/recover_journal.rs",
+  "src/journal/infrastructure/durable_journal.rs",
+]
+subject = "ingest.domain"
+reason = "DurableJournal holds the GovernancePolicySet it governs every appended event with (open reads it from the environment and recover validates it), and append_governed_batch reserves local capacity with ingest's storage_reservation; declaring ingest in depends_on would close a journal-ingest cycle, since ingest appends to the journal. P2: ingest governs events before the append, or governance reaches the journal through a domain port, and storage_reservation moves to the journal or node, which breaks the cycle."

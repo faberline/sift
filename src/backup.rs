@@ -17,7 +17,7 @@ use service_backup::{
     BackupRunResult, RetentionPolicy,
 };
 
-use crate::DurableJournal;
+use crate::journal::infrastructure::durable_journal::DurableJournal;
 
 const LIVE_BACKUP_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_ERROR_BODY_BYTES: usize = 8 * 1024;

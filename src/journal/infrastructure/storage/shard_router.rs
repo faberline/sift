@@ -1,28 +1,14 @@
-// HANDWRITE-BEGIN gap="sift-epoch-bucket-router" tracker="1659" reason="Persist and validate 4096-bucket epoch maps and route future cursors without changing historical ownership."
-use std::{
-    path::{Path, PathBuf},
-    sync::RwLock,
-};
+//! Persisting and validating the epoch map history, and routing future cursors
+//! without changing historical ownership.
+
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-pub const VIRTUAL_BUCKETS: usize = 4_096;
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct EpochMap {
-    pub epoch: u64,
-    pub activated_at_cursor: u64,
-    pub bucket_to_shard: Vec<u16>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct Route {
-    pub epoch: u64,
-    pub shard: u16,
-    pub bucket: u16,
-}
+use crate::journal::domain::shard_route::{
+    bucket_for, validate_epochs, EpochMap, Route, VIRTUAL_BUCKETS,
+};
 
 pub struct ShardRouter {
     path: PathBuf,
@@ -105,11 +91,6 @@ impl ShardRouter {
     }
 }
 
-pub(crate) fn bucket_for(event_id: &str) -> u16 {
-    let digest = Sha256::digest(event_id.as_bytes());
-    u16::from_be_bytes([digest[0], digest[1]]) & 0x0fff
-}
-
 pub(crate) fn write_epoch_maps(root: &Path, epochs: &[EpochMap]) -> Result<()> {
     validate_epochs(epochs)?;
     storage_durable::atomic_write(
@@ -122,32 +103,3 @@ pub(crate) fn write_epoch_maps(root: &Path, epochs: &[EpochMap]) -> Result<()> {
 fn epoch_path(root: &Path) -> PathBuf {
     root.join("segments").join("epochs.json")
 }
-
-fn validate_epochs(epochs: &[EpochMap]) -> Result<()> {
-    if epochs.is_empty() {
-        bail!("epoch map history must not be empty");
-    }
-    let mut previous_epoch = 0;
-    let mut previous_cursor = None;
-    for epoch in epochs {
-        if epoch.epoch <= previous_epoch {
-            bail!("epoch ids must be strictly increasing");
-        }
-        if epoch.bucket_to_shard.len() != VIRTUAL_BUCKETS {
-            bail!(
-                "epoch {} has {} buckets; expected {VIRTUAL_BUCKETS}",
-                epoch.epoch,
-                epoch.bucket_to_shard.len()
-            );
-        }
-        if let Some(previous) = previous_cursor {
-            if epoch.activated_at_cursor <= previous {
-                bail!("epoch activation cursors must be strictly increasing");
-            }
-        }
-        previous_epoch = epoch.epoch;
-        previous_cursor = Some(epoch.activated_at_cursor);
-    }
-    Ok(())
-}
-// HANDWRITE-END

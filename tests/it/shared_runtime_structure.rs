@@ -172,8 +172,14 @@ fn scoped_bearer_middleware_is_owned_by_service_auth() {
 
 #[test]
 fn replicated_host_startup_is_owned_by_raft_runtime() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+    let library = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
         .expect("read Sift library source");
+    let membership = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/journal/infrastructure/raft/sift_membership_policy.rs"
+    ))
+    .expect("read Sift membership policy");
+    let source = library + &membership;
 
     assert!(
         source.contains("impl raft_runtime::MembershipPolicy for SiftMembershipPolicy"),

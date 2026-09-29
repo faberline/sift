@@ -7,8 +7,9 @@ use crate::event::EventEnvelope;
 pub(in crate::ingest) fn split_governed_batches(
     events: Vec<EventEnvelope>,
 ) -> Result<Vec<Vec<EventEnvelope>>> {
-    let empty_size = crate::durability::SiftCommandV1::append_events_size_bound(Vec::new())
-        .uncompressed_len()?;
+    let empty_size =
+        crate::journal::domain::sift_command::SiftCommandV1::append_events_size_bound(Vec::new())
+            .uncompressed_len()?;
     let mut chunks = Vec::new();
     let mut batch = Vec::new();
     let mut encoded_size = empty_size;
@@ -18,8 +19,9 @@ pub(in crate::ingest) fn split_governed_batches(
             .len();
         let separator = usize::from(!batch.is_empty());
         if !batch.is_empty()
-            && (batch.len() >= crate::durability::RAFT_BATCH_MAX_ITEMS
-                || encoded_size + separator + event_size > crate::durability::RAFT_BATCH_MAX_BYTES)
+            && (batch.len() >= crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_ITEMS
+                || encoded_size + separator + event_size
+                    > crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_BYTES)
         {
             chunks.push(std::mem::take(&mut batch));
             encoded_size = empty_size;

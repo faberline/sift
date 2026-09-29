@@ -1,3 +1,6 @@
+//! The per-signal write-ahead log: framed event batches for logs, metrics and
+//! traces, their recovery, paged reads and compaction.
+
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     fs,

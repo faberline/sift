@@ -12,7 +12,9 @@ use crate::event::SignalKind;
 use crate::query::interfaces::http::phase_one::{
     ServiceListResponseV1, ServiceQueryV1, ServiceSummaryV1,
 };
-use crate::{authorize_project_read, ApiError, EventQuery, ServiceState};
+use crate::{
+    authorize_project_read, journal::domain::event_query::EventQuery, ApiError, ServiceState,
+};
 
 pub(crate) async fn list_services_v1(
     State(state): State<Arc<ServiceState>>,

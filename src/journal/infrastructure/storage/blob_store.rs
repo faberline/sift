@@ -1,4 +1,6 @@
-// HANDWRITE-BEGIN gap="sift-content-addressed-blob-store" tracker="1659" reason="Atomically fsync SHA-256-addressed blobs and externalize large base64 payload fields before raw append."
+//! The content-addressed blob store: SHA-256-addressed blobs written with
+//! fsync, and large base64 payload fields externalized before a raw append.
+
 use std::{
     collections::BTreeSet,
     fs,
@@ -176,4 +178,3 @@ impl BlobStore {
         }
     }
 }
-// HANDWRITE-END

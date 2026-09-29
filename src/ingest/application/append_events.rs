@@ -7,7 +7,12 @@ use crate::event::EventEnvelope;
 use crate::ingest::domain::raft_batch_splitter::split_governed_batches;
 use crate::ingest::infrastructure::ingest_batch_coordinator::IngestBatchRequest;
 use crate::shared_kernel::single_signal_batch::ensure_single_signal;
-use crate::{AppendResult, CommitContext, ServiceState};
+use crate::{
+    journal::{
+        application::commit_append_batch::CommitContext, domain::append_result::AppendResult,
+    },
+    ServiceState,
+};
 
 impl ServiceState {
     /// Govern and durably commit one Raft batch. Every returned event shares
@@ -66,9 +71,9 @@ impl ServiceState {
             return Ok(queue.clone());
         }
         let config = service_executor::GroupCommitConfig::new(
-            crate::durability::RAFT_BATCH_MAX_DELAY,
-            crate::durability::RAFT_BATCH_MAX_ITEMS,
-            crate::durability::RAFT_BATCH_MAX_BYTES,
+            crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_DELAY,
+            crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_ITEMS,
+            crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_BYTES,
         )?;
         let context = self.commit_context();
         let (queue, worker) =

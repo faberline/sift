@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use service_projection::{ProjectionLag, RebuildComparison};
 use sha2::{Digest, Sha256};
 
+use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::projection::domain::log::{LogPage, LogQuery, PROJECTION_LOGGING_STORE};
 use crate::projection::domain::metric::{MetricPage, MetricQuery, PROJECTION_METRIC_STORE};
 use crate::projection::domain::trace::{
@@ -20,7 +21,6 @@ use crate::projection::infrastructure::metric_projection::MetricProjection;
 use crate::projection::infrastructure::service_projection_adapter::JournalProjectionSource;
 use crate::projection::infrastructure::trace_projection::TraceProjection;
 use crate::shared_kernel::stored_event::StoredEvent;
-use crate::DurableJournal;
 
 pub const PROJECTION_BATCH_SIZE: usize = 1_000;
 pub const PROJECTION_RETRY_AFTER_SECONDS: u64 = 1;

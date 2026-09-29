@@ -25,9 +25,11 @@ use sha2::{Digest, Sha256};
 
 use crate::{shared_kernel::stored_event::StoredEvent, ContentBlobRef, SignalKind};
 
-use super::{
-    blob::BlobStore, dedupe::DedupeReceipt, shard, BlobHashSet, DataLayout, EpochMap, RawStorage,
-    SegmentManifest, StorageRole,
+use super::{BlobHashSet, DataLayout, EpochMap, SegmentManifest, StorageRole};
+use crate::journal::infrastructure::storage::raw_storage::RawStorage;
+use crate::journal::{
+    domain::dedupe_receipt::DedupeReceipt,
+    infrastructure::storage::{blob_store::BlobStore, shard_router::write_epoch_maps},
 };
 
 pub use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
@@ -335,7 +337,7 @@ pub struct ArchiveReplay {
 
 /// Commit a remote archive locally before any canonical WAL bytes are removed.
 pub fn archive_journal_gcs(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     destination_uri: &str,
 ) -> Result<ArchiveReceipt> {
     let (captured_cursor, segments) = journal.seal_archive_prefix()?;
@@ -344,7 +346,7 @@ pub fn archive_journal_gcs(
 
 #[doc(hidden)]
 pub fn archive_journal_gcs_captured(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     destination_uri: &str,
     captured_cursor: u64,
     segments: Vec<(SignalKind, SegmentManifest)>,
@@ -367,14 +369,16 @@ pub fn archive_journal_gcs_captured(
 /// Retry WAL removal that is already authorized by a durable local or remote
 /// commit. This is safe to call after a crash between receipt commit and WAL
 /// truncation.
-pub(crate) fn reconcile_committed_wal(journal: &crate::DurableJournal) -> Result<()> {
+pub(crate) fn reconcile_committed_wal(
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+) -> Result<()> {
     journal.compact_archived_wal(committed_watermarks(journal.storage().root())?)
 }
 
 /// Evict local copies whose complete event set is older than the 30-day hot
 /// window and is present in the verified remote manifest.
 pub fn evict_committed_cold_segments_at(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     now: DateTime<Utc>,
 ) -> Result<HotEvictionReceipt> {
     let manifest = fetch_verified_committed_root(journal.storage().root())?
@@ -456,7 +460,7 @@ pub fn evict_committed_cold_segments_at(
 /// manifest. A mixed Parquet segment is rewritten with only retained rows.
 /// The new objects and manifest commit before the prior objects are deleted.
 pub fn expire_committed_events_at(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     now: DateTime<Utc>,
 ) -> Result<ExpirationReceipt> {
     expire_committed_events_bounded_at(journal, now)
@@ -488,7 +492,7 @@ fn committed_has_expired_dedupe_receipt(
 }
 
 fn expire_committed_events_bounded_at(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     now: DateTime<Utc>,
 ) -> Result<ExpirationReceipt> {
     const BATCH_PARQUET_BYTES: u64 = 64 * 1024 * 1024;
@@ -522,7 +526,9 @@ fn expire_committed_events_bounded_at(
         .timestamp_nanos_opt()
         .context("180-day retention cutoff is outside the nanosecond range")?;
     let receipt_cutoff_nanos = (now
-        - chrono::Duration::seconds(super::dedupe::IDEMPOTENCY_WINDOW_SECONDS))
+        - chrono::Duration::seconds(
+            crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+        ))
     .timestamp_nanos_opt()
     .context("dedupe receipt cleanup cutoff is outside the nanosecond range")?;
     if current.retention_scan.is_none()
@@ -648,7 +654,9 @@ fn expire_committed_events_bounded_at(
         let mut retained = Vec::with_capacity(events.len());
         let mut segment_expired = 0_u64;
         let receipt_cutoff_nanos = (now
-            - chrono::Duration::seconds(super::dedupe::IDEMPOTENCY_WINDOW_SECONDS))
+            - chrono::Duration::seconds(
+                crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+            ))
         .timestamp_nanos_opt()
         .context("dedupe receipt retention cutoff is outside the nanosecond range")?;
         let mut has_active_expired_receipt = false;
@@ -1049,7 +1057,7 @@ fn validate_retention_receipt_source(
 }
 
 fn finish_bounded_retention_commit(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     source: &ArchiveManifest,
     receipt: ArchiveReceipt,
 ) -> Result<ExpirationReceipt> {
@@ -1232,7 +1240,9 @@ pub fn retention_due_at(root: &Path, now: DateTime<Utc>) -> Result<bool> {
         return Ok(true);
     }
     let receipt_cutoff_nanos = (now
-        - chrono::Duration::seconds(super::dedupe::IDEMPOTENCY_WINDOW_SECONDS))
+        - chrono::Duration::seconds(
+            crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+        ))
     .timestamp_nanos_opt()
     .context("dedupe receipt cleanup cutoff is outside the nanosecond range")?;
     committed_has_expired_dedupe_receipt(&manifest, receipt_cutoff_nanos)
@@ -1241,14 +1251,16 @@ pub fn retention_due_at(root: &Path, now: DateTime<Utc>) -> Result<bool> {
 /// Seal local immutable segments and commit their exact manifest set before
 /// compacting the corresponding WAL. This is the durable fallback for local
 /// installations without GCS.
-pub fn archive_journal_local(journal: &crate::DurableJournal) -> Result<LocalArchiveReceipt> {
+pub fn archive_journal_local(
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+) -> Result<LocalArchiveReceipt> {
     let (snapshot_index, segments) = journal.seal_archive_prefix()?;
     archive_journal_local_captured(journal, snapshot_index, segments)
 }
 
 #[doc(hidden)]
 pub fn archive_journal_local_captured(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     snapshot_index: u64,
     segments: Vec<(SignalKind, SegmentManifest)>,
 ) -> Result<LocalArchiveReceipt> {
@@ -2556,7 +2568,9 @@ pub(crate) fn reconcile_committed_retention(
 /// Finish a retention receipt inside the same process after a late local
 /// failure. The remote manifest is already the durable authority. Reapply its
 /// idempotent local delta and persist the journal head before serving again.
-pub(crate) fn reconcile_live_committed_retention(journal: &crate::DurableJournal) -> Result<()> {
+pub(crate) fn reconcile_live_committed_retention(
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+) -> Result<()> {
     let current_generation = journal.retention_generation();
     let Some(status) = committed_status(journal.data_dir())? else {
         return Ok(());
@@ -3360,7 +3374,7 @@ fn ensure_local_blob_gc_pending(root: &Path) -> Result<()> {
 
 #[doc(hidden)]
 pub fn resume_local_blob_gc_batch(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     max_plan_entries: usize,
     max_scan_events: usize,
 ) -> Result<(usize, bool)> {
@@ -3454,7 +3468,9 @@ pub fn resume_local_blob_gc_batch(
     Ok((removed, false))
 }
 
-pub(crate) fn finish_local_blob_gc(journal: &crate::DurableJournal) -> Result<usize> {
+pub(crate) fn finish_local_blob_gc(
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+) -> Result<usize> {
     let mut removed = 0_usize;
     loop {
         let (batch_removed, complete) = resume_local_blob_gc_batch(journal, 128, 1_280_000)?;
@@ -3956,8 +3972,8 @@ fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Result<ArchiveMa
         bail!("cold restore must create a new Sift cluster ID");
     }
     drop(layout);
-    shard::write_epoch_maps(target, &manifest.epochs)?;
-    let journal = crate::DurableJournal::open(target)?;
+    write_epoch_maps(target, &manifest.epochs)?;
+    let journal = crate::journal::infrastructure::durable_journal::DurableJournal::open(target)?;
     let hot_cutoff_nanos = (Utc::now() - chrono::Duration::days(30))
         .timestamp_nanos_opt()
         .context("30-day hot restore cutoff is outside the nanosecond range")?;
@@ -4123,7 +4139,7 @@ fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Result<ArchiveMa
 }
 
 fn restore_archive_page(
-    journal: &crate::DurableJournal,
+    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     events: Vec<StoredEvent>,
     hot_cutoff_nanos: i64,
     hot_blob_hashes: &mut impl BlobHashSet,

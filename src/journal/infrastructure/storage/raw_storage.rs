@@ -1,76 +1,28 @@
-// HANDWRITE-BEGIN gap="sift-sharded-storage-module" tracker="1659" reason="Compose blob, routing, segment, and archive ownership as Sift's canonical raw storage plane."
-//! Canonical raw storage plane: content-addressed blobs plus epoch-routed,
-//! CRC-framed per-signal segments.
-
-pub mod archive;
-mod blob;
-mod capacity;
-mod dedupe;
-mod head;
-mod layout;
-mod segment;
-mod shard;
-mod wal;
+//! Canonical raw storage: content-addressed blobs plus epoch-routed, CRC-framed
+//! per-signal segments, and a reader over them.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use anyhow::Result;
 
-use crate::{
-    shared_kernel::stored_event::StoredEvent, ContentBlobRef, OperationalEventV2, SignalKind,
-};
-
-pub use blob::BlobStore;
-pub use capacity::{CapacityLevel, LocalCapacity, LocalCapacityError};
-pub(crate) use dedupe::DedupeReceipt;
-pub use dedupe::{DedupeIndex, IDEMPOTENCY_WINDOW_SECONDS};
-pub use head::JournalHead;
-pub use layout::{DataLayout, LayoutManifest, StorageRole, DEFAULT_DATA_DIR};
-pub use segment::{AppendLocation, SegmentManifest, SegmentState};
-pub use shard::{EpochMap, Route, VIRTUAL_BUCKETS};
-pub use wal::{SignalWal, SignalWalReader};
-
-pub(crate) trait BlobHashSet {
-    fn insert_hash(&mut self, hash: &str) -> anyhow::Result<()>;
-    fn contains_hash(&self, hash: &str) -> anyhow::Result<bool>;
-}
-
-use segment::{SegmentEventReader, SegmentStore};
-use shard::ShardRouter;
-
-#[derive(Clone, Debug)]
-pub struct StorageConfig {
-    pub initial_logical_shards: u16,
-    pub max_segment_events: usize,
-    pub max_segment_bytes: usize,
-    pub blob_externalize_bytes: usize,
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            initial_logical_shards: 1,
-            max_segment_events: 100_000,
-            max_segment_bytes: 256 * 1024 * 1024,
-            blob_externalize_bytes: 65_536,
-        }
-    }
-}
+use crate::journal::domain::segment_manifest::{AppendLocation, SegmentManifest};
+use crate::journal::domain::shard_route::{EpochMap, Route};
+use crate::journal::domain::storage_config::StorageConfig;
+use crate::journal::infrastructure::storage::blob_store::BlobStore;
+use crate::journal::infrastructure::storage::segment_read::SegmentEventReader;
+use crate::journal::infrastructure::storage::segment_store::SegmentStore;
+use crate::journal::infrastructure::storage::shard_router::ShardRouter;
+use crate::shared_kernel::stored_event::StoredEvent;
+use crate::{ContentBlobRef, OperationalEventV2, SignalKind};
 
 pub struct RawStorage {
-    root: PathBuf,
+    pub(super) root: PathBuf,
     blobs: BlobStore,
     router: ShardRouter,
-    segments: SignalSegmentStores,
+    pub(super) segments: SignalSegmentStores,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct RetainedPrefixReconcileStats {
-    pub max_buffered_events: usize,
-}
-
-struct SignalSegmentStores {
+pub(super) struct SignalSegmentStores {
     logs: SegmentStore,
     metrics: SegmentStore,
     traces: SegmentStore,
@@ -244,77 +196,6 @@ impl RawStorage {
         Ok(manifests)
     }
 
-    /// Replace the local archived prefix with the exact retained rows from a
-    /// hash-verified restore. Rows after `snapshot_index` are a Raft suffix and
-    /// remain untouched.
-    #[doc(hidden)]
-    pub fn reconcile_retained_prefix(
-        &self,
-        retained: &RawStorage,
-        snapshot_index: u64,
-    ) -> Result<RetainedPrefixReconcileStats> {
-        let mut stats = RetainedPrefixReconcileStats::default();
-
-        // First remove every local row in the authoritative checkpoint
-        // prefix. Keep only the post-checkpoint Raft suffix. One immutable
-        // segment is materialized at a time, so memory does not grow with the
-        // total retained row count.
-        for (signal, manifest) in self.seal_all_with_signal()? {
-            let events = self.read_segment_events(signal, &manifest)?;
-            stats.max_buffered_events = stats.max_buffered_events.max(events.len());
-            let replacement = events
-                .iter()
-                .filter(|event| event.cursor > snapshot_index)
-                .cloned()
-                .collect::<Vec<_>>();
-            if replacement == events {
-                continue;
-            }
-            if !replacement.is_empty() {
-                self.segments
-                    .for_signal(signal)?
-                    .write_reconciled_segment(&manifest.segment_id, &replacement)?;
-            }
-            self.evict_segment(signal, &manifest.segment_id)?;
-        }
-
-        // Rebuild the exact retained prefix from the verified restore source.
-        // The source reader owns one frame at a time. The append batch is also
-        // bounded by item count and encoded bytes.
-        for signal in SignalKind::ALL {
-            let mut reader = retained.segments.for_signal(signal)?.reader(0)?;
-            let mut batch = Vec::with_capacity(1_000);
-            let mut batch_bytes = 0_usize;
-            while let Some(event) = reader.next_event()? {
-                if event.event.signal != signal {
-                    anyhow::bail!("retained archive contains the wrong signal");
-                }
-                if event.cursor > snapshot_index {
-                    break;
-                }
-                let encoded = serde_json::to_vec(&event)?.len();
-                if !batch.is_empty()
-                    && (batch.len() == 1_000
-                        || batch_bytes.saturating_add(encoded) > 16 * 1024 * 1024)
-                {
-                    stats.max_buffered_events = stats.max_buffered_events.max(batch.len());
-                    self.append_batch(&batch)?;
-                    batch.clear();
-                    batch_bytes = 0;
-                }
-                batch_bytes = batch_bytes.saturating_add(encoded);
-                batch.push(event);
-            }
-            if !batch.is_empty() {
-                stats.max_buffered_events = stats.max_buffered_events.max(batch.len());
-                self.append_batch(&batch)?;
-            }
-        }
-
-        verify_local_retained_exact(self, retained, snapshot_index)?;
-        Ok(stats)
-    }
-
     pub fn read_segment_events(
         &self,
         signal: SignalKind,
@@ -328,68 +209,6 @@ impl RawStorage {
             anyhow::bail!("segment {} contains the wrong signal", manifest.segment_id);
         }
         Ok(events)
-    }
-
-    /// Remove only local cache rows older than a committed retention cutoff.
-    /// Rows after the archived Raft prefix stay intact. The remote manifest is
-    /// still the authority for every cold row while a bounded scan continues.
-    pub(crate) fn evict_expired_before(
-        &self,
-        cutoff: DateTime<Utc>,
-        snapshot_index: u64,
-    ) -> Result<u64> {
-        let cutoff_nanos = cutoff
-            .timestamp_nanos_opt()
-            .context("local retention cutoff is outside the nanosecond range")?;
-        let mut removed = 0_u64;
-        for (signal, manifest) in self.seal_all_with_signal()? {
-            if manifest.first_cursor > snapshot_index
-                || manifest.min_event_time_unix_nano >= cutoff_nanos
-            {
-                continue;
-            }
-            let events = self.read_segment_events(signal, &manifest)?;
-            let mut retained = Vec::with_capacity(events.len());
-            for event in events {
-                let occurred = DateTime::parse_from_rfc3339(&event.event.occurred_at)
-                    .context("local retained event occurred_at must be RFC3339")?
-                    .with_timezone(&Utc);
-                if event.cursor <= snapshot_index && occurred < cutoff {
-                    removed = removed.saturating_add(1);
-                } else {
-                    retained.push(event);
-                }
-            }
-            if retained.len() as u64 == manifest.event_count {
-                continue;
-            }
-            if !retained.is_empty() {
-                self.segments
-                    .for_signal(signal)?
-                    .write_reconciled_segment(&manifest.segment_id, &retained)?;
-            }
-            self.evict_segment(signal, &manifest.segment_id)?;
-        }
-        Ok(removed)
-    }
-
-    pub(crate) fn evict_segment(
-        &self,
-        signal: SignalKind,
-        segment_id: &str,
-    ) -> Result<Option<SegmentManifest>> {
-        let receipt_root = self
-            .root
-            .join("archive-cache")
-            .join("evicted")
-            .join(match signal {
-                SignalKind::Log => "logs",
-                SignalKind::Metric => "metrics",
-                SignalKind::Span => "traces",
-            });
-        self.segments
-            .for_signal(signal)?
-            .evict_segment(segment_id, &receipt_root)
     }
 
     pub fn manifests(&self) -> Result<Vec<SegmentManifest>> {
@@ -487,47 +306,8 @@ impl RawStorageReader {
     }
 }
 
-fn verify_local_retained_exact(
-    local: &RawStorage,
-    retained: &RawStorage,
-    snapshot_index: u64,
-) -> Result<()> {
-    for signal in SignalKind::ALL {
-        let mut local_reader = local.segments.for_signal(signal)?.reader(0)?;
-        let mut retained_reader = retained.segments.for_signal(signal)?.reader(0)?;
-        loop {
-            let local_event = next_prefix_event(&mut local_reader, signal, snapshot_index)?;
-            let retained_event = next_prefix_event(&mut retained_reader, signal, snapshot_index)?;
-            if local_event != retained_event {
-                anyhow::bail!(
-                    "local {} prefix does not equal the retained archive through cursor {snapshot_index}",
-                    signal
-                );
-            }
-            if local_event.is_none() {
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn next_prefix_event(
-    reader: &mut SegmentEventReader,
-    signal: SignalKind,
-    snapshot_index: u64,
-) -> Result<Option<StoredEvent>> {
-    let Some(event) = reader.next_event()? else {
-        return Ok(None);
-    };
-    if event.event.signal != signal {
-        anyhow::bail!("retained-prefix verification found the wrong signal");
-    }
-    Ok((event.cursor <= snapshot_index).then_some(event))
-}
-
 impl SignalSegmentStores {
-    fn for_signal(&self, signal: SignalKind) -> Result<&SegmentStore> {
+    pub(super) fn for_signal(&self, signal: SignalKind) -> Result<&SegmentStore> {
         match signal {
             SignalKind::Log => Ok(&self.logs),
             SignalKind::Metric => Ok(&self.metrics),
@@ -539,4 +319,3 @@ impl SignalSegmentStores {
         [&self.logs, &self.metrics, &self.traces]
     }
 }
-// HANDWRITE-END

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
+use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::projection::application::projection_runtime::ProjectionRuntime;
-use crate::DurableJournal;
 
 pub struct ProjectionWorker {
     pub(crate) shutdown: Option<tokio::sync::watch::Sender<bool>>,

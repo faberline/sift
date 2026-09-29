@@ -11,6 +11,7 @@ pub mod durability;
 pub mod event;
 pub mod grpc;
 pub mod ingest;
+mod journal;
 pub mod mcp;
 pub mod operator;
 pub mod projection;
@@ -21,6 +22,10 @@ mod shared_kernel;
 pub mod storage;
 
 pub use crate::ingest::domain::governance_policy::{GovernancePolicy, GovernancePolicySet};
+pub use crate::journal::domain::append_result::AppendResult;
+pub use crate::journal::domain::event_query::EventQuery;
+pub use crate::journal::infrastructure::durable_journal::DurableJournal;
+pub use crate::journal::infrastructure::journal_projection_read_session::JournalProjectionReadSession;
 pub use crate::projection::interfaces::projection_worker::ProjectionWorker;
 pub use crate::query::interfaces::http::query_role_router::query_role_router;
 pub use crate::shared_kernel::stored_event::StoredEvent;
@@ -31,11 +36,10 @@ pub use event::{
 };
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, RwLock,
+        Arc,
     },
 };
 
@@ -48,8 +52,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::{DateTime, Duration, Utc};
-use metrics_prometheus::{Counter, Sample};
+use chrono::{DateTime, Utc};
+use metrics_prometheus::Sample;
 use serde::{Deserialize, Serialize};
 use service_auth::{Role, RoleMapPrincipal};
 use service_http::{DetailedErrorEnvelope as ErrorEnvelope, ProjectionMetadata};
@@ -59,13 +63,13 @@ use utoipa::{OpenApi, ToSchema};
 use crate::ingest::application::admission_controller::AdmissionController;
 use crate::ingest::domain::admission_error::AdmissionError;
 use crate::ingest::domain::ingest_limits::IngestLimits;
-use crate::ingest::domain::storage_reservation::storage_reservation;
 use crate::ingest::infrastructure::ingest_batch_coordinator::IngestBatchCoordinator;
 use crate::ingest::interfaces::http::otlp_handlers::{
     __path_ingest_logs, __path_ingest_metrics, __path_ingest_traces, ingest_logs, ingest_metrics,
     ingest_traces,
 };
 use crate::ingest::interfaces::http::prometheus_remote_write::prometheus_remote_write;
+use crate::journal::infrastructure::raft::sift_membership_policy::SiftMembershipPolicy;
 use crate::query::application::archive_query_status::ArchiveQueryStatus;
 use crate::query::infrastructure::file_query_job_store::QueryJobStore;
 use crate::query::interfaces::http::correlate_v1::correlate_v1;
@@ -77,1771 +81,10 @@ use crate::query::interfaces::http::prometheus_query::{
 use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
 use crate::query::interfaces::http::query_v1::{get_query_job_v1, query_v1, tail_logs_v1};
 use crate::query::interfaces::mcp::mcp_transport::http_router;
-use crate::shared_kernel::event_content_digest::{decode_digest, xor_digest};
 use crate::shared_kernel::retention_boundary::retention_rejection_at;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
-pub struct AppendResult {
-    pub event_id: String,
-    /// Leader-selected Raft decision time. The exact six-hour window starts
-    /// at this returned timestamp, not at client-side response receipt time.
-    pub acknowledged_at: String,
-    /// Compatibility alias for `raw_cursor`.
-    pub cursor: u64,
-    pub raw_cursor: u64,
-    pub commit_index: u64,
-    /// True when Sift found the event ID inside its six-hour exact window.
-    pub duplicate: bool,
-}
-
-impl AppendResult {
-    fn with_commit_index(mut self, commit_index: u64) -> Self {
-        self.commit_index = commit_index;
-        self
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct EventQuery {
-    pub signal: Option<SignalKind>,
-    pub after: u64,
-    pub limit: usize,
-}
-
-const DEFAULT_RESIDENT_JOURNAL_EVENTS: usize = 100_000;
-const RECOVERY_PAGE_EVENTS: usize = 10_000;
-const RECOVERY_PAGE_BYTES: usize = 16 * 1024 * 1024;
-const PROJECTION_LOCAL_BUFFER_EVENTS: usize = 100_000;
 const ALL_VOTER_CHECKPOINT_ATTEMPT: std::time::Duration = std::time::Duration::from_secs(30);
 const ARCHIVE_GC_BATCH_OBJECTS: usize = 128;
-
-#[derive(Default)]
-struct JournalState {
-    recent_events: VecDeque<StoredEvent>,
-    recent_cursors_by_event_id: HashMap<(String, String), RecentCursor>,
-    last_cursor: u64,
-    total_events: u64,
-    projection_generation: u64,
-    retention_generation: u64,
-    event_content_digest: [u8; 32],
-}
-
-#[derive(Clone, Debug)]
-struct RecentCursor {
-    cursor: u64,
-    acknowledged_at: DateTime<Utc>,
-}
-
-impl RecentCursor {
-    fn from_stored(event: &StoredEvent) -> Result<Self> {
-        Ok(Self {
-            cursor: event.cursor,
-            acknowledged_at: DateTime::parse_from_rfc3339(&event.acknowledged_at)
-                .context("stored event acknowledged_at must be RFC3339")?
-                .with_timezone(&Utc),
-        })
-    }
-
-    fn active_at(&self, now: DateTime<Utc>) -> bool {
-        self.acknowledged_at >= now - Duration::seconds(storage::IDEMPOTENCY_WINDOW_SECONDS)
-    }
-}
-
-fn recent_cursor_at(
-    cursors: &HashMap<(String, String), RecentCursor>,
-    project: &str,
-    event_id: &str,
-    now: DateTime<Utc>,
-) -> Option<u64> {
-    recent_receipt_at(cursors, project, event_id, now).map(|(cursor, _)| cursor)
-}
-
-fn recent_receipt_at(
-    cursors: &HashMap<(String, String), RecentCursor>,
-    project: &str,
-    event_id: &str,
-    now: DateTime<Utc>,
-) -> Option<(u64, DateTime<Utc>)> {
-    cursors
-        .get(&(project.to_owned(), event_id.to_owned()))
-        .filter(|recent| recent.active_at(now))
-        .map(|recent| (recent.cursor, recent.acknowledged_at))
-}
-
-fn recent_cursor_map(
-    events: &VecDeque<StoredEvent>,
-) -> Result<HashMap<(String, String), RecentCursor>> {
-    events
-        .iter()
-        .map(|event| {
-            Ok((
-                (event.event.project.clone(), event.event.event_id.clone()),
-                RecentCursor::from_stored(event)?,
-            ))
-        })
-        .collect()
-}
-
-fn xor_event_content_digest(accumulator: &mut [u8; 32], event: &EventEnvelope) -> Result<()> {
-    let encoded = serde_json::to_vec(event).context("encode Sift event content digest")?;
-    let digest: [u8; 32] = Sha256::digest(encoded).into();
-    for (slot, byte) in accumulator.iter_mut().zip(digest) {
-        *slot ^= byte;
-    }
-    Ok(())
-}
-
-struct CanonicalRecoveryReader<'a> {
-    storage: &'a storage::RawStorage,
-    segments: storage::RawStorageReader,
-    wal: storage::SignalWalReader,
-    archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
-    repair_segments: bool,
-    segment_next: Option<StoredEvent>,
-    wal_next: Option<StoredEvent>,
-    pending: Option<StoredEvent>,
-}
-
-impl<'a> CanonicalRecoveryReader<'a> {
-    fn open(
-        storage: &'a storage::RawStorage,
-        wal: &'a storage::SignalWal,
-        archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
-        after: u64,
-        repair_segments: bool,
-    ) -> Result<Self> {
-        Ok(Self {
-            storage,
-            segments: storage.reader(after)?,
-            wal: wal.reader(after)?,
-            archived,
-            repair_segments,
-            segment_next: None,
-            wal_next: None,
-            pending: None,
-        })
-    }
-
-    fn read_page(&mut self) -> Result<Vec<StoredEvent>> {
-        self.read_page_with_limits(RECOVERY_PAGE_EVENTS, RECOVERY_PAGE_BYTES)
-            .map(|(page, _)| page)
-    }
-
-    fn read_page_with_limits(
-        &mut self,
-        max_events: usize,
-        max_bytes: usize,
-    ) -> Result<(Vec<StoredEvent>, bool)> {
-        if max_events == 0 || max_bytes == 0 {
-            bail!("canonical recovery page limits must be greater than zero");
-        }
-        let mut page = Vec::with_capacity(max_events.min(1_000));
-        let mut bytes = 0_usize;
-        while page.len() < max_events {
-            let Some(event) = self.pending.take().or(self.next_event()?) else {
-                return Ok((page, true));
-            };
-            let encoded = serde_json::to_vec(&event)?.len();
-            if !page.is_empty() && bytes.saturating_add(encoded) > max_bytes {
-                self.pending = Some(event);
-                return Ok((page, false));
-            }
-            bytes = bytes.saturating_add(encoded);
-            page.push(event);
-        }
-        Ok((page, false))
-    }
-
-    fn next_event(&mut self) -> Result<Option<StoredEvent>> {
-        loop {
-            if self.segment_next.is_none() {
-                self.segment_next = self.segments.next_event()?;
-            }
-            if self.wal_next.is_none() {
-                self.wal_next = self.wal.read_page(1, usize::MAX)?.pop();
-            }
-            let segment_cursor = self.segment_next.as_ref().map(|event| event.cursor);
-            let wal_cursor = self.wal_next.as_ref().map(|event| event.cursor);
-            match (segment_cursor, wal_cursor) {
-                (None, None) => return Ok(None),
-                (Some(segment_cursor), Some(wal_cursor)) if segment_cursor == wal_cursor => {
-                    let segment = self.segment_next.take().expect("segment event exists");
-                    let wal_event = self.wal_next.take().expect("WAL event exists");
-                    if segment != wal_event {
-                        bail!("WAL and segment disagree at cursor {segment_cursor}");
-                    }
-                    return Ok(Some(wal_event));
-                }
-                (Some(segment_cursor), Some(wal_cursor)) if segment_cursor < wal_cursor => {
-                    let segment = self.segment_next.take().expect("segment event exists");
-                    if !self.archived.covers(segment.event.signal, segment_cursor) {
-                        bail!(
-                            "segment cursor {segment_cursor} has no committed WAL or archive receipt"
-                        );
-                    }
-                    return Ok(Some(segment));
-                }
-                (Some(_), Some(_)) | (None, Some(_)) => {
-                    let wal_event = self.wal_next.take().expect("WAL event exists");
-                    if self
-                        .archived
-                        .covers(wal_event.event.signal, wal_event.cursor)
-                    {
-                        continue;
-                    }
-                    if !self.repair_segments {
-                        bail!(
-                            "WAL cursor {} was not recovered into a segment",
-                            wal_event.cursor
-                        );
-                    }
-                    self.storage
-                        .append(&wal_event)
-                        .context("recover committed WAL event into a segment")?;
-                    return Ok(Some(wal_event));
-                }
-                (Some(segment_cursor), None) => {
-                    let segment = self.segment_next.take().expect("segment event exists");
-                    if !self.archived.covers(segment.event.signal, segment_cursor) {
-                        bail!(
-                            "segment cursor {segment_cursor} has no committed WAL or archive receipt"
-                        );
-                    }
-                    return Ok(Some(segment));
-                }
-            }
-        }
-    }
-}
-
-fn rebuild_dedupe_index(
-    root: &Path,
-    storage: &storage::RawStorage,
-    wal: &storage::SignalWal,
-    dedupe: &storage::DedupeIndex,
-    archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
-    expected_last_cursor: u64,
-) -> Result<()> {
-    dedupe.reset()?;
-    let mut page = Vec::with_capacity(RECOVERY_PAGE_EVENTS);
-    let now = Utc::now();
-
-    let cutoff = now - Duration::seconds(storage::IDEMPOTENCY_WINDOW_SECONDS);
-    let remote = storage::archive::replay_recent_committed_events(root, cutoff, |event| {
-        page.push(event);
-        if page.len() == RECOVERY_PAGE_EVENTS {
-            append_unique_dedupe_page_at(dedupe, &mut page, now)?;
-            dedupe.maintain_at(now, false)?;
-        }
-        Ok(())
-    })?;
-    if !page.is_empty() {
-        append_unique_dedupe_page_at(dedupe, &mut page, now)?;
-        dedupe.maintain_at(now, false)?;
-    }
-
-    let mut receipt_page = Vec::<storage::DedupeReceipt>::with_capacity(RECOVERY_PAGE_EVENTS);
-    storage::archive::replay_recent_committed_receipts(root, cutoff, |receipt| {
-        receipt_page.push(receipt);
-        if receipt_page.len() == RECOVERY_PAGE_EVENTS {
-            dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
-            receipt_page.clear();
-            dedupe.maintain_at(now, false)?;
-        }
-        Ok(())
-    })?;
-    if !receipt_page.is_empty() {
-        dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
-        dedupe.maintain_at(now, false)?;
-    }
-
-    let remote_watermarks = remote
-        .map(|_| archived)
-        .unwrap_or_else(crate::shared_kernel::archive_watermarks::ArchiveWatermarks::default);
-    let mut local_reader = CanonicalRecoveryReader::open(storage, wal, archived, 0, false)?;
-    loop {
-        let local = local_reader.read_page()?;
-        if local.is_empty() {
-            break;
-        }
-        let mut new_events = local
-            .into_iter()
-            .filter(|event| !remote_watermarks.covers(event.event.signal, event.cursor))
-            .collect::<Vec<_>>();
-        append_unique_dedupe_page_at(dedupe, &mut new_events, now)?;
-        dedupe.maintain_at(now, false)?;
-    }
-
-    let stats = dedupe.stats_at(now)?;
-    if stats.newest_cursor > expected_last_cursor {
-        bail!(
-            "rebuilt dedupe index cursor {} is ahead of journal cursor {expected_last_cursor}",
-            stats.newest_cursor
-        );
-    }
-    dedupe.mark_rebuilt_through(expected_last_cursor)?;
-    dedupe.maintain_at(now, true)?;
-    Ok(())
-}
-
-fn append_unique_dedupe_page(
-    dedupe: &storage::DedupeIndex,
-    page: &mut Vec<StoredEvent>,
-) -> Result<()> {
-    append_unique_dedupe_page_at(dedupe, page, Utc::now())
-}
-
-fn append_unique_dedupe_page_at(
-    dedupe: &storage::DedupeIndex,
-    page: &mut Vec<StoredEvent>,
-    now: DateTime<Utc>,
-) -> Result<()> {
-    if page.is_empty() {
-        return Ok(());
-    }
-    let mut page_ids = HashMap::with_capacity(page.len());
-    for stored in page.iter() {
-        if !dedupe.covers(stored, now)? {
-            continue;
-        }
-        if let Some(previous) = page_ids
-            .insert(
-                (stored.event.project.clone(), stored.event.event_id.clone()),
-                stored.cursor,
-            )
-            .or(dedupe.lookup_at(&stored.event.project, &stored.event.event_id, now)?)
-        {
-            bail!(
-                "journal contains duplicate event_id {} at cursors {previous} and {}",
-                stored.event.event_id,
-                stored.cursor
-            );
-        }
-    }
-    dedupe.append_batch_at(page, now)?;
-    page.clear();
-    Ok(())
-}
-
-/// Append-only JSONL journal. State is updated only after `sync_data` succeeds,
-/// making a successful [`append`](Self::append) acknowledgement durable.
-pub struct DurableJournal {
-    _layout: storage::DataLayout,
-    wal: storage::SignalWal,
-    storage: storage::RawStorage,
-    dedupe: storage::DedupeIndex,
-    blob_gate: Mutex<()>,
-    state: RwLock<JournalState>,
-    resident_limit: usize,
-    governance: GovernancePolicySet,
-    accepted: Counter,
-    duplicates: Counter,
-    fsyncs: Counter,
-    recovery_required: AtomicBool,
-    retention_fenced: AtomicBool,
-}
-
-#[doc(hidden)]
-pub struct JournalProjectionReadSession {
-    journal: Arc<DurableJournal>,
-    archive: Option<storage::archive::CommittedEventReader>,
-    archive_through: u64,
-    cursor: u64,
-    local: VecDeque<StoredEvent>,
-}
-
-impl JournalProjectionReadSession {
-    #[doc(hidden)]
-    pub fn read_next(&mut self, limit: usize) -> Result<Vec<StoredEvent>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let mut page = Vec::with_capacity(limit);
-        if let Some(archive) = self.archive.as_mut() {
-            let archived = archive.read_next(limit)?;
-            if let Some(last) = archived.last() {
-                self.cursor = last.cursor;
-            }
-            let exhausted = archived.len() < limit;
-            page.extend(archived);
-            if !exhausted {
-                return Ok(page);
-            }
-            self.archive = None;
-            self.cursor = self.cursor.max(self.archive_through);
-        }
-        while page.len() < limit {
-            if self.local.is_empty() {
-                // A background archive can commit and evict the next local
-                // suffix after this session opened. Refresh the manifest at
-                // the current cursor before consulting local files.
-                if self.refresh_archive()? {
-                    let archived = self
-                        .archive
-                        .as_mut()
-                        .expect("refreshed archive reader exists")
-                        .read_next(limit - page.len())?;
-                    if let Some(last) = archived.last() {
-                        self.cursor = last.cursor;
-                    }
-                    let exhausted = archived.len() < limit - page.len();
-                    page.extend(archived);
-                    if !exhausted {
-                        return Ok(page);
-                    }
-                    self.archive = None;
-                    self.cursor = self.cursor.max(self.archive_through);
-                    continue;
-                }
-                self.local = self
-                    .journal
-                    .query_local_unchecked(
-                        EventQuery {
-                            signal: None,
-                            after: self.cursor,
-                            limit: PROJECTION_LOCAL_BUFFER_EVENTS,
-                        },
-                        PROJECTION_LOCAL_BUFFER_EVENTS,
-                    )?
-                    .into();
-                if self.local.is_empty() {
-                    // Close the commit/eviction race. The first refresh can
-                    // observe the old receipt immediately before local files
-                    // are evicted under a new committed receipt.
-                    if self.refresh_archive()? {
-                        continue;
-                    }
-                    break;
-                }
-            }
-            while page.len() < limit {
-                let Some(event) = self.local.pop_front() else {
-                    break;
-                };
-                if event.cursor <= self.cursor {
-                    bail!("projection source cursors are not strictly increasing");
-                }
-                self.cursor = event.cursor;
-                page.push(event);
-            }
-        }
-        Ok(page)
-    }
-
-    fn refresh_archive(&mut self) -> Result<bool> {
-        let Some(reader) =
-            storage::archive::CommittedEventReader::open(self.journal.data_dir(), self.cursor)?
-        else {
-            return Ok(false);
-        };
-        self.archive_through = reader.snapshot_index();
-        self.archive = Some(reader);
-        Ok(true)
-    }
-}
-
-impl DurableJournal {
-    fn ensure_recovered(&self) -> Result<()> {
-        if self.recovery_required.load(Ordering::Acquire) {
-            bail!("Sift journal requires archive recovery before it can serve data");
-        }
-        Ok(())
-    }
-
-    fn ensure_queryable(&self) -> Result<()> {
-        self.ensure_recovered()?;
-        if self.retention_fenced.load(Ordering::Acquire) {
-            bail!("Sift queries wait for the committed retention checkpoint");
-        }
-        Ok(())
-    }
-
-    #[doc(hidden)]
-    pub fn projection_read_session(
-        self: &Arc<Self>,
-        after: u64,
-    ) -> Result<JournalProjectionReadSession> {
-        self.ensure_recovered()?;
-        let archive = storage::archive::CommittedEventReader::open(self.data_dir(), after)?;
-        let archive_through = archive
-            .as_ref()
-            .map(storage::archive::CommittedEventReader::snapshot_index)
-            .unwrap_or(after);
-        Ok(JournalProjectionReadSession {
-            journal: self.clone(),
-            archive,
-            archive_through,
-            cursor: after,
-            local: VecDeque::new(),
-        })
-    }
-
-    pub(crate) fn set_retention_fenced(&self, fenced: bool) {
-        self.retention_fenced.store(fenced, Ordering::Release);
-    }
-
-    pub(crate) fn mark_recovery_required(&self) {
-        self.recovery_required.store(true, Ordering::Release);
-    }
-
-    pub(crate) fn recovery_required(&self) -> bool {
-        self.recovery_required.load(Ordering::Acquire)
-    }
-
-    pub(crate) fn retention_generation(&self) -> u64 {
-        self.state
-            .read()
-            .expect("journal state lock poisoned")
-            .retention_generation
-    }
-
-    pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_role(data_dir, storage::StorageRole::All)
-    }
-
-    pub fn open_with_role(data_dir: impl AsRef<Path>, role: storage::StorageRole) -> Result<Self> {
-        Self::open_with_governance_and_role(data_dir, GovernancePolicySet::from_env()?, role)
-    }
-
-    pub fn open_with_governance(
-        data_dir: impl AsRef<Path>,
-        governance: GovernancePolicySet,
-    ) -> Result<Self> {
-        Self::open_with_governance_and_role(data_dir, governance, storage::StorageRole::All)
-    }
-
-    pub fn open_with_governance_and_role(
-        data_dir: impl AsRef<Path>,
-        governance: GovernancePolicySet,
-        role: storage::StorageRole,
-    ) -> Result<Self> {
-        Self::open_configured(data_dir, governance, role, DEFAULT_RESIDENT_JOURNAL_EVENTS)
-    }
-
-    pub fn open_with_resident_limit(
-        data_dir: impl AsRef<Path>,
-        resident_limit: usize,
-    ) -> Result<Self> {
-        Self::open_configured(
-            data_dir,
-            GovernancePolicySet::from_env()?,
-            storage::StorageRole::All,
-            resident_limit,
-        )
-    }
-
-    fn open_configured(
-        data_dir: impl AsRef<Path>,
-        governance: GovernancePolicySet,
-        role: storage::StorageRole,
-        resident_limit: usize,
-    ) -> Result<Self> {
-        governance.validate()?;
-        if resident_limit == 0 {
-            bail!("resident journal event limit must be greater than zero");
-        }
-        let layout = storage::DataLayout::open(data_dir, role)?;
-        let data_dir = layout.root().to_path_buf();
-        storage::archive::cleanup_orphan_spills(&data_dir)?;
-        storage::archive::reconcile_staged_archive_gc(&data_dir)?;
-        let wal = storage::SignalWal::open(&data_dir)?;
-        let storage = storage::RawStorage::open(&data_dir)?;
-        let stored_head = storage::JournalHead::load(&data_dir)?;
-        storage::archive::reconcile_committed_retention(
-            &data_dir,
-            &storage,
-            stored_head
-                .as_ref()
-                .map(|head| head.retention_generation)
-                .unwrap_or_default(),
-        )?;
-        let archived = storage::archive::committed_watermarks(&data_dir)?;
-        // A committed manifest is the durable authority for this prefix. Retry
-        // compaction before comparing local segments with WAL bytes so a crash
-        // after archive reconciliation cannot resurrect an older WAL copy.
-        wal.compact_through(archived)?;
-        let remote_retained = storage::archive::remote_retained_state(&data_dir)?;
-        let mut state = JournalState::default();
-        let (dedupe, dedupe_stats) = storage::DedupeIndex::open(&data_dir)?;
-        let recovery_time = Utc::now();
-        let mut recovery = CanonicalRecoveryReader::open(&storage, &wal, archived, 0, true)?;
-        let mut dedupe_matches = true;
-        let mut local_after_remote = 0_u64;
-        let mut local_after_remote_digest = [0_u8; 32];
-        loop {
-            let page = recovery.read_page()?;
-            if page.is_empty() {
-                break;
-            }
-            for stored in page {
-                if remote_retained.is_none_or(|remote| {
-                    !remote.watermarks.covers(stored.event.signal, stored.cursor)
-                }) {
-                    local_after_remote = local_after_remote.saturating_add(1);
-                    xor_event_content_digest(&mut local_after_remote_digest, &stored.event)?;
-                }
-                if !dedupe_stats.rebuild_required
-                    && dedupe.covers(&stored, recovery_time)?
-                    && dedupe.lookup_at(
-                        &stored.event.project,
-                        &stored.event.event_id,
-                        recovery_time,
-                    )? != Some(stored.cursor)
-                {
-                    dedupe_matches = false;
-                }
-                Self::insert_recovered(&mut state, stored, resident_limit)?;
-            }
-        }
-
-        let mut head = stored_head.unwrap_or_else(|| {
-            storage::JournalHead::new(
-                state.last_cursor.max(archived.max_cursor()),
-                state.total_events,
-            )
-        });
-        head.last_cursor = head
-            .last_cursor
-            .max(state.last_cursor)
-            .max(archived.max_cursor())
-            .max(
-                remote_retained
-                    .map(|remote| remote.snapshot_index)
-                    .unwrap_or_default(),
-            );
-        head.retained_events = match remote_retained {
-            Some(remote) => remote
-                .event_count
-                .checked_add(local_after_remote)
-                .context("retained event count exhausted u64")?,
-            None => head.retained_events.max(state.total_events),
-        };
-        if let Some(remote) = remote_retained {
-            if remote.retention_generation > head.retention_generation {
-                if !remote.retention_scan_pending {
-                    head.projection_generation = head.projection_generation.saturating_add(1);
-                }
-                head.retention_generation = remote.retention_generation;
-            }
-        }
-        if head.retained_events > head.last_cursor {
-            bail!("journal head retained event count exceeds the recovered cursor range");
-        }
-
-        if dedupe_stats.rebuild_required
-            || dedupe_stats.indexed_through_cursor != head.last_cursor
-            || dedupe_stats.newest_cursor > head.last_cursor
-            || !dedupe_matches
-        {
-            rebuild_dedupe_index(
-                &data_dir,
-                &storage,
-                &wal,
-                &dedupe,
-                archived,
-                head.last_cursor,
-            )?;
-        }
-        head.persist(&data_dir)?;
-        // A durable archive receipt authorizes WAL truncation. Retry a crash
-        // or late I/O failure before this journal starts serving requests.
-        wal.compact_through(archived)?;
-        state.last_cursor = head.last_cursor;
-        state.total_events = head.retained_events;
-        state.projection_generation = head.projection_generation;
-        state.retention_generation = head.retention_generation;
-        if let Some(remote) = remote_retained {
-            state.event_content_digest =
-                xor_digest(remote.event_content_sha256, local_after_remote_digest);
-        }
-        let accepted = head.retained_events;
-        let journal = Self {
-            _layout: layout,
-            wal,
-            storage,
-            dedupe,
-            blob_gate: Mutex::new(()),
-            state: RwLock::new(state),
-            resident_limit,
-            governance,
-            accepted: Counter::new(),
-            duplicates: Counter::new(),
-            fsyncs: Counter::new(),
-            recovery_required: AtomicBool::new(false),
-            retention_fenced: AtomicBool::new(false),
-        };
-        journal.accepted.add(accepted);
-        if let Err(error) = storage::archive::resume_local_blob_gc_batch(&journal, 128, 1_280_000) {
-            tracing::warn!(%error, "resume local blob GC after restart failed; durable progress is retained");
-        }
-        Ok(journal)
-    }
-
-    pub fn append(&self, event: EventEnvelope) -> Result<AppendResult> {
-        self.append_durable_batch(vec![event])?
-            .pop()
-            .context("single-event durable batch returned no result")
-    }
-
-    /// Apply one committed single-signal batch to the canonical WAL.
-    ///
-    /// The batch is encoded as one WAL frame and reaches one fsync boundary.
-    /// Segment writes are rebuildable work and do not participate in the
-    /// acknowledgement boundary.
-    pub(crate) fn append_durable_batch(
-        &self,
-        events: Vec<EventEnvelope>,
-    ) -> Result<Vec<AppendResult>> {
-        self.append_durable_batch_at(events, Utc::now())
-    }
-
-    pub(crate) fn append_durable_batch_at(
-        &self,
-        events: Vec<EventEnvelope>,
-        acknowledged_at: DateTime<Utc>,
-    ) -> Result<Vec<AppendResult>> {
-        self.ensure_recovered()?;
-        self.dedupe.advance_window_at(acknowledged_at)?;
-        self.dedupe
-            .preflight_append_at(acknowledged_at, events.len())?;
-        // Blob externalization happens before the event reaches the WAL. Hold
-        // this gate through the durable append so retention cannot delete a
-        // newly created blob before its event reference becomes visible.
-        let _blob_gate = self.blob_gate.lock().expect("Sift blob gate poisoned");
-        let signal = events
-            .first()
-            .context("Sift durable batch must not be empty")?
-            .signal;
-        if events.iter().any(|event| event.signal != signal) {
-            bail!("Sift durable batch must contain exactly one signal");
-        }
-        let mut governed = Vec::with_capacity(events.len());
-        for event in events {
-            let event = self.govern_event(event)?;
-            event.validate()?;
-            governed.push(event);
-        }
-
-        let mut state = self.state.write().expect("journal state lock poisoned");
-        let mut next_cursor = state
-            .last_cursor
-            .checked_add(1)
-            .context("Sift journal cursor exhausted u64")?;
-        let mut staged = Vec::with_capacity(governed.len());
-        let mut staged_cursors = HashMap::<(String, String), u64>::new();
-        let mut results = Vec::with_capacity(governed.len());
-
-        for mut event in governed {
-            let duplicate_receipt = recent_receipt_at(
-                &state.recent_cursors_by_event_id,
-                &event.project,
-                &event.event_id,
-                acknowledged_at,
-            )
-            .map(|(cursor, accepted)| (cursor, accepted.to_rfc3339()))
-            .or_else(|| {
-                staged_cursors
-                    .get(&(event.project.clone(), event.event_id.clone()))
-                    .copied()
-                    .map(|cursor| (cursor, acknowledged_at.to_rfc3339()))
-            })
-            .or(self
-                .dedupe
-                .lookup_record_at(&event.project, &event.event_id, acknowledged_at)?
-                .map(|(cursor, accepted)| {
-                    (
-                        cursor,
-                        DateTime::<Utc>::from_timestamp_nanos(accepted).to_rfc3339(),
-                    )
-                }));
-            if let Some((cursor, original_acknowledged_at)) = duplicate_receipt {
-                self.duplicates.incr();
-                results.push(AppendResult {
-                    event_id: event.event_id,
-                    acknowledged_at: original_acknowledged_at,
-                    cursor,
-                    raw_cursor: cursor,
-                    commit_index: cursor,
-                    duplicate: true,
-                });
-                continue;
-            }
-
-            // A successful acknowledgement owns its exact six-hour retry
-            // window even when the telemetry event crosses the 180-day
-            // retention boundary meanwhile. Only a new event is subject to
-            // retention admission.
-            if let Some(message) = retention_rejection_at(&event, acknowledged_at) {
-                bail!(message);
-            }
-
-            self.storage
-                .externalize_event(&mut event)
-                .context("durably externalize raw event payload")?;
-            event.validate()?;
-            let cursor = next_cursor;
-            next_cursor = next_cursor
-                .checked_add(1)
-                .context("Sift journal cursor exhausted u64")?;
-            let event_id = event.event_id.clone();
-            staged_cursors.insert((event.project.clone(), event_id.clone()), cursor);
-            staged.push(StoredEvent {
-                cursor,
-                acknowledged_at: acknowledged_at.to_rfc3339(),
-                event,
-            });
-            results.push(AppendResult {
-                event_id,
-                acknowledged_at: acknowledged_at.to_rfc3339(),
-                cursor,
-                raw_cursor: cursor,
-                commit_index: cursor,
-                duplicate: false,
-            });
-        }
-
-        if !staged.is_empty() {
-            self.wal
-                .append_batch(&staged)
-                .context("append and fsync one signal WAL batch before acknowledgement")?;
-            self.fsyncs.incr();
-            if let Err(error) = self.storage.append_batch(&staged) {
-                tracing::warn!(
-                    %error,
-                    first_cursor = staged.first().map(|event| event.cursor),
-                    last_cursor = staged.last().map(|event| event.cursor),
-                    "deferred segment append failed; canonical WAL remains recoverable"
-                );
-            }
-            if let Err(append_error) = self.dedupe.append_batch_at(&staged, acknowledged_at) {
-                let archived = storage::archive::committed_watermarks(self.data_dir())?;
-                let expected_last_cursor = staged
-                    .last()
-                    .map(|stored| stored.cursor)
-                    .unwrap_or(state.last_cursor);
-                if let Err(rebuild_error) = rebuild_dedupe_index(
-                    self.data_dir(),
-                    &self.storage,
-                    &self.wal,
-                    &self.dedupe,
-                    archived,
-                    expected_last_cursor,
-                ) {
-                    self.recovery_required.store(true, Ordering::Release);
-                    bail!(
-                        "dedupe index append failed ({append_error:#}); rebuild failed ({rebuild_error:#})"
-                    );
-                }
-            }
-            for stored in staged {
-                Self::push_resident(&mut state, stored, self.resident_limit)?;
-            }
-            storage::JournalHead::new(state.last_cursor, state.total_events)
-                .with_projection_generation(state.projection_generation)
-                .with_retention_generation(state.retention_generation)
-                .persist(self.data_dir())
-                .context("persist journal head before acknowledging the durable batch")?;
-            self.accepted.add(staged_cursors.len() as u64);
-        }
-        Ok(results)
-    }
-
-    pub fn govern_event(&self, event: EventEnvelope) -> Result<EventEnvelope> {
-        self.governance.govern(event)
-    }
-
-    pub fn storage(&self) -> &storage::RawStorage {
-        &self.storage
-    }
-
-    fn maintain_dedupe_at(&self, _now: DateTime<Utc>, force: bool) -> Result<usize> {
-        match self.dedupe.maintain_applied(force) {
-            Ok(flushed) => Ok(flushed),
-            Err(maintenance_error) => {
-                let archived = storage::archive::committed_watermarks(self.data_dir())?;
-                let expected_last_cursor = self.last_cursor();
-                rebuild_dedupe_index(
-                    self.data_dir(),
-                    &self.storage,
-                    &self.wal,
-                    &self.dedupe,
-                    archived,
-                    expected_last_cursor,
-                )
-                .with_context(|| {
-                    format!(
-                        "dedupe projection maintenance failed ({maintenance_error:#}); canonical rebuild failed"
-                    )
-                })?;
-                self.dedupe.maintain_applied(force)
-            }
-        }
-    }
-
-    pub(crate) fn scan_blob_references_page(
-        &self,
-        after: u64,
-        limit: usize,
-    ) -> Result<(Vec<String>, u64, bool)> {
-        if limit == 0 {
-            bail!("blob reference scan limit must be greater than zero");
-        }
-        let archived = storage::archive::committed_watermarks(self.data_dir())?;
-        let mut reader =
-            CanonicalRecoveryReader::open(&self.storage, &self.wal, archived, after, true)?;
-        let (page, exhausted) = reader.read_page_with_limits(limit, RECOVERY_PAGE_BYTES)?;
-        let scanned_through = page.last().map(|event| event.cursor).unwrap_or_else(|| {
-            if exhausted {
-                self.last_cursor()
-            } else {
-                after
-            }
-        });
-        let mut references = BTreeSet::new();
-        for event in page {
-            references.extend(
-                event
-                    .event
-                    .blob_refs
-                    .into_iter()
-                    .map(|reference| reference.hash),
-            );
-        }
-        Ok((references.into_iter().collect(), scanned_through, exhausted))
-    }
-
-    pub(crate) fn finalize_blob_candidates_with_index<Mark, IsLive>(
-        &self,
-        hashes: &[String],
-        after: u64,
-        limit: usize,
-        mut mark_live: Mark,
-        mut is_live: IsLive,
-    ) -> Result<(u64, usize, bool)>
-    where
-        Mark: FnMut(&str) -> Result<()>,
-        IsLive: FnMut(&str) -> Result<bool>,
-    {
-        let _blob_gate = self.blob_gate.lock().expect("Sift blob gate poisoned");
-        let (references, scanned_through, exhausted) =
-            self.scan_blob_references_page(after, limit)?;
-        for hash in references {
-            mark_live(&hash)?;
-        }
-        if !exhausted {
-            return Ok((scanned_through, 0, false));
-        }
-        let mut removed = 0_usize;
-        for hash in hashes {
-            if !is_live(hash)? && self.storage.remove_blob(hash)? {
-                removed = removed.saturating_add(1);
-            }
-        }
-        Ok((self.last_cursor(), removed, true))
-    }
-
-    /// Seal one globally consistent archive prefix.
-    ///
-    /// Ingest holds this same journal-state write lock while it allocates a
-    /// cursor, writes the canonical WAL, and appends rebuildable segments. The
-    /// archive therefore cannot observe a later signal while missing an
-    /// earlier cursor from another signal.
-    pub(crate) fn seal_archive_prefix(
-        &self,
-    ) -> Result<(u64, Vec<(SignalKind, storage::SegmentManifest)>)> {
-        let state = self.state.write().expect("journal state lock poisoned");
-        let captured_cursor = state.last_cursor;
-        let segments = self.storage.seal_all_with_signal()?;
-        drop(state);
-        Ok((captured_cursor, segments))
-    }
-
-    pub(crate) fn compact_archived_wal(
-        &self,
-        watermarks: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
-    ) -> Result<()> {
-        self.wal.compact_through(watermarks)
-    }
-
-    /// Adopt a hash-verified archive checkpoint on a caught-up replica.
-    ///
-    /// The journal write lock also blocks queries and appends. The local
-    /// segment prefix is rewritten before the archive receipt permits WAL
-    /// compaction. A new source generation then forces every typed projection
-    /// to rebuild from the retained canonical rows.
-    pub(crate) fn adopt_archive_checkpoint(
-        &self,
-        restored: &DurableJournal,
-        receipt: &storage::archive::ArchiveReceipt,
-        expected_raw_cursor: u64,
-    ) -> Result<()> {
-        if receipt.manifest.raft_snapshot_index != expected_raw_cursor
-            || restored.last_cursor() != expected_raw_cursor
-            || restored.total_event_count() != receipt.manifest.event_count
-        {
-            bail!("verified archive checkpoint does not match its Raft cursor");
-        }
-
-        self.recovery_required.store(true, Ordering::Release);
-        let mut state = self.state.write().expect("journal state lock poisoned");
-        self.dedupe.preflight_rebuild()?;
-        let staged_dedupe = self.dedupe.replace_from(&restored.dedupe)?;
-        if staged_dedupe.indexed_through_cursor != expected_raw_cursor
-            || staged_dedupe.newest_cursor > expected_raw_cursor
-            || staged_dedupe.rebuild_required
-        {
-            bail!("validated archive checkpoint dedupe index disagrees with its manifest");
-        }
-        let last_cursor = state.last_cursor.max(expected_raw_cursor);
-        let prior_archive = storage::archive::committed_status(self.data_dir())?;
-        let archive_identity_changed = prior_archive.as_ref().is_some_and(|status| {
-            status.manifest_uri != receipt.manifest_uri
-                || status.manifest_sha256 != receipt.manifest_sha256
-        });
-        self.storage
-            .reconcile_retained_prefix(restored.storage(), receipt.manifest.raft_snapshot_index)?;
-        let watermarks =
-            storage::archive::adopt_verified_archive_receipt(self.data_dir(), receipt)?;
-        self.wal.compact_through(watermarks)?;
-
-        let projection_generation = if receipt.manifest.retention_scan.is_none()
-            && (receipt.manifest.retention_generation > state.retention_generation
-                || archive_identity_changed)
-        {
-            state.projection_generation.saturating_add(1)
-        } else {
-            state.projection_generation
-        };
-        let mut rebuilt = JournalState {
-            projection_generation,
-            retention_generation: receipt.manifest.retention_generation,
-            ..JournalState::default()
-        };
-        let mut recovery =
-            CanonicalRecoveryReader::open(&self.storage, &self.wal, watermarks, 0, false)?;
-        let mut local_after_archive = 0_u64;
-        let mut local_after_archive_digest = [0_u8; 32];
-        let mut suffix_dedupe_page = Vec::with_capacity(RECOVERY_PAGE_EVENTS);
-        loop {
-            let page = recovery.read_page()?;
-            if page.is_empty() {
-                break;
-            }
-            for event in page {
-                if !watermarks.covers(event.event.signal, event.cursor) {
-                    local_after_archive = local_after_archive.saturating_add(1);
-                    xor_event_content_digest(&mut local_after_archive_digest, &event.event)?;
-                    suffix_dedupe_page.push(event.clone());
-                    if suffix_dedupe_page.len() == RECOVERY_PAGE_EVENTS {
-                        append_unique_dedupe_page(&self.dedupe, &mut suffix_dedupe_page)?;
-                    }
-                }
-                Self::insert_recovered(&mut rebuilt, event, self.resident_limit)?;
-            }
-        }
-        append_unique_dedupe_page(&self.dedupe, &mut suffix_dedupe_page)?;
-        rebuilt.last_cursor = rebuilt.last_cursor.max(last_cursor);
-        let retained_events = receipt
-            .manifest
-            .event_count
-            .checked_add(local_after_archive)
-            .context("retained event count exhausted u64")?;
-        rebuilt.total_events = retained_events;
-        let archived_digest: [u8; 32] = hex::decode(&receipt.manifest.event_content_sha256)
-            .context("decode adopted archive event content digest")?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("archive event content digest must be 32 bytes"))?;
-        rebuilt.event_content_digest = xor_digest(archived_digest, local_after_archive_digest);
-        storage::JournalHead::new(rebuilt.last_cursor, retained_events)
-            .with_projection_generation(projection_generation)
-            .with_retention_generation(rebuilt.retention_generation)
-            .persist(self.data_dir())?;
-        *state = rebuilt;
-        drop(state);
-        storage::archive::resume_local_blob_gc_batch(self, 128, 1_280_000)?;
-        self.recovery_required.store(false, Ordering::Release);
-        Ok(())
-    }
-
-    /// Apply one manifest-backed retention generation to a caught-up voter.
-    /// The voter uses its local hot cache plus the small source/target delta.
-    /// It does not download every cumulative Parquet segment.
-    pub(crate) fn adopt_archive_retention_delta(
-        &self,
-        receipt: &storage::archive::ArchiveReceipt,
-        expected_raw_cursor: u64,
-    ) -> Result<()> {
-        let delta = receipt
-            .manifest
-            .retention_delta
-            .as_ref()
-            .context("archive retention checkpoint is missing its source delta")?;
-        if receipt.manifest.raft_snapshot_index != expected_raw_cursor
-            || receipt.manifest.retention_generation != delta.source_generation.saturating_add(1)
-        {
-            bail!("archive retention delta does not match its Raft cursor or generation");
-        }
-        let local_status = storage::archive::committed_status(self.data_dir())?
-            .context("archive retention delta requires its source receipt")?;
-        if local_status.manifest_uri != delta.source_manifest_uri
-            || local_status.manifest_sha256 != delta.source_manifest_sha256
-            || local_status.retention_generation != delta.source_generation
-        {
-            bail!("archive retention delta source receipt changed");
-        }
-        let (prefix_events, prefix_digest, generation) =
-            self.checkpoint_identity(expected_raw_cursor)?;
-        if generation != delta.source_generation
-            || prefix_events != delta.source_event_count
-            || hex::encode(prefix_digest) != delta.source_event_content_sha256
-        {
-            bail!("archive retention delta source content disagrees with the voter");
-        }
-
-        self.recovery_required.store(true, Ordering::Release);
-        let cutoff = DateTime::<Utc>::from_timestamp_nanos(delta.cutoff_unix_nano);
-        self.storage
-            .evict_expired_before(cutoff, expected_raw_cursor)?;
-        let watermarks =
-            storage::archive::adopt_verified_archive_receipt(self.data_dir(), receipt)?;
-        self.apply_expiration_head(
-            cutoff,
-            delta.source_event_count,
-            receipt.manifest.event_count,
-            decode_digest(&delta.source_event_content_sha256)?,
-            decode_digest(&receipt.manifest.event_content_sha256)?,
-            false,
-        )?;
-        storage::archive::resume_local_blob_gc_batch(self, 128, 1_280_000)?;
-        self.wal.compact_through(watermarks)?;
-        self.recovery_required.store(false, Ordering::Release);
-        Ok(())
-    }
-
-    /// Adopt newer durable archive coverage when retention did not change.
-    /// A caught-up voter already has the same logical rows through Raft, so it
-    /// only needs the small manifest receipt and can avoid a cumulative GCS
-    /// restore on every lifecycle tick.
-    pub(crate) fn adopt_archive_coverage(
-        &self,
-        receipt: &storage::archive::ArchiveReceipt,
-        expected_raw_cursor: u64,
-    ) -> Result<()> {
-        if receipt.manifest.raft_snapshot_index != expected_raw_cursor {
-            bail!("verified archive coverage does not match its Raft cursor");
-        }
-        let (prefix_events, prefix_digest, _) = self.checkpoint_identity(expected_raw_cursor)?;
-        if prefix_events != receipt.manifest.event_count
-            || hex::encode(prefix_digest) != receipt.manifest.event_content_sha256
-        {
-            bail!("archive coverage content disagrees with the caught-up journal");
-        }
-        self.recovery_required.store(true, Ordering::Release);
-        let mut state = self.state.write().expect("journal state lock poisoned");
-        if state.last_cursor < expected_raw_cursor {
-            bail!("Sift journal is behind archive coverage");
-        }
-        if receipt.manifest.retention_generation != state.retention_generation {
-            bail!("archive coverage changed retention and requires full reconciliation");
-        }
-        let suffix_events = state.last_cursor.saturating_sub(expected_raw_cursor);
-        let expected_events = receipt
-            .manifest
-            .event_count
-            .checked_add(suffix_events)
-            .context("archive coverage event count exhausted u64")?;
-        if state.total_events != expected_events {
-            bail!("archive coverage event count disagrees with the caught-up journal");
-        }
-        let watermarks =
-            storage::archive::adopt_verified_archive_receipt(self.data_dir(), receipt)?;
-        state.retention_generation = receipt.manifest.retention_generation;
-        storage::JournalHead::new(state.last_cursor, state.total_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())?;
-        self.wal.compact_through(watermarks)?;
-        self.recovery_required.store(false, Ordering::Release);
-        Ok(())
-    }
-
-    pub(crate) fn evict_resident_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
-        let mut state = self.state.write().expect("journal state lock poisoned");
-        let before = state.recent_events.len();
-        let mut retained = VecDeque::with_capacity(before);
-        while let Some(event) = state.recent_events.pop_front() {
-            let occurred = DateTime::parse_from_rfc3339(&event.event.occurred_at)
-                .context("resident event occurred_at must be RFC3339")?
-                .with_timezone(&Utc);
-            if occurred >= cutoff {
-                retained.push_back(event);
-            }
-        }
-        state.recent_events = retained;
-        state.recent_cursors_by_event_id = recent_cursor_map(&state.recent_events)?;
-        Ok(before.saturating_sub(state.recent_events.len()))
-    }
-
-    pub(crate) fn apply_expiration_head(
-        &self,
-        cutoff: DateTime<Utc>,
-        archived_prefix_events: u64,
-        retained_prefix_events: u64,
-        archived_prefix_digest: [u8; 32],
-        retained_prefix_digest: [u8; 32],
-        repair_dedupe: bool,
-    ) -> Result<()> {
-        let retention_status = storage::archive::committed_status(self.data_dir())?
-            .context("expiration requires a committed archive")?;
-        let retention_generation = retention_status.retention_generation;
-        let archived = storage::archive::committed_watermarks(self.data_dir())?;
-        let mut state = self.state.write().expect("journal state lock poisoned");
-        if !repair_dedupe && state.total_events < archived_prefix_events {
-            bail!("journal contains fewer events than its prior archive prefix");
-        }
-        if retained_prefix_events > archived_prefix_events {
-            bail!("retention cannot add events to an archived prefix");
-        }
-        let suffix_events = state
-            .last_cursor
-            .checked_sub(archived.max_cursor())
-            .context("archive cursor is ahead of the journal head")?;
-        let retained_events = retained_prefix_events
-            .checked_add(suffix_events)
-            .context("retained event count exhausted u64")?;
-        if retained_events > state.last_cursor {
-            bail!("retained event count exceeds the journal cursor high-water mark");
-        }
-
-        let mut retained_resident = VecDeque::with_capacity(state.recent_events.len());
-        while let Some(event) = state.recent_events.pop_front() {
-            let occurred = DateTime::parse_from_rfc3339(&event.event.occurred_at)
-                .context("resident event occurred_at must be RFC3339")?
-                .with_timezone(&Utc);
-            if event.cursor > archived.max_cursor() || occurred >= cutoff {
-                retained_resident.push_back(event);
-            }
-        }
-        state.recent_events = retained_resident;
-        state.recent_cursors_by_event_id = recent_cursor_map(&state.recent_events)?;
-        if !retention_status.retention_scan_pending
-            && state.retention_generation != retention_generation
-        {
-            state.projection_generation = state.projection_generation.saturating_add(1);
-        }
-        state.total_events = retained_events;
-        let suffix_digest = if repair_dedupe {
-            let mut digest = [0_u8; 32];
-            let mut recovery = CanonicalRecoveryReader::open(
-                &self.storage,
-                &self.wal,
-                archived,
-                archived.max_cursor(),
-                true,
-            )?;
-            loop {
-                let page = recovery.read_page()?;
-                if page.is_empty() {
-                    break;
-                }
-                for event in page {
-                    xor_event_content_digest(&mut digest, &event.event)?;
-                }
-            }
-            digest
-        } else {
-            xor_digest(state.event_content_digest, archived_prefix_digest)
-        };
-        state.event_content_digest = xor_digest(retained_prefix_digest, suffix_digest);
-        state.retention_generation = retention_generation;
-        let last_cursor = state.last_cursor;
-        storage::JournalHead::new(last_cursor, retained_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(retention_generation)
-            .persist(self.data_dir())?;
-        if repair_dedupe {
-            rebuild_dedupe_index(
-                self.data_dir(),
-                &self.storage,
-                &self.wal,
-                &self.dedupe,
-                archived,
-                last_cursor,
-            )?;
-        }
-        drop(state);
-        self.recovery_required.store(false, Ordering::Release);
-        Ok(())
-    }
-
-    fn insert_recovered(
-        state: &mut JournalState,
-        stored: StoredEvent,
-        resident_limit: usize,
-    ) -> Result<()> {
-        stored.event.validate()?;
-        let acknowledged_at = DateTime::parse_from_rfc3339(&stored.acknowledged_at)
-            .context("recovered event acknowledged_at must be RFC3339")?
-            .with_timezone(&Utc);
-        if stored.cursor <= state.last_cursor {
-            bail!(
-                "journal cursor {} is not strictly after recovered cursor {}",
-                stored.cursor,
-                state.last_cursor
-            );
-        }
-        if recent_cursor_at(
-            &state.recent_cursors_by_event_id,
-            &stored.event.project,
-            &stored.event.event_id,
-            acknowledged_at,
-        )
-        .is_some()
-        {
-            bail!(
-                "journal contains duplicate event_id {}",
-                stored.event.event_id
-            );
-        }
-        Self::push_resident(state, stored, resident_limit)?;
-        Ok(())
-    }
-
-    fn push_resident(
-        state: &mut JournalState,
-        stored: StoredEvent,
-        resident_limit: usize,
-    ) -> Result<()> {
-        xor_event_content_digest(&mut state.event_content_digest, &stored.event)
-            .expect("validated Sift event must have a stable content digest");
-        let recent = RecentCursor::from_stored(&stored)?;
-        state.last_cursor = stored.cursor;
-        state.total_events = state.total_events.saturating_add(1);
-        state.recent_cursors_by_event_id.insert(
-            (stored.event.project.clone(), stored.event.event_id.clone()),
-            recent,
-        );
-        state.recent_events.push_back(stored);
-        while state.recent_events.len() > resident_limit {
-            if let Some(evicted) = state.recent_events.pop_front() {
-                let remove = state
-                    .recent_cursors_by_event_id
-                    .get(&(
-                        evicted.event.project.clone(),
-                        evicted.event.event_id.clone(),
-                    ))
-                    .is_some_and(|recent| recent.cursor == evicted.cursor);
-                if remove {
-                    state.recent_cursors_by_event_id.remove(&(
-                        evicted.event.project.clone(),
-                        evicted.event.event_id.clone(),
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn last_cursor(&self) -> u64 {
-        self.state
-            .read()
-            .expect("journal state lock poisoned")
-            .last_cursor
-    }
-
-    pub(crate) fn projection_generation(&self) -> u64 {
-        self.state
-            .read()
-            .expect("journal state lock poisoned")
-            .projection_generation
-    }
-
-    pub(crate) fn data_dir(&self) -> &Path {
-        self._layout.root()
-    }
-
-    pub(crate) fn snapshot_bounds(&self) -> (u64, u64) {
-        let state = self.state.read().expect("journal state lock poisoned");
-        (state.last_cursor, state.total_events)
-    }
-
-    pub(crate) fn checkpoint_identity(&self, raw_cursor: u64) -> Result<(u64, [u8; 32], u64)> {
-        let (last_cursor, total_events, total_digest, retention_generation) = {
-            let state = self.state.read().expect("journal state lock poisoned");
-            (
-                state.last_cursor,
-                state.total_events,
-                state.event_content_digest,
-                state.retention_generation,
-            )
-        };
-        if raw_cursor > last_cursor {
-            bail!("checkpoint cursor is ahead of the Sift journal");
-        }
-        let mut suffix_count = 0_u64;
-        let mut suffix_digest = [0_u8; 32];
-        let mut after = raw_cursor;
-        loop {
-            let page = self.query_unchecked(EventQuery {
-                signal: None,
-                after,
-                limit: RECOVERY_PAGE_EVENTS,
-            })?;
-            let Some(last) = page.last().map(|event| event.cursor) else {
-                break;
-            };
-            for event in page {
-                suffix_count = suffix_count.saturating_add(1);
-                xor_event_content_digest(&mut suffix_digest, &event.event)?;
-            }
-            if last <= after {
-                bail!("checkpoint suffix scan made no progress");
-            }
-            after = last;
-        }
-        if suffix_count != last_cursor.saturating_sub(raw_cursor) {
-            bail!("checkpoint suffix is not a contiguous Raft cursor range");
-        }
-        let prefix_events = total_events
-            .checked_sub(suffix_count)
-            .context("checkpoint suffix exceeds retained event count")?;
-        Ok((
-            prefix_events,
-            xor_digest(total_digest, suffix_digest),
-            retention_generation,
-        ))
-    }
-
-    pub fn resident_event_count(&self) -> usize {
-        self.state
-            .read()
-            .expect("journal state lock poisoned")
-            .recent_events
-            .len()
-    }
-
-    pub fn total_event_count(&self) -> u64 {
-        self.state
-            .read()
-            .expect("journal state lock poisoned")
-            .total_events
-    }
-
-    pub fn snapshot_bytes(&self) -> Result<Vec<u8>> {
-        let mut snapshot = Vec::new();
-        durability::write_snapshot(self, self.last_cursor(), &mut snapshot)
-            .context("serialize durable journal snapshot")?;
-        Ok(snapshot)
-    }
-
-    pub fn restore_snapshot_bytes(&self, bytes: &[u8]) -> Result<()> {
-        let mut cursor = std::io::Cursor::new(bytes);
-        durability::restore_seekable_snapshot(self, &mut cursor)
-            .context("restore durable journal snapshot")?;
-        Ok(())
-    }
-
-    /// Restore one globally ordered page without creating a second full-copy
-    /// JSON snapshot. Cold archive restore calls this repeatedly, so resident
-    /// memory stays bounded by the journal cache plus one recovery page.
-    pub(crate) fn restore_stored_page(&self, events: Vec<StoredEvent>) -> Result<()> {
-        if events.is_empty() {
-            return Ok(());
-        }
-        let restored_events = events.len() as u64;
-        let restore_time = Utc::now();
-        let mut state = self.state.write().expect("journal state lock poisoned");
-        let mut previous_cursor = state.last_cursor;
-        let mut page_ids = HashMap::with_capacity(events.len());
-        for event in &events {
-            event.event.validate()?;
-            if event.cursor <= previous_cursor {
-                bail!(
-                    "restored journal cursor {} is not strictly after cursor {previous_cursor}",
-                    event.cursor,
-                );
-            }
-            previous_cursor = event.cursor;
-            if !self.dedupe.covers(event, restore_time)? {
-                continue;
-            }
-            if let Some(previous) = page_ids
-                .insert(
-                    (event.event.project.clone(), event.event.event_id.clone()),
-                    event.cursor,
-                )
-                .or_else(|| {
-                    recent_cursor_at(
-                        &state.recent_cursors_by_event_id,
-                        &event.event.project,
-                        &event.event.event_id,
-                        restore_time,
-                    )
-                })
-                .or(self.dedupe.lookup_at(
-                    &event.event.project,
-                    &event.event.event_id,
-                    restore_time,
-                )?)
-            {
-                bail!(
-                    "restored journal contains duplicate event_id {} at cursors {previous} and {}",
-                    event.event.event_id,
-                    event.cursor
-                );
-            }
-        }
-
-        // A signal WAL frame must contain one contiguous same-signal run.
-        // Preserve global cursor order while still avoiding one fsync per item.
-        let mut start = 0;
-        while start < events.len() {
-            let signal = events[start].event.signal;
-            let mut end = start + 1;
-            while end < events.len()
-                && events[end].event.signal == signal
-                && events[end - 1].cursor.checked_add(1) == Some(events[end].cursor)
-            {
-                end += 1;
-            }
-            self.wal
-                .append_batch(&events[start..end])
-                .context("restore ordered page into signal WAL")?;
-            self.fsyncs.incr();
-            start = end;
-        }
-        self.storage
-            .append_batch(&events)
-            .context("restore ordered page into signal segments")?;
-        self.dedupe
-            .append_batch_at(&events, restore_time)
-            .context("restore ordered page into dedupe index")?;
-        self.dedupe.maintain_at(restore_time, false)?;
-        for event in events {
-            Self::push_resident(&mut state, event, self.resident_limit)?;
-        }
-        storage::JournalHead::new(state.last_cursor, state.total_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())
-            .context("persist restored journal head")?;
-        self.accepted.add(restored_events);
-        Ok(())
-    }
-
-    pub(crate) fn restore_archive_dedupe_page(&self, events: &[StoredEvent]) -> Result<()> {
-        self.dedupe
-            .append_batch(events)
-            .context("restore cold archive IDs into the dedupe index")?;
-        self.dedupe.maintain_at(Utc::now(), false)?;
-        Ok(())
-    }
-
-    pub(crate) fn restore_archive_receipts(
-        &self,
-        receipts: &[storage::DedupeReceipt],
-        indexed_through_cursor: u64,
-    ) -> Result<()> {
-        self.dedupe
-            .append_receipts_at(receipts, indexed_through_cursor, Utc::now())
-            .context("restore independent archive dedupe receipts")?;
-        self.dedupe.maintain_at(Utc::now(), false)?;
-        Ok(())
-    }
-
-    pub(crate) fn set_restored_archive_head(
-        &self,
-        manifest: &storage::archive::ArchiveManifest,
-    ) -> Result<()> {
-        self.dedupe
-            .mark_rebuilt_through(manifest.raft_snapshot_index)?;
-        let dedupe = self.dedupe.stats()?;
-        if dedupe.newest_cursor > manifest.raft_snapshot_index
-            || dedupe.window_seconds != storage::IDEMPOTENCY_WINDOW_SECONDS as u64
-        {
-            bail!("restored archive dedupe index disagrees with its manifest");
-        }
-        let mut state = self.state.write().expect("journal state lock poisoned");
-        if state.last_cursor > manifest.raft_snapshot_index
-            || state.total_events > manifest.event_count
-        {
-            bail!("restored hot set exceeds its archive manifest");
-        }
-        let event_content_digest: [u8; 32] = hex::decode(&manifest.event_content_sha256)
-            .context("decode restored archive event content digest")?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("archive event content digest must be 32 bytes"))?;
-        let newly_counted = manifest.event_count.saturating_sub(state.total_events);
-        state.last_cursor = manifest.raft_snapshot_index;
-        state.total_events = manifest.event_count;
-        state.retention_generation = manifest.retention_generation;
-        state.event_content_digest = event_content_digest;
-        state.projection_generation = state.projection_generation.saturating_add(1);
-        storage::JournalHead::new(state.last_cursor, state.total_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())?;
-        self.accepted.add(newly_counted);
-        Ok(())
-    }
-
-    fn result_for_at(
-        &self,
-        project: &str,
-        event_id: &str,
-        decision_time: DateTime<Utc>,
-    ) -> Result<Option<AppendResult>> {
-        let recent = {
-            let state = self.state.read().expect("journal state lock poisoned");
-            recent_receipt_at(
-                &state.recent_cursors_by_event_id,
-                project,
-                event_id,
-                decision_time,
-            )
-            .map(|(cursor, acknowledged_at)| (cursor, acknowledged_at.to_rfc3339()))
-        };
-        let receipt = match recent {
-            Some(receipt) => Some(receipt),
-            None => self
-                .dedupe
-                .lookup_record_at(project, event_id, decision_time)?
-                .map(|(cursor, acknowledged_at)| {
-                    (
-                        cursor,
-                        DateTime::<Utc>::from_timestamp_nanos(acknowledged_at).to_rfc3339(),
-                    )
-                }),
-        };
-        Ok(receipt.map(|(cursor, acknowledged_at)| AppendResult {
-            event_id: event_id.to_string(),
-            acknowledged_at,
-            cursor,
-            raw_cursor: cursor,
-            commit_index: cursor,
-            duplicate: true,
-        }))
-    }
-
-    pub fn query(&self, query: EventQuery) -> Result<Vec<StoredEvent>> {
-        self.ensure_queryable()?;
-        self.query_unchecked(query)
-    }
-
-    fn query_unchecked(&self, query: EventQuery) -> Result<Vec<StoredEvent>> {
-        self.query_local_unchecked(query, 10_000)
-    }
-
-    fn query_local_unchecked(
-        &self,
-        query: EventQuery,
-        maximum_limit: usize,
-    ) -> Result<Vec<StoredEvent>> {
-        let limit = if query.limit == 0 {
-            100
-        } else {
-            query.limit.clamp(1, maximum_limit.max(1))
-        };
-        let state = self.state.read().expect("journal state lock poisoned");
-        let mut by_cursor = BTreeMap::<u64, StoredEvent>::new();
-        for event in self
-            .storage
-            .query_events(query.signal, query.after, limit)?
-        {
-            by_cursor.insert(event.cursor, event);
-        }
-        for event in state
-            .recent_events
-            .iter()
-            .filter(|entry| entry.cursor > query.after)
-            .filter(|entry| {
-                query
-                    .signal
-                    .is_none_or(|signal| entry.event.signal == signal)
-            })
-        {
-            if let Some(existing) = by_cursor.insert(event.cursor, event.clone()) {
-                if existing.event.event_id != event.event.event_id {
-                    bail!(
-                        "disk and resident journal disagree at cursor {}",
-                        event.cursor
-                    );
-                }
-            }
-        }
-        Ok(by_cursor.into_values().take(limit).collect())
-    }
-
-    pub(crate) fn query_projection_events(
-        &self,
-        after: u64,
-        limit: usize,
-    ) -> Result<Vec<StoredEvent>> {
-        self.ensure_recovered()?;
-        let limit = limit.clamp(1, 10_000);
-        let mut by_cursor = BTreeMap::<u64, StoredEvent>::new();
-        let archive_status = storage::archive::committed_status(self.data_dir())?;
-        if archive_status
-            .as_ref()
-            .is_some_and(|status| after < status.snapshot_index)
-        {
-            if let Some(events) =
-                storage::archive::read_committed_events_after(self.data_dir(), after, limit)?
-            {
-                for event in events {
-                    by_cursor.insert(event.cursor, event);
-                }
-            }
-        }
-        if by_cursor.len() < limit {
-            for event in self.query_unchecked(EventQuery {
-                signal: None,
-                after,
-                limit,
-            })? {
-                by_cursor.insert(event.cursor, event);
-            }
-        }
-        Ok(by_cursor.into_values().take(limit).collect())
-    }
-
-    pub fn replay(&self, after: u64, limit: usize) -> Result<Vec<StoredEvent>> {
-        self.query(EventQuery {
-            signal: None,
-            after,
-            limit,
-        })
-    }
-
-    fn metrics_text(&self) -> String {
-        metrics_prometheus::render(&[
-            Sample::new(
-                "sift_raw_events_total",
-                "counter",
-                "Durably accepted Sift raw events.",
-                self.accepted.get(),
-            ),
-            Sample::new(
-                "sift_duplicate_events_total",
-                "counter",
-                "Idempotent duplicate Sift event submissions.",
-                self.duplicates.get(),
-            ),
-            Sample::new(
-                "sift_journal_fsync_total",
-                "counter",
-                "Sift journal fsync operations completed before acknowledgement.",
-                self.fsyncs.get(),
-            ),
-            Sample::new(
-                "sift_journal_resident_events",
-                "gauge",
-                "Sift events currently retained in journal memory.",
-                self.resident_event_count() as u64,
-            ),
-        ])
-    }
-}
 
 /// Shared HTTP state: journal access plus the drain bit read by `/readyz`.
 #[derive(Clone)]
@@ -1851,36 +94,13 @@ pub struct ServiceState {
     raft: Option<Arc<raft_runtime::RaftHost>>,
     peer_transport: Option<raft_runtime::PeerTransport>,
     peer_port: Option<u16>,
-    state_machine: Arc<durability::SiftStateMachine>,
+    state_machine: Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     local_command: Arc<tokio::sync::Mutex<()>>,
     projections: Arc<projection::ProjectionRuntime>,
     admission: Arc<AdmissionController>,
     local_capacity: Arc<storage::LocalCapacity>,
     query_jobs: Arc<QueryJobStore>,
     batch_coordinator: Arc<std::sync::Mutex<IngestBatchCoordinator>>,
-}
-
-#[derive(Clone)]
-struct CommitContext {
-    journal: Arc<DurableJournal>,
-    raft: Option<Arc<raft_runtime::RaftHost>>,
-    state_machine: Arc<durability::SiftStateMachine>,
-    local_command: Arc<tokio::sync::Mutex<()>>,
-    local_capacity: Arc<storage::LocalCapacity>,
-}
-
-struct SiftMembershipPolicy;
-
-impl raft_runtime::MembershipPolicy for SiftMembershipPolicy {
-    fn validate(&self, topology: &raft_runtime::ClusterTopology) -> anyhow::Result<()> {
-        if topology.replicas_per_shard != 3
-            || topology.membership.voters.len() != 3
-            || !topology.membership.learners.is_empty()
-        {
-            bail!("Sift replicated mode requires exactly three durable voting replicas per shard");
-        }
-        Ok(())
-    }
 }
 
 impl ServiceState {
@@ -1911,10 +131,12 @@ impl ServiceState {
             limits.max_local_storage_bytes,
             limits.min_local_free_bytes,
         )?);
-        let state_machine = Arc::new(durability::SiftStateMachine::open(
-            data_dir,
-            journal.clone(),
-        )?);
+        let state_machine = Arc::new(
+            crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine::open(
+                data_dir,
+                journal.clone(),
+            )?,
+        );
         let (raft, peer_transport, peer_port) = if raft_runtime::replica_mode() {
             let peer_port = std::env::var("SIFT_PEER_PORT")
                 .unwrap_or_else(|_| "7381".to_string())
@@ -2141,8 +363,7 @@ impl ServiceState {
                                             outcome.manifest_uri.clone(),
                                             outcome.manifest_sha256.clone(),
                                         ) {
-                                            match (durability::SiftCommandV1::
-                                                ArchiveCheckpointBarrier {
+                                            match (crate::journal::domain::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
                                                     retention_generation,
                                                     manifest_uri,
                                                     manifest_sha256,
@@ -2178,8 +399,7 @@ impl ServiceState {
                                         outcome.manifest_uri.clone(),
                                         outcome.manifest_sha256.clone(),
                                     ) {
-                                        match (durability::SiftCommandV1::
-                                            ArchiveCheckpointBarrier {
+                                        match (crate::journal::domain::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
                                                 retention_generation,
                                                 manifest_uri,
                                                 manifest_sha256,
@@ -2474,94 +694,6 @@ impl ServiceState {
             task,
         }
     }
-
-    /// Return the dedicated mutually authenticated Raft listener parts.
-    /// Raft routes must never be merged into the public Sift API router.
-    pub fn peer_server(&self) -> Option<(raft_runtime::PeerTransport, u16, Router)> {
-        Some((
-            self.peer_transport.clone()?,
-            self.peer_port?,
-            self.raft.as_ref()?.router(),
-        ))
-    }
-}
-
-impl CommitContext {
-    async fn append_governed_batch(
-        &self,
-        governed: Vec<EventEnvelope>,
-    ) -> Result<Vec<AppendResult>> {
-        if governed.is_empty() {
-            bail!("Sift Raft batch must not be empty");
-        }
-        let encoded_bytes = governed.iter().try_fold(0u64, |total, event| {
-            let bytes = serde_json::to_vec(event)
-                .context("encode governed Sift event for local capacity reservation")?;
-            anyhow::Ok(total.saturating_add(bytes.len() as u64))
-        })?;
-        let capacity_reservation = self
-            .local_capacity
-            .reserve(storage_reservation(encoded_bytes, governed.len()))
-            .context("reserve local WAL and segment capacity before Raft admission")?;
-        let acknowledged_at = Utc::now();
-        let current_commit = self.state_machine.applied_commit_index();
-        let mut duplicate_results = Vec::with_capacity(governed.len());
-        let mut all_duplicates = true;
-        for event in &governed {
-            match self
-                .journal
-                .result_for_at(&event.project, &event.event_id, acknowledged_at)?
-            {
-                Some(result) => duplicate_results.push(result.with_commit_index(current_commit)),
-                None => {
-                    all_duplicates = false;
-                    break;
-                }
-            }
-        }
-        if all_duplicates {
-            return Ok(duplicate_results);
-        }
-        let event_ids = governed
-            .iter()
-            .map(|event| (event.project.clone(), event.event_id.clone()))
-            .collect::<Vec<_>>();
-        let commit_index = self
-            .commit_command(durability::SiftCommandV1::append_events_at(
-                governed,
-                acknowledged_at,
-            ))
-            .await?;
-        let results = if let Some(results) = self.state_machine.take_append_outcomes(commit_index) {
-            results
-        } else {
-            let mut recovered = Vec::with_capacity(event_ids.len());
-            for (project, event_id) in event_ids {
-                recovered.push(
-                    self.journal
-                        .result_for_at(&project, &event_id, acknowledged_at)?
-                        .map(|result| result.with_commit_index(commit_index))
-                        .context(
-                            "state-machine commit completed without applying the Sift batch",
-                        )?,
-                );
-            }
-            recovered
-        };
-        capacity_reservation.commit();
-        Ok(results)
-    }
-
-    async fn commit_command(&self, command: durability::SiftCommandV1) -> Result<u64> {
-        let bytes = command.encoded()?;
-        if let Some(raft) = &self.raft {
-            return raft.propose(bytes).await;
-        }
-        let _guard = self.local_command.lock().await;
-        let index = self.state_machine.applied_commit_index() + 1;
-        self.state_machine.apply_local(index, &bytes)?;
-        Ok(index)
-    }
 }
 
 pub struct ArchiveWorker {
@@ -2588,11 +720,11 @@ struct LifecycleOutcome {
 
 async fn prepare_retention_fence(
     journal: &Arc<DurableJournal>,
-    state_machine: &Arc<durability::SiftStateMachine>,
+    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     raft: Option<&Arc<raft_runtime::RaftHost>>,
     remote_archive: bool,
     retention_capable: bool,
-) -> Result<Option<durability::RetentionFenceV1>> {
+) -> Result<Option<crate::journal::domain::retention_fence::RetentionFenceV1>> {
     if let Some((fence, applied_index)) = state_machine.pending_retention_fence() {
         if let Some(raft) = raft {
             raft.require_applied_index_on_all_voters(applied_index)
@@ -2603,17 +735,18 @@ async fn prepare_retention_fence(
             if status.retention_scan_pending
                 && status.retention_generation >= fence.target_generation
             {
-                let next = durability::RetentionFenceV1 {
+                let next = crate::journal::domain::retention_fence::RetentionFenceV1 {
                     source_manifest_uri: status.manifest_uri,
                     source_manifest_sha256: status.manifest_sha256,
                     target_generation: status.retention_generation.saturating_add(1),
                     evaluate_at: fence.evaluate_at,
                 };
                 if let Some(raft) = raft {
-                    let command = durability::SiftCommandV1::RetentionFence {
-                        fence: next.clone(),
-                    }
-                    .encoded()?;
+                    let command =
+                        crate::journal::domain::sift_command::SiftCommandV1::RetentionFence {
+                            fence: next.clone(),
+                        }
+                        .encoded()?;
                     let fence_index = raft
                         .propose(command)
                         .await
@@ -2642,14 +775,14 @@ async fn prepare_retention_fence(
     }
     let status = storage::archive::committed_status(journal.storage().root())?
         .context("Sift retention requires a committed archive")?;
-    let fence = durability::RetentionFenceV1 {
+    let fence = crate::journal::domain::retention_fence::RetentionFenceV1 {
         source_manifest_uri: status.manifest_uri,
         source_manifest_sha256: status.manifest_sha256,
         target_generation: status.retention_generation.saturating_add(1),
         evaluate_at: evaluate_at.to_rfc3339(),
     };
     if let Some(raft) = raft {
-        let command = durability::SiftCommandV1::RetentionFence {
+        let command = crate::journal::domain::sift_command::SiftCommandV1::RetentionFence {
             fence: fence.clone(),
         }
         .encoded()?;
@@ -2670,9 +803,9 @@ async fn prepare_retention_fence(
 
 fn run_lifecycle_attempt(
     journal: &DurableJournal,
-    state_machine: &durability::SiftStateMachine,
+    state_machine: &crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine,
     destination: Option<&str>,
-    retention_fence: Option<durability::RetentionFenceV1>,
+    retention_fence: Option<crate::journal::domain::retention_fence::RetentionFenceV1>,
 ) -> Result<LifecycleOutcome> {
     storage::archive::reconcile_live_committed_retention(journal)?;
     storage::archive::reconcile_committed_wal(journal)?;
@@ -2768,7 +901,7 @@ fn run_lifecycle_attempt(
 
 fn prepare_lifecycle_checkpoint(
     journal: &DurableJournal,
-    state_machine: &durability::SiftStateMachine,
+    state_machine: &crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine,
     destination: Option<&str>,
     archive_gc_authorized: bool,
 ) -> Result<u64> {
@@ -2810,7 +943,7 @@ fn prepare_lifecycle_checkpoint(
 
 async fn compact_remote_quorum_without_gc(
     journal: &Arc<DurableJournal>,
-    state_machine: &Arc<durability::SiftStateMachine>,
+    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     destination: &Option<String>,
     raft: &Arc<raft_runtime::RaftHost>,
 ) -> Result<raft_runtime::SnapshotCompactionOutcome> {
@@ -2833,7 +966,7 @@ async fn compact_remote_quorum_without_gc(
 
 async fn clear_completed_retention_fence(
     raft: &Arc<raft_runtime::RaftHost>,
-    state_machine: &Arc<durability::SiftStateMachine>,
+    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     retention_generation: u64,
 ) -> Result<()> {
     let Some((fence, _)) = state_machine.pending_retention_fence() else {
@@ -2842,14 +975,19 @@ async fn clear_completed_retention_fence(
     if fence.target_generation > retention_generation {
         return Ok(());
     }
-    raft.propose(durability::SiftCommandV1::clear_retention_fence(retention_generation).encoded()?)
-        .await
-        .context("commit Sift retention fence clear to quorum")?;
+    raft.propose(
+        crate::journal::domain::sift_command::SiftCommandV1::clear_retention_fence(
+            retention_generation,
+        )
+        .encoded()?,
+    )
+    .await
+    .context("commit Sift retention fence clear to quorum")?;
     Ok(())
 }
 
 async fn compact_resident_all_voters(
-    state_machine: &Arc<durability::SiftStateMachine>,
+    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     raft: &Arc<raft_runtime::RaftHost>,
 ) -> Result<raft_runtime::SnapshotCompactionOutcome> {
     let checkpoint_state_machine = state_machine.clone();
@@ -3216,7 +1354,9 @@ async fn admin_backup(
     let mut response = Response::new(Body::from(snapshot));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_static(durability::SNAPSHOT_CONTENT_TYPE),
+        HeaderValue::from_static(
+            crate::journal::infrastructure::raft::snapshot_format::SNAPSHOT_CONTENT_TYPE,
+        ),
     );
     Ok(response)
 }
