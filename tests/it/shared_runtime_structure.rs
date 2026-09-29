@@ -163,8 +163,15 @@ fn persistent_query_job_transitions_use_service_executor() {
 
 #[test]
 fn shutdown_order_and_task_failures_use_server_lifecycle() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/bin/sift.rs"))
-        .expect("read Sift binary source");
+    let mut paths: Vec<_> = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src/bin/sift"))
+        .expect("list Sift binary source")
+        .map(|entry| entry.expect("read Sift binary source entry").path())
+        .collect();
+    paths.sort();
+    let source: String = paths
+        .iter()
+        .map(|path| std::fs::read_to_string(path).expect("read Sift binary source"))
+        .collect();
 
     assert!(
         source.contains("server_lifecycle::TaskSupervisor::new"),
