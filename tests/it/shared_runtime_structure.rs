@@ -4,8 +4,24 @@
 fn group_commit_is_owned_by_service_executor() {
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
         .expect("read Sift manifest");
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+    let library = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
         .expect("read Sift library source");
+    let coordinator = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/infrastructure/ingest_batch_coordinator.rs"
+    ))
+    .expect("read Sift ingest batch coordinator");
+    let append = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/application/append_events.rs"
+    ))
+    .expect("read Sift ingest append");
+    let drain = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/application/drain_ingest.rs"
+    ))
+    .expect("read Sift ingest drain");
+    let source = library + &coordinator + &append + &drain;
 
     assert!(
         manifest.contains("service-executor ="),
@@ -23,9 +39,35 @@ fn group_commit_is_owned_by_service_executor() {
 
 #[test]
 fn ingest_admission_mechanics_are_owned_by_service_http() {
-    let source =
+    let limits =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ingest/limits.rs"))
             .expect("read Sift ingest limits");
+    let controller = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/application/admission_controller.rs"
+    ))
+    .expect("read Sift ingest admission controller");
+    let decoder = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/interfaces/http/request_body_decoder.rs"
+    ))
+    .expect("read Sift ingest body decoder");
+    let limit_values = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/domain/ingest_limits.rs"
+    ))
+    .expect("read Sift ingest limit values");
+    let limits_env = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/infrastructure/ingest_limits_env.rs"
+    ))
+    .expect("read Sift ingest limits from the environment");
+    let error = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/domain/admission_error.rs"
+    ))
+    .expect("read Sift ingest admission error");
+    let source = limits + &controller + &decoder + &limit_values + &limits_env + &error;
 
     assert!(
         source.contains("service_http::WeightedAdmission"),
@@ -261,13 +303,17 @@ fn typed_projection_flow_is_owned_by_service_projection() {
 fn otlp_wire_and_direct_grpc_runtime_are_owned_by_transport_otlp() {
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
         .expect("read Sift manifest");
-    let normalizer = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/ingest/otlp/mod.rs"
-    ))
-    .expect("read Sift OTLP adapter");
-    let grpc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/grpc.rs"))
+    let normalizer =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ingest/otlp.rs"))
+            .expect("read Sift OTLP adapter");
+    let grpc_proxy = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/grpc.rs"))
         .expect("read Sift gRPC adapter");
+    let grpc_server = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/interfaces/grpc/otlp_grpc_server.rs"
+    ))
+    .expect("read Sift OTLP/gRPC server");
+    let grpc = grpc_proxy + &grpc_server;
 
     assert!(manifest.contains("transport-otlp ="));
     assert!(normalizer.contains("pub use transport_otlp::proto as wire"));

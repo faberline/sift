@@ -1,18 +1,17 @@
-// HANDWRITE-BEGIN gap="sift-pre-journal-governance" tracker="1657" reason="Load default/project policies and apply denied-key, truncation, and default-off GenAI content redaction idempotently."
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    env, fs,
-    path::Path,
-};
+//! The governance policy applied before an event is journaled: the default and
+//! per-project policies, and the denied-key, allowlist, truncation and GenAI
+//! content redaction they apply.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{AttributeValue, OperationalEventV2};
+use crate::event::{AttributeValue, OperationalEventV2};
 
-const POLICY_FILE_ENV: &str = "SIFT_GOVERNANCE_POLICY_FILE";
 const DEFAULT_MAX_STRING_BYTES: usize = 4_096;
+
 const DEFAULT_REDACTION: &str = "[REDACTED]";
 
 /// Privacy and cardinality policy applied before an event can enter Raft or
@@ -73,24 +72,6 @@ pub struct GovernancePolicySet {
 }
 
 impl GovernancePolicySet {
-    pub fn from_env() -> Result<Self> {
-        let Ok(path) = env::var(POLICY_FILE_ENV) else {
-            return Ok(Self::default());
-        };
-        Self::from_path(path)
-    }
-
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let policies: Self = serde_json::from_slice(
-            &fs::read(path)
-                .with_context(|| format!("read Sift governance policy {}", path.display()))?,
-        )
-        .with_context(|| format!("decode Sift governance policy {}", path.display()))?;
-        policies.validate()?;
-        Ok(policies)
-    }
-
     pub fn validate(&self) -> Result<()> {
         self.default.validate().context("validate default policy")?;
         for (project, policy) in &self.projects {
@@ -245,5 +226,3 @@ fn truncate_utf8(value: &mut String, max_bytes: usize) {
     }
     value.truncate(boundary);
 }
-
-// HANDWRITE-END

@@ -20,13 +20,14 @@ mod query;
 mod shared_kernel;
 pub mod storage;
 
+pub use crate::ingest::domain::governance_policy::{GovernancePolicy, GovernancePolicySet};
 pub use crate::projection::interfaces::projection_worker::ProjectionWorker;
 pub use crate::query::interfaces::http::query_role_router::query_role_router;
 pub use crate::shared_kernel::stored_event::StoredEvent;
 pub use event::{
-    decode_event_json, AttributeValue, ContentBlobRef, EventEnvelope, GovernancePolicy,
-    GovernancePolicySet, IncomingEvent, InstrumentationScope, MetricExemplar, MetricPoint,
-    MetricTemporality, OperationalEventV2, SignalKind, EVENT_SCHEMA_URL, EVENT_SCHEMA_VERSION,
+    decode_event_json, AttributeValue, ContentBlobRef, EventEnvelope, IncomingEvent,
+    InstrumentationScope, MetricExemplar, MetricPoint, MetricTemporality, OperationalEventV2,
+    SignalKind, EVENT_SCHEMA_URL, EVENT_SCHEMA_VERSION,
 };
 
 use std::{
@@ -40,9 +41,9 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use axum::{
-    body::{Body, Bytes},
+    body::Body,
     extract::{Extension, Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -55,6 +56,16 @@ use service_http::{DetailedErrorEnvelope as ErrorEnvelope, ProjectionMetadata};
 use sha2::{Digest, Sha256};
 use utoipa::{OpenApi, ToSchema};
 
+use crate::ingest::application::admission_controller::AdmissionController;
+use crate::ingest::domain::admission_error::AdmissionError;
+use crate::ingest::domain::ingest_limits::IngestLimits;
+use crate::ingest::domain::storage_reservation::storage_reservation;
+use crate::ingest::infrastructure::ingest_batch_coordinator::IngestBatchCoordinator;
+use crate::ingest::interfaces::http::otlp_handlers::{
+    __path_ingest_logs, __path_ingest_metrics, __path_ingest_traces, ingest_logs, ingest_metrics,
+    ingest_traces,
+};
+use crate::ingest::interfaces::http::prometheus_remote_write::prometheus_remote_write;
 use crate::query::application::archive_query_status::ArchiveQueryStatus;
 use crate::query::infrastructure::file_query_job_store::QueryJobStore;
 use crate::query::interfaces::http::correlate_v1::correlate_v1;
@@ -68,7 +79,6 @@ use crate::query::interfaces::http::query_v1::{get_query_job_v1, query_v1, tail_
 use crate::query::interfaces::mcp::mcp_transport::http_router;
 use crate::shared_kernel::event_content_digest::{decode_digest, xor_digest};
 use crate::shared_kernel::retention_boundary::retention_rejection_at;
-use crate::shared_kernel::single_signal_batch::ensure_single_signal;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 pub struct AppendResult {
@@ -1844,54 +1854,10 @@ pub struct ServiceState {
     state_machine: Arc<durability::SiftStateMachine>,
     local_command: Arc<tokio::sync::Mutex<()>>,
     projections: Arc<projection::ProjectionRuntime>,
-    admission: Arc<ingest::AdmissionController>,
+    admission: Arc<AdmissionController>,
     local_capacity: Arc<storage::LocalCapacity>,
     query_jobs: Arc<QueryJobStore>,
     batch_coordinator: Arc<std::sync::Mutex<IngestBatchCoordinator>>,
-}
-
-struct IngestBatchRequest {
-    events: Vec<EventEnvelope>,
-    encoded_bytes: usize,
-}
-
-impl IngestBatchRequest {
-    fn new(events: Vec<EventEnvelope>) -> Result<Self> {
-        let encoded_bytes = durability::SiftCommandV1::append_events_size_bound(events.clone())
-            .uncompressed_len()?;
-        Ok(Self {
-            events,
-            encoded_bytes,
-        })
-    }
-}
-
-impl service_executor::GroupCommitRequest for IngestBatchRequest {
-    type Item = EventEnvelope;
-    type Key = SignalKind;
-
-    fn key(&self) -> Self::Key {
-        self.events[0].signal
-    }
-
-    fn item_count(&self) -> usize {
-        self.events.len()
-    }
-
-    fn encoded_bytes(&self) -> usize {
-        self.encoded_bytes
-    }
-
-    fn into_items(self) -> Vec<Self::Item> {
-        self.events
-    }
-}
-
-#[derive(Default)]
-struct IngestBatchCoordinator {
-    queue:
-        Option<service_executor::GroupCommitQueue<IngestBatchRequest, AppendResult, anyhow::Error>>,
-    worker: Option<service_executor::GroupCommitWorker>,
 }
 
 #[derive(Clone)]
@@ -1917,31 +1883,25 @@ impl raft_runtime::MembershipPolicy for SiftMembershipPolicy {
     }
 }
 
-fn storage_reservation(encoded_bytes: u64, event_count: usize) -> u64 {
-    encoded_bytes
-        .saturating_mul(3)
-        .saturating_add((event_count as u64).saturating_mul(128))
-}
-
 impl ServiceState {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_role(data_dir, storage::StorageRole::All)
     }
 
     pub fn open_with_role(data_dir: impl AsRef<Path>, role: storage::StorageRole) -> Result<Self> {
-        Self::open_with_ingest_limits_and_role(data_dir, ingest::IngestLimits::from_env()?, role)
+        Self::open_with_ingest_limits_and_role(data_dir, IngestLimits::from_env()?, role)
     }
 
     pub fn open_with_ingest_limits(
         data_dir: impl AsRef<Path>,
-        limits: ingest::IngestLimits,
+        limits: IngestLimits,
     ) -> Result<Self> {
         Self::open_with_ingest_limits_and_role(data_dir, limits, storage::StorageRole::All)
     }
 
     pub fn open_with_ingest_limits_and_role(
         data_dir: impl AsRef<Path>,
-        limits: ingest::IngestLimits,
+        limits: IngestLimits,
         role: storage::StorageRole,
     ) -> Result<Self> {
         let data_dir = data_dir.as_ref();
@@ -1998,43 +1958,11 @@ impl ServiceState {
             peer_port,
             state_machine,
             local_command: Arc::new(tokio::sync::Mutex::new(())),
-            admission: Arc::new(ingest::AdmissionController::new(limits)?),
+            admission: Arc::new(AdmissionController::new(limits)?),
             local_capacity,
             query_jobs: Arc::new(QueryJobStore::open(data_dir.join("query-jobs"))?),
             batch_coordinator: Arc::new(std::sync::Mutex::new(IngestBatchCoordinator::default())),
         })
-    }
-
-    pub fn start_drain(&self) {
-        self.draining.store(true, Ordering::Release);
-        self.batch_coordinator
-            .lock()
-            .expect("Sift ingest batch coordinator lock poisoned")
-            .queue
-            .take();
-    }
-
-    /// Stop accepting new batches and wait until every accepted batch has a
-    /// durable result. This also releases the journal lock held by the worker.
-    pub async fn finish_drain(&self) -> Result<()> {
-        self.start_drain();
-        let worker = self
-            .batch_coordinator
-            .lock()
-            .expect("Sift ingest batch coordinator lock poisoned")
-            .worker
-            .take();
-        if let Some(worker) = worker {
-            worker
-                .join()
-                .await
-                .context("join Sift ingest batch coordinator")?;
-        }
-        Ok(())
-    }
-
-    pub fn is_draining(&self) -> bool {
-        self.draining.load(Ordering::Acquire)
     }
 
     pub fn journal(&self) -> &DurableJournal {
@@ -2043,15 +1971,6 @@ impl ServiceState {
 
     pub fn projections(&self) -> &projection::ProjectionRuntime {
         &self.projections
-    }
-
-    pub(crate) fn ensure_local_capacity(
-        &self,
-        incoming_bytes: usize,
-    ) -> Result<(), ingest::AdmissionError> {
-        self.local_capacity
-            .preflight(storage_reservation(incoming_bytes as u64, 1))
-            .map_err(|error| ingest::AdmissionError::local_storage_backpressure(error.to_string()))
     }
 
     /// Start the one in-process projection worker owned by the Sift service.
@@ -2556,104 +2475,6 @@ impl ServiceState {
         }
     }
 
-    /// Govern and durably commit one Raft batch. Every returned event shares
-    /// the same commit index, which is acknowledged only after local apply (or
-    /// quorum apply in three-replica mode).
-    pub async fn append_batch(&self, events: Vec<EventEnvelope>) -> Result<Vec<AppendResult>> {
-        if events.is_empty() {
-            bail!("Sift Raft batch must not be empty");
-        }
-        ensure_single_signal(&events)?;
-        // Govern before the Raft proposal so sensitive content never enters a
-        // replicated log, even transiently. DurableJournal repeats the policy
-        // idempotently at the raw boundary for direct/single-node callers.
-        let governed = self.govern_events(events)?;
-        self.append_governed_batch(governed).await
-    }
-
-    /// Split one decoded ingest request into Raft commands below the 1 MiB
-    /// hard limit. The caller receives outcomes in the original event order.
-    pub async fn append_events(&self, events: Vec<EventEnvelope>) -> Result<Vec<AppendResult>> {
-        if events.is_empty() {
-            return Ok(Vec::new());
-        }
-        if self.is_draining() {
-            bail!("Sift is draining and cannot accept a new ingest batch");
-        }
-        ensure_single_signal(&events)?;
-        let governed = self.govern_events(events)?;
-        let chunks = split_governed_batches(governed)?;
-        let queue = self.ingest_batch_queue()?;
-        let mut results = Vec::new();
-        for events in chunks {
-            let request = IngestBatchRequest::new(events)?;
-            results.extend(
-                queue
-                    .submit(request)
-                    .await
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-            );
-        }
-        Ok(results)
-    }
-
-    fn ingest_batch_queue(
-        &self,
-    ) -> Result<service_executor::GroupCommitQueue<IngestBatchRequest, AppendResult, anyhow::Error>>
-    {
-        let mut coordinator = self
-            .batch_coordinator
-            .lock()
-            .expect("Sift ingest batch coordinator lock poisoned");
-        if self.is_draining() {
-            bail!("Sift is draining and cannot start an ingest batch coordinator");
-        }
-        if let Some(queue) = coordinator.queue.as_ref() {
-            return Ok(queue.clone());
-        }
-        let config = service_executor::GroupCommitConfig::new(
-            durability::RAFT_BATCH_MAX_DELAY,
-            durability::RAFT_BATCH_MAX_ITEMS,
-            durability::RAFT_BATCH_MAX_BYTES,
-        )?;
-        let context = self.commit_context();
-        let (queue, worker) =
-            service_executor::spawn_group_commit(config, move |events: Vec<EventEnvelope>| {
-                let context = context.clone();
-                async move { context.append_governed_batch(events).await }
-            });
-        coordinator.queue = Some(queue.clone());
-        coordinator.worker = Some(worker);
-        Ok(queue)
-    }
-
-    fn commit_context(&self) -> CommitContext {
-        CommitContext {
-            journal: self.journal.clone(),
-            raft: self.raft.clone(),
-            state_machine: self.state_machine.clone(),
-            local_command: self.local_command.clone(),
-            local_capacity: self.local_capacity.clone(),
-        }
-    }
-
-    fn govern_events(&self, events: Vec<EventEnvelope>) -> Result<Vec<EventEnvelope>> {
-        let mut governed = Vec::with_capacity(events.len());
-        for event in events {
-            let event = self.journal.govern_event(event)?;
-            event.validate()?;
-            governed.push(event);
-        }
-        Ok(governed)
-    }
-
-    async fn append_governed_batch(
-        &self,
-        governed: Vec<EventEnvelope>,
-    ) -> Result<Vec<AppendResult>> {
-        self.commit_context().append_governed_batch(governed).await
-    }
-
     /// Return the dedicated mutually authenticated Raft listener parts.
     /// Raft routes must never be merged into the public Sift API router.
     pub fn peer_server(&self) -> Option<(raft_runtime::PeerTransport, u16, Router)> {
@@ -2741,33 +2562,6 @@ impl CommitContext {
         self.state_machine.apply_local(index, &bytes)?;
         Ok(index)
     }
-}
-
-fn split_governed_batches(events: Vec<EventEnvelope>) -> Result<Vec<Vec<EventEnvelope>>> {
-    let empty_size =
-        durability::SiftCommandV1::append_events_size_bound(Vec::new()).uncompressed_len()?;
-    let mut chunks = Vec::new();
-    let mut batch = Vec::new();
-    let mut encoded_size = empty_size;
-    for event in events {
-        let event_size = serde_json::to_vec(&event)
-            .context("encode governed Sift event for Raft batching")?
-            .len();
-        let separator = usize::from(!batch.is_empty());
-        if !batch.is_empty()
-            && (batch.len() >= durability::RAFT_BATCH_MAX_ITEMS
-                || encoded_size + separator + event_size > durability::RAFT_BATCH_MAX_BYTES)
-        {
-            chunks.push(std::mem::take(&mut batch));
-            encoded_size = empty_size;
-        }
-        encoded_size += usize::from(!batch.is_empty()) + event_size;
-        batch.push(event);
-    }
-    if !batch.is_empty() {
-        chunks.push(batch);
-    }
-    Ok(chunks)
 }
 
 pub struct ArchiveWorker {
@@ -3202,7 +2996,7 @@ impl ApiError {
         }
     }
 
-    fn from_admission(error: ingest::AdmissionError) -> Self {
+    fn from_admission(error: AdmissionError) -> Self {
         Self {
             status: error.status,
             error: error.code,
@@ -3299,81 +3093,6 @@ pub fn protected_router_with_mcp(
     Ok(router(state).merge(http_router(internal_endpoint)?).layer(
         axum::middleware::from_fn_with_state(verifier, auth::auth_middleware),
     ))
-}
-
-async fn prometheus_remote_write(
-    State(state): State<Arc<ServiceState>>,
-    principal: Option<Extension<RoleMapPrincipal>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, ApiError> {
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    let content_encoding = headers
-        .get(header::CONTENT_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    let remote_write_version = headers
-        .get("x-prometheus-remote-write-version")
-        .and_then(|value| value.to_str().ok());
-    metrics_remote_write::validate_headers(content_type, content_encoding, remote_write_version)
-        .map_err(|error| ApiError::unsupported_media(error.to_string()))?;
-    let limits = state.admission.limits();
-    if body.len() > limits.max_compressed_body_bytes {
-        return Err(ApiError::from_admission(ingest::AdmissionError::invalid(
-            "compressed_body_too_large",
-            "compressed remote write body exceeds the configured limit",
-        )));
-    }
-    let decoded = metrics_remote_write::decode_snappy(&body, limits.max_decoded_body_bytes)
-        .map_err(|error| match error {
-            metrics_remote_write::DecodeError::BodyTooLarge { .. } => ApiError::bad_request(
-                "decoded_body_too_large",
-                "decoded remote write body exceeds the configured limit",
-            ),
-            other => ApiError::bad_request("invalid_snappy", other.to_string()),
-        })?;
-    state
-        .ensure_local_capacity(decoded.len())
-        .map_err(ApiError::from_admission)?;
-    let admitted_project = headers
-        .get("x-sift-project")
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.trim().is_empty());
-    let decoded = prometheus::decode_remote_write(&decoded, admitted_project)
-        .map_err(|error| ApiError::bad_request("invalid_remote_write", error.to_string()))?;
-    authorize_project(
-        principal.as_ref().map(|principal| &principal.0),
-        &decoded.project,
-    )?;
-    let _permit = state
-        .admission
-        .acquire(&decoded.project, decoded.events.len(), state.is_draining())
-        .map_err(ApiError::from_admission)?;
-    let written = decoded.events.len();
-    for event in &decoded.events {
-        let bytes = serde_json::to_vec(&event)
-            .map(|bytes| bytes.len())
-            .unwrap_or(usize::MAX);
-        state
-            .admission
-            .validate_event_bytes(bytes)
-            .map_err(ApiError::from_admission)?;
-        if let Some(message) = retention_rejection(event) {
-            return Err(ApiError::bad_request("outside_retention", message));
-        }
-    }
-    state
-        .append_events(decoded.events)
-        .await
-        .map_err(|error| ApiError::internal(format!("remote write append failed: {error}")))?;
-    Response::builder()
-        .status(StatusCode::NO_CONTENT)
-        .header("x-prometheus-remote-write-samples-written", written)
-        .body(Body::empty())
-        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
 fn replay_cold_query(
@@ -3685,157 +3404,6 @@ async fn admin_integrity(
             },
         },
     }))
-}
-
-#[utoipa::path(post, path = "/v1/logs", responses((status = 200, description = "OTLP logs export response")))]
-async fn ingest_logs(
-    State(state): State<Arc<ServiceState>>,
-    principal: Option<Extension<RoleMapPrincipal>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, ApiError> {
-    ingest_otlp(
-        state,
-        principal,
-        headers,
-        body,
-        ingest::otlp::OtlpSignal::Logs,
-    )
-    .await
-}
-
-#[utoipa::path(post, path = "/v1/traces", responses((status = 200, description = "OTLP traces export response")))]
-async fn ingest_traces(
-    State(state): State<Arc<ServiceState>>,
-    principal: Option<Extension<RoleMapPrincipal>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, ApiError> {
-    ingest_otlp(
-        state,
-        principal,
-        headers,
-        body,
-        ingest::otlp::OtlpSignal::Traces,
-    )
-    .await
-}
-
-#[utoipa::path(post, path = "/v1/metrics", responses((status = 200, description = "OTLP metrics export response")))]
-async fn ingest_metrics(
-    State(state): State<Arc<ServiceState>>,
-    principal: Option<Extension<RoleMapPrincipal>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Response, ApiError> {
-    ingest_otlp(
-        state,
-        principal,
-        headers,
-        body,
-        ingest::otlp::OtlpSignal::Metrics,
-    )
-    .await
-}
-
-async fn ingest_otlp(
-    state: Arc<ServiceState>,
-    principal: Option<Extension<RoleMapPrincipal>>,
-    headers: HeaderMap,
-    body: Bytes,
-    signal: ingest::otlp::OtlpSignal,
-) -> Result<Response, ApiError> {
-    let project = project_header(&headers)?;
-    authorize_project(principal.as_ref().map(|value| &value.0), project)?;
-    let media = ingest::otlp::OtlpMediaType::parse(
-        headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-    )
-    .map_err(|error| ApiError::bad_request("unsupported_content_type", error.to_string()))?;
-    let decoded_body = state
-        .admission
-        .decode_body(&headers, body)
-        .map_err(ApiError::from_admission)?;
-    state
-        .ensure_local_capacity(decoded_body.len())
-        .map_err(ApiError::from_admission)?;
-    let decoded = ingest::otlp::decode(signal, media, &decoded_body, project)
-        .map_err(|error| ApiError::bad_request("invalid_otlp", error.to_string()))?;
-    let _permit = state
-        .admission
-        .acquire(project, decoded.item_count(), state.is_draining())
-        .map_err(ApiError::from_admission)?;
-    let mut rejected = 0usize;
-    let mut messages = Vec::new();
-    let mut accepted = Vec::new();
-    for item in decoded.items {
-        let event = match item {
-            Ok(event) => event,
-            Err(error) => {
-                rejected += 1;
-                if messages.len() < 8 {
-                    messages.push(error.message);
-                }
-                continue;
-            }
-        };
-        if event.project != project {
-            rejected += 1;
-            if messages.len() < 8 {
-                messages.push(format!(
-                    "event project `{}` does not match admitted project `{project}`",
-                    event.project
-                ));
-            }
-            continue;
-        }
-        let event_bytes = serde_json::to_vec(&event)
-            .map(|value| value.len())
-            .unwrap_or(usize::MAX);
-        if let Err(error) = state.admission.validate_event_bytes(event_bytes) {
-            rejected += 1;
-            if messages.len() < 8 {
-                messages.push(error.message);
-            }
-            continue;
-        }
-        if let Some(message) = retention_rejection(&event) {
-            rejected += 1;
-            if messages.len() < 8 {
-                messages.push(message);
-            }
-            continue;
-        }
-        accepted.push(event);
-    }
-    let accepted_count = accepted.len();
-    if let Err(error) = state.append_events(accepted).await {
-        rejected += accepted_count;
-        if messages.len() < 8 {
-            messages.push(format!("durable batch append failed: {error}"));
-        }
-    }
-    let encoded = ingest::otlp::encode_response(signal, media, rejected, &messages)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, encoded.content_type)
-        .body(Body::from(encoded.body))
-        .map_err(|error| ApiError::internal(error.to_string()))
-}
-
-fn project_header(headers: &HeaderMap) -> Result<&str, ApiError> {
-    headers
-        .get("x-sift-project")
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "missing_project",
-                "x-sift-project is required for bounded ingest",
-            )
-        })
 }
 
 fn authorize_project(principal: Option<&RoleMapPrincipal>, project: &str) -> Result<(), ApiError> {

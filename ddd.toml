@@ -362,3 +362,88 @@ rule = "B4"
 paths = ["src/query/application/execute_query.rs"]
 subject = "projection.infrastructure"
 reason = "execute_query_v1 replays the archive into fresh LoggingProjection, MetricProjection and TraceProjection instances to answer a cold query; P1 moves it whole. P2: projection's application offers an archive-replay read use case, and the cold path calls it instead of building the projections."
+
+# Ingest: telemetry admitted within bounded limits, decoded from OTLP, Cloud
+# Logging structured JSON and Prometheus remote write into operational
+# events, governed, and appended through the group-commit queue to the
+# journal. Besides the shared kernel it appends through DurableJournal and
+# ServiceState, still crate-root items until commits 6 and 11.
+[[contexts]]
+name = "ingest"
+depends_on = []
+
+[contexts.layers]
+domain = "src/ingest/domain"
+application = "src/ingest/application"
+infrastructure = "src/ingest/infrastructure"
+interfaces = "src/ingest/interfaces"
+
+# Ingest dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/batch.rs"]
+subject = "src/ingest/batch"
+reason = "Compat facade: sift::ingest::batch was a public module, and batch.rs now only re-exports the event batch schemas, decode_item and event_id_hint from interfaces/http/batch.rs so the public path keeps compiling. P2: drop the facade once callers use the ingest root re-exports or the layer paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/gcp.rs"]
+subject = "src/ingest/gcp"
+reason = "Compat facade: sift::ingest::gcp was a public module, and gcp.rs now only re-exports looks_like_structured_log and normalize_structured_log from infrastructure/gcp.rs so the public path keeps compiling. P2: drop the facade once callers use the layer path or an ingest root re-export."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/limits.rs"]
+subject = "src/ingest/limits"
+reason = "Compat facade: sift::ingest::limits was a public module, and limits.rs now only re-exports AdmissionController, AdmissionPermit, AdmissionError and IngestLimits from their layers so the public path keeps compiling. P2: drop the facade; the ingest root already re-exports all four."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/ingest/otlp.rs"]
+subject = "src/ingest/otlp"
+reason = "Compat facade: sift::ingest::otlp was a public module, and otlp.rs now only re-exports the OTLP codec from interfaces/otlp/otlp_codec.rs and transport_otlp's proto (as wire), OtlpMediaType and OtlpSignal; the bin's acceptance payloads and tests/it/acceptance_payload_cli.rs still name sift::ingest::otlp::wire. P2: those callers use transport_otlp::proto directly and the facade goes."
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/ingest/domain/governance_policy.rs",
+  "src/ingest/domain/ingest_limits.rs",
+  "src/ingest/domain/raft_batch_splitter.rs",
+]
+subject = "anyhow"
+reason = "GovernancePolicy's and GovernancePolicySet's validate, GovernancePolicySet::govern, IngestLimits::validate and split_governed_batches return anyhow errors whose text is the startup error for a bad policy file or limit and the append failure the API reports, so converting them is not a move (E6). P2: an ingest domain error (thiserror) with the same Display text, which the application and the bin convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/ingest/domain/admission_error.rs"]
+subject = "axum"
+reason = "AdmissionError carries the axum StatusCode each refusal answers with (400, 413, 429, 503), which the admission controller and the body decoder set and ApiError::from_admission copies into the response; P1 moves it as-is. P2: AdmissionError holds a domain refusal kind and the interfaces map the kind to an HTTP status and a gRPC code."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/ingest/application/append_events.rs"]
+subject = "application->infrastructure"
+reason = "ServiceState::append_events wraps each governed chunk in an IngestBatchRequest and submits it to the group-commit queue that ingest_batch_queue starts on IngestBatchCoordinator; P1 moves the use case whole. P2: an application port for submitting a batch, with the composition root injecting the coordinator behind it."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/ingest/interfaces/http/batch.rs"]
+subject = "interfaces->infrastructure"
+reason = "decode_item routes a Cloud Logging structured entry through gcp::looks_like_structured_log and gcp::normalize_structured_log before the plain event path; P1 moves the batch schemas and decode_item whole. P2: an application use case that decodes a batch item, with the GCP normalizer injected behind a port."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/ingest/interfaces/http/prometheus_remote_write.rs",
+  "src/ingest/interfaces/http/request_body_decoder.rs",
+  "src/ingest/interfaces/otlp/json_logs_decoder.rs",
+  "src/ingest/interfaces/otlp/json_metrics_decoder.rs",
+  "src/ingest/interfaces/otlp/json_traces_decoder.rs",
+  "src/ingest/interfaces/otlp/proto_logs_decoder.rs",
+  "src/ingest/interfaces/otlp/proto_metrics_decoder.rs",
+  "src/ingest/interfaces/otlp/proto_traces_decoder.rs",
+]
+subject = "interfaces->domain"
+reason = "The remote-write handler and AdmissionController::decode_body build AdmissionError refusals, and the OTLP decoders derive each event's id with stable_id; P1 moves the handler and the decoders whole. P2: the application re-exports AdmissionError and an event-id service the decoders call, or decoding moves behind an application use case, so the interfaces reach the domain only through the application."
