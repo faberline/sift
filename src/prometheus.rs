@@ -1,15 +1,18 @@
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Context, Result};
-use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
-use regex::Regex;
-use serde::Deserialize;
+use chrono::{TimeZone, Utc};
 use sha2::{Digest, Sha256};
 
 use crate::{
     AttributeValue, EventEnvelope, MetricExemplar, MetricPoint, MetricTemporality, SignalKind,
 };
 
+pub use crate::query::domain::promql::{parse_promql, ParsedPromQuery, PromFunction};
+pub use crate::query::interfaces::http::prom_query_params::{
+    nanos_rfc3339, parse_prom_duration_nanos, parse_prom_time_nanos, InstantQueryParams,
+    RangeQueryParams,
+};
 pub use metrics_remote_write::{proto as remote, PROMETHEUS_STALE_NAN_BITS};
 
 #[derive(Clone, Debug)]
@@ -166,209 +169,4 @@ fn to_metric_exemplar(exemplar: &remote::Exemplar) -> Option<MetricExemplar> {
         trace_id: labels.get("trace_id")?.to_string(),
         span_id: labels.get("span_id")?.to_string(),
     })
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PromFunction {
-    Raw,
-    Sum,
-    Avg,
-    Min,
-    Max,
-    Count,
-    Rate,
-}
-
-#[derive(Clone, Debug)]
-pub struct ParsedPromQuery {
-    pub metric: String,
-    pub labels: BTreeMap<String, String>,
-    pub function: PromFunction,
-}
-
-pub fn parse_promql(input: &str) -> Result<ParsedPromQuery> {
-    let input = input.trim();
-    if input.is_empty() {
-        bail!("query must not be empty");
-    }
-    let function = Regex::new(r"^(sum|avg|min|max|count|rate)\((.*)\)$")?;
-    let (function, selector) = match function.captures(input) {
-        Some(captures) => {
-            let function = match &captures[1] {
-                "sum" => PromFunction::Sum,
-                "avg" => PromFunction::Avg,
-                "min" => PromFunction::Min,
-                "max" => PromFunction::Max,
-                "count" => PromFunction::Count,
-                "rate" => PromFunction::Rate,
-                _ => unreachable!(),
-            };
-            (function, captures[2].trim().to_string())
-        }
-        None => (PromFunction::Raw, input.to_string()),
-    };
-    let selector_pattern = Regex::new(r#"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(.*)\})?$"#)?;
-    let captures = selector_pattern
-        .captures(&selector)
-        .context("unsupported PromQL; expected a metric selector or sum/avg/min/max/count/rate")?;
-    let metric = captures[1].to_string();
-    let mut labels = BTreeMap::new();
-    if let Some(matchers) = captures.get(2).map(|value| value.as_str()) {
-        let matcher = Regex::new(r#"^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*=\s*\"([^\"]*)\"\s*$"#)?;
-        for part in split_matchers(matchers)? {
-            let captures = matcher
-                .captures(part)
-                .with_context(|| format!("unsupported label matcher `{part}`"))?;
-            labels.insert(captures[1].to_string(), captures[2].to_string());
-        }
-    }
-    Ok(ParsedPromQuery {
-        metric,
-        labels,
-        function,
-    })
-}
-
-fn split_matchers(input: &str) -> Result<Vec<&str>> {
-    if input.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    if input.contains('\\') {
-        bail!("escaped PromQL label values are not supported in phase one");
-    }
-    Ok(input.split(',').collect())
-}
-
-#[derive(Debug, Deserialize)]
-pub struct InstantQueryParams {
-    pub project: String,
-    #[serde(default)]
-    pub environment: Option<String>,
-    pub query: String,
-    #[serde(default)]
-    pub time: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RangeQueryParams {
-    pub project: String,
-    #[serde(default)]
-    pub environment: Option<String>,
-    pub query: String,
-    pub start: String,
-    pub end: String,
-    pub step: String,
-}
-
-pub fn parse_prom_time_nanos(value: &str) -> Result<i64> {
-    if let Ok(value) = DateTime::parse_from_rfc3339(value) {
-        return value
-            .timestamp_nanos_opt()
-            .context("Prometheus timestamp is outside the supported range");
-    }
-    parse_decimal_seconds_nanos(value)
-        .with_context(|| format!("invalid Prometheus timestamp `{value}`"))
-}
-
-pub fn parse_prom_duration_nanos(value: &str) -> Result<i64> {
-    parse_decimal_seconds_nanos(value)
-        .with_context(|| format!("invalid Prometheus duration `{value}`"))
-}
-
-fn parse_decimal_seconds_nanos(value: &str) -> Result<i64> {
-    let (negative, unsigned) = match value.as_bytes().first() {
-        Some(b'-') => (true, &value[1..]),
-        Some(b'+') => (false, &value[1..]),
-        _ => (false, value),
-    };
-    if unsigned.is_empty() {
-        bail!("decimal seconds must contain digits");
-    }
-    let mut exponent_parts = unsigned.split(['e', 'E']);
-    let mantissa = exponent_parts.next().unwrap_or_default();
-    let exponent = exponent_parts
-        .next()
-        .map(str::parse::<i32>)
-        .transpose()
-        .context("decimal exponent is invalid")?
-        .unwrap_or(0);
-    if exponent_parts.next().is_some() {
-        bail!("decimal seconds contain more than one exponent");
-    }
-    let mut mantissa_parts = mantissa.split('.');
-    let integer = mantissa_parts.next().unwrap_or_default();
-    let fraction = mantissa_parts.next().unwrap_or_default();
-    if mantissa_parts.next().is_some()
-        || (integer.is_empty() && fraction.is_empty())
-        || !integer.bytes().all(|byte| byte.is_ascii_digit())
-        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        bail!("decimal seconds have an invalid mantissa");
-    }
-    let digits = format!("{integer}{fraction}");
-    let coefficient = digits
-        .parse::<i128>()
-        .context("decimal seconds exceed the supported precision")?;
-    if coefficient == 0 {
-        return Ok(0);
-    }
-    let fraction_digits =
-        i128::try_from(fraction.len()).context("decimal seconds exceed the supported precision")?;
-    let power = i128::from(exponent) - fraction_digits + 9;
-    let magnitude = if power >= 0 {
-        let power = u32::try_from(power).context("decimal seconds are outside nanosecond range")?;
-        coefficient
-            .checked_mul(
-                10_i128
-                    .checked_pow(power)
-                    .context("decimal seconds are outside nanosecond range")?,
-            )
-            .context("decimal seconds are outside nanosecond range")?
-    } else {
-        let divisor_power =
-            u32::try_from(-power).context("decimal seconds are outside nanosecond range")?;
-        let Some(divisor) = 10_i128.checked_pow(divisor_power) else {
-            return Ok(0);
-        };
-        let quotient = coefficient / divisor;
-        let remainder = coefficient % divisor;
-        quotient + i128::from(remainder >= (divisor + 1) / 2)
-    };
-    let nanos = if negative {
-        magnitude
-            .checked_neg()
-            .context("decimal seconds are outside nanosecond range")?
-    } else {
-        magnitude
-    };
-    i64::try_from(nanos).context("decimal seconds are outside nanosecond range")
-}
-
-pub fn nanos_rfc3339(nanos: i64) -> Result<String> {
-    let seconds = nanos.div_euclid(1_000_000_000);
-    let subsecond = nanos.rem_euclid(1_000_000_000) as u32;
-    Ok(DateTime::<Utc>::from_timestamp(seconds, subsecond)
-        .context("Prometheus timestamp is outside the supported range")?
-        .to_rfc3339_opts(SecondsFormat::Nanos, true))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{nanos_rfc3339, parse_prom_time_nanos};
-
-    #[test]
-    fn prometheus_times_keep_exact_nanoseconds() {
-        assert_eq!(
-            parse_prom_time_nanos("1783987200.000999600").unwrap(),
-            1_783_987_200_000_999_600
-        );
-        assert_eq!(
-            parse_prom_time_nanos("2026-07-14T00:00:00.000999600Z").unwrap(),
-            1_783_987_200_000_999_600
-        );
-        assert_eq!(
-            nanos_rfc3339(1_783_987_200_000_999_600).unwrap(),
-            "2026-07-14T00:00:00.000999600Z"
-        );
-    }
 }

@@ -66,8 +66,19 @@ fn reverse_proxy_runtime_is_owned_by_service_http() {
 
 #[test]
 fn persistent_query_job_transitions_use_service_executor() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+    let library = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
         .expect("read Sift library source");
+    let query_v1 = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/query/interfaces/http/query_v1.rs"
+    ))
+    .expect("read Sift query handlers");
+    let query_role = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/query/interfaces/http/query_role_router.rs"
+    ))
+    .expect("read Sift query role router");
+    let source = library + &query_v1 + &query_role;
 
     assert!(
         source.contains("service_executor::JobRunner::new"),

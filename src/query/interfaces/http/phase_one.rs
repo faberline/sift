@@ -1,12 +1,17 @@
+//! The phase-one wire schemas beside the versioned query: the log tail
+//! request, the correlation request and response, and the service listing
+//! query and response.
+
 use std::collections::BTreeMap;
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::projection::{LogRecordV1, MetricSeriesResultV1, TraceResultV1};
-
-use super::query::{MAX_QUERY_LIMIT, QUERY_AST_VERSION};
-use super::{QueryExpressionV1, TimeRangeV1};
+use crate::query::domain::filter_expression::QueryExpressionV1;
+use crate::query::interfaces::http::query_request_v1::{
+    TimeRangeV1, MAX_QUERY_LIMIT, QUERY_AST_VERSION,
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

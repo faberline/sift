@@ -243,3 +243,122 @@ paths = [
 ]
 subject = "infrastructure->application"
 reason = "The three projections implement the Projection trait, service_projection_adapter binds that trait to service_projection's, and LoggingProjection maps each event with normalize; §2.7 puts the trait and the normalizer in application, and P1 follows it. P2: move the Projection trait into the domain as a port and log_record_normalizer with it, so infrastructure depends only on the domain."
+
+# Queries: the versioned query API over logs, metrics and traces, its async
+# jobs, the Prometheus-compatible endpoints, the query role and the
+# read-only MCP tools. It reads the projections it answers from.
+[[contexts]]
+name = "query"
+depends_on = ["projection"]
+
+[contexts.layers]
+domain = "src/query/domain"
+application = "src/query/application"
+infrastructure = "src/query/infrastructure"
+interfaces = "src/query/interfaces"
+
+# Query dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/query/domain/filter_evaluator.rs",
+  "src/query/domain/filter_expression.rs",
+  "src/query/domain/promql.rs",
+  "src/query/domain/promql_evaluator.rs",
+  "src/query/domain/query_cursor.rs",
+  "src/query/domain/query_job.rs",
+  "src/query/domain/query_time.rs",
+]
+subject = "anyhow"
+reason = "QueryExpressionV1::validate, validate_field, evaluate_filter, parse_promql, split_matchers, parse_decimal_seconds_nanos and validate_id return anyhow errors whose text is the API's invalid_query and Prometheus bad_data message that tests match by substring, and the cursor, time and PromQL budget helpers spell Result<_, ApiError> through anyhow::Result; converting them is not a move (E6). P2: a query domain error (thiserror) with the same Display text, which the handlers convert, and std Result for the ApiError helpers."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/query/domain/query_cursor.rs"]
+subject = "base64"
+reason = "encode_query_cursor and decode_query_cursor write the opaque page cursor as base64url (URL_SAFE_NO_PAD) JSON; the cursor text is the API's wire and clients hand it back, so P1 moves the codec as-is. P2: the domain keeps the cursor as a typed value and an interfaces codec writes and reads the base64url text, or base64 is approved in the domain allowlist."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/query/domain/query_time.rs"]
+subject = "chrono::Utc::now"
+reason = "cold_query_requested compares the query's start with Utc::now minus 30 days to decide whether the archive is read; P1 moves it without rewriting it (E7). P2: it takes now as an argument and the application reads it from a Clock port."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/domain/query_job.rs",
+  "src/query/domain/query_time.rs",
+]
+subject = "domain->interfaces"
+reason = "QueryJobV1 stores the job's QueryRequestV1 and its Option<QueryResponseV1>, and cold_query_requested reads a QueryRequestV1's time range; §2 puts QueryRequestV1 and QueryResponseV1 in interfaces/http as the API's wire schemas and wins over layer_deps here. P2: a domain query and result model the V1 wire types map to and from at the HTTP edge, or QueryRequestV1 and QueryResponseV1 approved as the query's published language in the domain."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/application/archive_query_status.rs",
+  "src/query/application/execute_query.rs",
+]
+subject = "application->interfaces"
+reason = "execute_query_v1 takes a QueryRequestV1 and matches its QuerySignalV1 and MetricFunctionV1, and it and apply_archive_query_status build a QueryResponseV1; §2 puts those wire schemas in interfaces/http and wins over layer_deps here. P2: the use case takes and returns the domain query and result model, and the handler maps the V1 wire types onto it."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/infrastructure/file_query_job_store.rs",
+  "src/query/infrastructure/sift_api_client.rs",
+  "src/query/infrastructure/store_query_client.rs",
+]
+subject = "infrastructure->interfaces"
+reason = "QueryJobStore::create takes a QueryRequestV1 and succeed (and its JobState impl) a QueryResponseV1, forward_query_to_store and decode_store_query_response send a QueryRequestV1 and decode a QueryResponseV1, and SiftApiClient sends QueryRequestV1 (checking its QueryModeV1), CorrelationRequestV1 and LogTailRequestV1 and decodes QueryResponseV1; §2 puts those wire schemas in interfaces/http and wins over layer_deps here. P2: the store and the store client hold the domain query and result model, and the API client's wire types become its own or the published language."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/interfaces/http/correlate_v1.rs",
+  "src/query/interfaces/http/phase_one.rs",
+  "src/query/interfaces/http/prom_query_params.rs",
+  "src/query/interfaces/http/prometheus_query.rs",
+  "src/query/interfaces/http/query_request_v1.rs",
+  "src/query/interfaces/http/query_role_router.rs",
+  "src/query/interfaces/http/query_v1.rs",
+]
+subject = "interfaces->domain"
+reason = "The handlers and wire types P1 moves whole read the domain directly: QueryRequestV1 and the phase-one requests embed QueryExpressionV1 and validate with validate_field and MAX_FILTER_ARGUMENTS, correlate_v1 parses times with parse_query_time_nanos, query_v1 encodes cursors with encode_query_cursor and reads QueryJobV1 as query_role_router does, prom_query_params parses with parse_decimal_seconds_nanos, and the Prometheus handlers run parse_promql, PromFunction and the promql_evaluator helpers (PROM_LOOKBACK_NANOS, PROM_MAX_RANGE_EVALUATIONS, prom_latest_values, prom_rate_values and the rest) inline. P2: the instant and range evaluation, correlation, tail and job lookup move behind application use cases the handlers call, and the V1 wire types map QueryExpressionV1 at the edge or it is approved as published language."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/query/interfaces/http/query_role_router.rs",
+  "src/query/interfaces/mcp/mcp_transport.rs",
+  "src/query/interfaces/mcp/sift_mcp_server.rs",
+]
+subject = "interfaces->infrastructure"
+reason = "query_role_query_v1 calls forward_query_to_store and decode_store_query_response, and serve_stdio and http_router build the SiftApiClient that SiftMcpServer holds and calls; P1 moves the handlers and the MCP server whole. P2: application ports for forwarding a query to the store and for reaching the Sift API, with the composition root injecting store_query_client and SiftApiClient behind them."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/domain/promql_evaluator.rs"]
+subject = "projection.domain"
+reason = "ensure_complete_prom_metric_page, prom_series_labels, prom_latest_values and prom_rate_values evaluate over projection's MetricPage, MetricSeriesResultV1 and MetricPointV1 and read MAX_METRIC_QUERY_LIMIT; P1 moves the evaluator as-is. P2: the evaluator works on query-owned series and points that the application maps from projection's published query results."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/query/application/execute_query.rs",
+  "src/query/application/prom_query.rs",
+  "src/query/interfaces/http/correlate_v1.rs",
+  "src/query/interfaces/http/get_trace.rs",
+  "src/query/interfaces/http/phase_one.rs",
+  "src/query/interfaces/http/prometheus_query.rs",
+]
+subject = "projection.domain"
+reason = "Queries are answered by the projections: execute_query_v1, prom_metric_query and correlate_v1 build LogQuery, MetricQuery and TraceQuery with the MAX_*_QUERY_LIMIT bounds, catch up on PROJECTION_LOGGING_STORE, PROJECTION_METRIC_STORE and PROJECTION_TRACE_STORE, and the responses carry LogRecordV1, MetricSeriesResultV1 and TraceResultV1; P1 moves them as-is. P2: projection's application exposes the read use cases with the queries, pages and *V1 records as its published language, and query calls through them."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/application/execute_query.rs"]
+subject = "projection.infrastructure"
+reason = "execute_query_v1 replays the archive into fresh LoggingProjection, MetricProjection and TraceProjection instances to answer a cold query; P1 moves it whole. P2: projection's application offers an archive-replay read use case, and the cold path calls it instead of building the projections."

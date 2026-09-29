@@ -1,41 +1,20 @@
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-};
+//! The async query job store: one file per job under the data root, and the
+//! job-state hook service_executor runs jobs through.
 
-use anyhow::{bail, Context, Result};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{QueryRequestV1, QueryResponseV1};
+use crate::query::domain::query_job::{validate_id, QueryJobStatusV1, QueryJobV1};
+use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
+use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
 
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QueryJobStatusV1 {
-    Queued,
-    Running,
-    Succeeded,
-    Failed,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct QueryJobV1 {
-    pub query_id: String,
-    pub project: String,
-    pub status: QueryJobStatusV1,
-    pub created_at: String,
-    pub updated_at: String,
-    pub request: QueryRequestV1,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<QueryResponseV1>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
 
 pub(crate) struct QueryJobStore {
     root: PathBuf,
@@ -176,13 +155,6 @@ impl service_executor::JobState<QueryResponseV1> for QueryJobStore {
     fn fail(&self, id: &Self::Id, message: String) -> Result<()> {
         QueryJobStore::fail(self, id, message)
     }
-}
-
-fn validate_id(query_id: &str) -> Result<()> {
-    if query_id.len() != 32 || !query_id.bytes().all(|value| value.is_ascii_hexdigit()) {
-        bail!("query id has an invalid format");
-    }
-    Ok(())
 }
 
 fn now() -> String {
