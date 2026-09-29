@@ -16,6 +16,7 @@ pub mod ingest;
 mod journal;
 pub mod mcp;
 mod node;
+mod operations;
 pub mod operator;
 pub mod projection;
 pub mod prometheus;
@@ -30,6 +31,10 @@ pub use crate::journal::domain::append_result::AppendResult;
 pub use crate::journal::domain::event_query::EventQuery;
 pub use crate::journal::infrastructure::durable_journal::DurableJournal;
 pub use crate::journal::infrastructure::journal_projection_read_session::JournalProjectionReadSession;
+pub use crate::operations::interfaces::http::integrity_report_v1::{
+    IntegrityArchiveV1, IntegrityReportV1, IntegritySignalV1, IntegritySignalsV1,
+    IntegrityStorageV1, IntegrityWalBytesV1, IntegrityWatermarksV1,
+};
 pub use crate::projection::interfaces::projection_worker::ProjectionWorker;
 pub use crate::query::interfaces::http::query_role_router::query_role_router;
 pub use crate::shared_kernel::stored_event::StoredEvent;
@@ -49,23 +54,17 @@ use std::{
 
 use anyhow::{Context, Result};
 use axum::{
-    body::Body,
-    extract::{Extension, Query, State},
-    http::{header, HeaderValue, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
+    Router,
 };
 use chrono::Utc;
 use metrics_prometheus::Sample;
-use serde::{Deserialize, Serialize};
-use service_auth::RoleMapPrincipal;
 use service_http::{DetailedErrorEnvelope as ErrorEnvelope, ProjectionMetadata};
-use sha2::{Digest, Sha256};
-use utoipa::{OpenApi, ToSchema};
+use utoipa::OpenApi;
 
 use crate::access::infrastructure::sift_verifier::SiftVerifier;
-use crate::access::interfaces::http::project_authorization::authorize_global_admin;
 use crate::access::interfaces::http::scoped_authorization::auth_middleware;
 use crate::ingest::application::admission_controller::AdmissionController;
 use crate::ingest::domain::admission_error::AdmissionError;
@@ -79,6 +78,10 @@ use crate::ingest::interfaces::http::prometheus_remote_write::prometheus_remote_
 use crate::journal::infrastructure::raft::sift_membership_policy::SiftMembershipPolicy;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::local_capacity::LocalCapacity;
+use crate::operations::interfaces::http::admin_backup::{__path_admin_backup, admin_backup};
+use crate::operations::interfaces::http::admin_integrity::{
+    __path_admin_integrity, admin_integrity,
+};
 use crate::query::infrastructure::file_query_job_store::QueryJobStore;
 use crate::query::interfaces::http::correlate_v1::correlate_v1;
 use crate::query::interfaces::http::get_trace::get_trace;
@@ -463,229 +466,6 @@ pub fn protected_router_with_mcp(
     Ok(router(state).merge(http_router(internal_endpoint)?).layer(
         axum::middleware::from_fn_with_state(verifier, auth_middleware),
     ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/admin/backup",
-    responses(
-        (status = 200, description = "exact durable-journal snapshot bytes"),
-        (status = 403, description = "wildcard admin role required", body = ErrorEnvelope),
-        (status = 500, description = "snapshot serialization failed", body = ErrorEnvelope)
-    )
-)]
-async fn admin_backup(
-    State(state): State<Arc<ServiceState>>,
-    principal: Option<Extension<RoleMapPrincipal>>,
-) -> Result<Response, ApiError> {
-    authorize_global_admin(principal.as_ref().map(|principal| &principal.0))?;
-    let snapshot = state
-        .journal()
-        .snapshot_bytes()
-        .map_err(|error| ApiError::internal(format!("create durable journal snapshot: {error}")))?;
-    tracing::info!(
-        event = "backup_started",
-        subject = principal
-            .as_ref()
-            .and_then(|principal| principal.0.subject())
-            .unwrap_or("open-auth"),
-        bytes = snapshot.len(),
-        "durable journal snapshot exported"
-    );
-    let mut response = Response::new(Body::from(snapshot));
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(
-            crate::journal::infrastructure::raft::snapshot_format::SNAPSHOT_CONTENT_TYPE,
-        ),
-    );
-    Ok(response)
-}
-
-#[derive(Debug, Deserialize)]
-struct IntegrityHttpQuery {
-    project: String,
-}
-
-#[derive(Clone, Debug, Default, Serialize, ToSchema)]
-pub struct IntegritySignalV1 {
-    pub count: u64,
-    pub watermark: u64,
-}
-
-#[derive(Clone, Debug, Default, Serialize, ToSchema)]
-pub struct IntegritySignalsV1 {
-    pub logs: IntegritySignalV1,
-    pub metrics: IntegritySignalV1,
-    pub traces: IntegritySignalV1,
-}
-
-#[derive(Clone, Debug, Default, Serialize, ToSchema)]
-pub struct IntegrityWatermarksV1 {
-    pub logs: u64,
-    pub metrics: u64,
-    pub traces: u64,
-}
-
-#[derive(Clone, Debug, Default, Serialize, ToSchema)]
-pub struct IntegrityWalBytesV1 {
-    pub logs: u64,
-    pub metrics: u64,
-    pub traces: u64,
-}
-
-#[derive(Clone, Debug, Default, Serialize, ToSchema)]
-pub struct IntegrityArchiveV1 {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manifest_uri: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manifest_sha256: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub committed_at: Option<String>,
-    pub watermarks: IntegrityWatermarksV1,
-    pub retention_generation: u64,
-    pub retention_scan_pending: bool,
-}
-
-#[derive(Clone, Debug, Default, Serialize, ToSchema)]
-pub struct IntegrityStorageV1 {
-    pub wal_bytes: IntegrityWalBytesV1,
-    pub archive: IntegrityArchiveV1,
-}
-
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct IntegrityReportV1 {
-    pub version: u16,
-    pub project: String,
-    pub cluster_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub restored_from: Option<String>,
-    pub event_count: u64,
-    pub event_id_digest_algorithm: String,
-    pub event_id_sha256: String,
-    pub watermark: u64,
-    pub signals: IntegritySignalsV1,
-    pub storage: IntegrityStorageV1,
-}
-
-impl IntegritySignalsV1 {
-    fn include(&mut self, event: &StoredEvent) {
-        let signal = match event.event.signal {
-            SignalKind::Log => &mut self.logs,
-            SignalKind::Metric => &mut self.metrics,
-            SignalKind::Span => &mut self.traces,
-        };
-        signal.count = signal.count.saturating_add(1);
-        signal.watermark = signal.watermark.max(event.cursor);
-    }
-}
-
-#[utoipa::path(
-    get,
-    path = "/admin/integrity",
-    params(("project" = String, Query, description = "project to verify")),
-    responses(
-        (status = 200, description = "project count, ID digest, and watermarks", body = IntegrityReportV1),
-        (status = 403, description = "wildcard admin role required", body = ErrorEnvelope)
-    )
-)]
-async fn admin_integrity(
-    State(state): State<Arc<ServiceState>>,
-    principal: Option<Extension<RoleMapPrincipal>>,
-    Query(query): Query<IntegrityHttpQuery>,
-) -> Result<Json<IntegrityReportV1>, ApiError> {
-    authorize_global_admin(principal.as_ref().map(|principal| &principal.0))?;
-    let project = query.project.trim();
-    if project.is_empty() {
-        return Err(ApiError::bad_request(
-            "invalid_project",
-            "integrity project must not be empty",
-        ));
-    }
-
-    let layout_path = state.journal().storage().root().join("layout.json");
-    let layout: storage::LayoutManifest = serde_json::from_slice(
-        &std::fs::read(&layout_path)
-            .map_err(|error| ApiError::internal(format!("read integrity layout: {error}")))?,
-    )
-    .map_err(|error| ApiError::internal(format!("decode integrity layout: {error}")))?;
-    let storage_root = state.journal().storage().root();
-    let archive =
-        crate::archive::application::archive_status_queries::committed_status(storage_root)
-            .map_err(|error| ApiError::internal(format!("read archive integrity: {error}")))?;
-    let watermarks = archive
-        .as_ref()
-        .map(|status| status.watermarks)
-        .unwrap_or_default();
-    let wal_bytes = |signal: &str| {
-        std::fs::metadata(storage_root.join("wal").join(signal).join("events.framed"))
-            .map(|metadata| metadata.len())
-            .unwrap_or(0)
-    };
-
-    let mut reader = state
-        .journal
-        .projection_read_session(0)
-        .map_err(|error| ApiError::internal(format!("open integrity scan: {error}")))?;
-    let mut event_count = 0_u64;
-    let mut watermark = 0_u64;
-    let mut event_id_digest = [0_u8; 32];
-    let mut signals = IntegritySignalsV1::default();
-    loop {
-        let page = reader
-            .read_next(10_000)
-            .map_err(|error| ApiError::internal(format!("scan integrity events: {error}")))?;
-        if page.is_empty() {
-            break;
-        }
-        for event in page.iter().filter(|event| event.event.project == project) {
-            event_count = event_count.saturating_add(1);
-            watermark = watermark.max(event.cursor);
-            signals.include(event);
-            let digest: [u8; 32] = Sha256::digest(event.event.event_id.as_bytes()).into();
-            for (slot, byte) in event_id_digest.iter_mut().zip(digest) {
-                *slot ^= byte;
-            }
-        }
-    }
-
-    Ok(Json(IntegrityReportV1 {
-        version: 1,
-        project: project.to_string(),
-        cluster_id: layout.cluster_id,
-        restored_from: layout.restored_from,
-        event_count,
-        event_id_digest_algorithm: "xor-sha256-v1".to_string(),
-        event_id_sha256: hex::encode(event_id_digest),
-        watermark,
-        signals,
-        storage: IntegrityStorageV1 {
-            wal_bytes: IntegrityWalBytesV1 {
-                logs: wal_bytes("logs"),
-                metrics: wal_bytes("metrics"),
-                traces: wal_bytes("traces"),
-            },
-            archive: IntegrityArchiveV1 {
-                manifest_uri: archive.as_ref().map(|status| status.manifest_uri.clone()),
-                manifest_sha256: archive
-                    .as_ref()
-                    .map(|status| status.manifest_sha256.clone()),
-                committed_at: archive.as_ref().map(|status| status.committed_at.clone()),
-                watermarks: IntegrityWatermarksV1 {
-                    logs: watermarks.logs,
-                    metrics: watermarks.metrics,
-                    traces: watermarks.traces,
-                },
-                retention_generation: archive
-                    .as_ref()
-                    .map(|status| status.retention_generation)
-                    .unwrap_or_default(),
-                retention_scan_pending: archive
-                    .as_ref()
-                    .is_some_and(|status| status.retention_scan_pending),
-            },
-        },
-    }))
 }
 
 #[derive(OpenApi)]

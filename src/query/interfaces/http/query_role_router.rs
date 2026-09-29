@@ -13,6 +13,7 @@ use axum::{Json, Router};
 use service_auth::RoleMapPrincipal;
 
 use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::operations::interfaces::http::gateway_proxy::query_router;
 use crate::query::application::get_query_job::query_job_for_project;
 use crate::query::domain::query_job::QueryJobV1;
 use crate::query::infrastructure::store_query_client::{
@@ -37,7 +38,7 @@ pub fn query_role_router(
     store_endpoint: &str,
     max_body_bytes: usize,
 ) -> Result<Router> {
-    let store = crate::proxy::query_router(store_endpoint, max_body_bytes)?;
+    let store = query_router(store_endpoint, max_body_bytes)?;
     Ok(Router::new()
         .route("/api/v1/query", post(query_role_query_v1))
         .route("/api/v1/queries/{query_id}", get(get_query_role_job_v1))

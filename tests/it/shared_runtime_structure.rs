@@ -91,8 +91,11 @@ fn ingest_admission_mechanics_are_owned_by_service_http() {
 
 #[test]
 fn reverse_proxy_runtime_is_owned_by_service_http() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/proxy.rs"))
-        .expect("read Sift proxy adapter");
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/operations/interfaces/http/gateway_proxy.rs"
+    ))
+    .expect("read Sift proxy adapter");
 
     assert!(
         source.contains("impl service_http::ReverseProxyPolicy for SiftRolePolicy"),
@@ -210,8 +213,23 @@ fn replicated_host_startup_is_owned_by_raft_runtime() {
 
 #[test]
 fn kubernetes_workloads_are_owned_by_service_k8s() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/operator.rs"))
-        .expect("read Sift operator adapter");
+    let source: String = [
+        "/src/operations/interfaces/crd/sift_spec.rs",
+        "/src/operations/interfaces/operator.rs",
+        "/src/operations/infrastructure/k8s/constants.rs",
+        "/src/operations/infrastructure/k8s/managed_service.rs",
+        "/src/operations/infrastructure/k8s/api_endpoint_discovery.rs",
+        "/src/operations/infrastructure/k8s/role_workloads.rs",
+        "/src/operations/infrastructure/k8s/agent_workloads.rs",
+        "/src/operations/infrastructure/k8s/backup_cron_job.rs",
+        "/src/operations/infrastructure/k8s/network_policy.rs",
+    ]
+    .iter()
+    .map(|path| {
+        std::fs::read_to_string(format!("{}{path}", env!("CARGO_MANIFEST_DIR")))
+            .expect("read Sift operator adapter")
+    })
+    .collect();
 
     assert!(
         source.contains("render::WorkloadPlan::new"),
@@ -237,8 +255,17 @@ fn kubernetes_workloads_are_owned_by_service_k8s() {
 
 #[test]
 fn live_backup_http_transport_is_owned_by_service_backup() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/backup.rs"))
-        .expect("read Sift backup adapter");
+    let application = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/operations/application/journal_backup.rs"
+    ))
+    .expect("read Sift backup adapter");
+    let client = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/operations/infrastructure/live_snapshot_client.rs"
+    ))
+    .expect("read Sift live snapshot client");
+    let source = application + &client;
 
     assert!(
         source.contains("service_backup::AdminSnapshotTransport"),
@@ -334,8 +361,11 @@ fn otlp_wire_and_direct_grpc_runtime_are_owned_by_transport_otlp() {
     let normalizer =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ingest/otlp.rs"))
             .expect("read Sift OTLP adapter");
-    let grpc_proxy = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/grpc.rs"))
-        .expect("read Sift gRPC adapter");
+    let grpc_proxy = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/operations/interfaces/grpc/otlp_proxy.rs"
+    ))
+    .expect("read Sift gRPC adapter");
     let grpc_server = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/ingest/interfaces/grpc/otlp_grpc_server.rs"

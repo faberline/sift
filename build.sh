@@ -45,7 +45,7 @@ trap 'fail_hint "$MODE"' ERR
 
 # Each operator and collector manifest below carries one Sift GHCR pin.
 # Instance and overlay manifests retain their required immutable digest input.
-# `src/deploy.rs`
+# `src/operations/infrastructure/manifest_bundle.rs`
 # substitutes the same `ghcr.io/faberline/sift:<CARGO_PKG_VERSION>` string
 # when it renders `--image` overrides, so a pin that drifts from Cargo.toml
 # silently disables those overrides; `cargo test -p sift --test it -- deployment_cli::`

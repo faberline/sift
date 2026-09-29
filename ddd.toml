@@ -256,11 +256,12 @@ reason = "ProjectionRuntime::open, ProjectionWorker and JournalProjectionSource 
 # Queries: the versioned query API over logs, metrics and traces, its async
 # jobs, the Prometheus-compatible endpoints, the query role and the
 # read-only MCP tools. It reads the projections it answers from, the journal
-# for the services it lists, the archive for cold queries, and access for the
-# project checks its handlers run.
+# for the services it lists, the archive for cold queries, access for the
+# project checks its handlers run, and operations for the router that forwards
+# the query role's other routes to the store role.
 [[contexts]]
 name = "query"
-depends_on = ["projection", "journal", "archive", "access"]
+depends_on = ["projection", "journal", "archive", "access", "operations"]
 
 [contexts.layers]
 domain = "src/query/domain"
@@ -379,6 +380,12 @@ rule = "B4"
 paths = ["src/query/interfaces/http/list_services_v1.rs"]
 subject = "journal.domain"
 reason = "list_services_v1 scans recent events through ServiceState's journal with an EventQuery; P1 moves the handler whole. P2: journal's application publishes query_events with EventQuery as its input, and the handler calls it through a query use case, or the listing reads a projection instead."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/query/interfaces/http/query_role_router.rs"]
+subject = "operations.interfaces"
+reason = "query_role_router falls back to query_router, the gateway proxy's reverse-proxy router to the store role, for every route the query role does not answer itself; P1 moves proxy.rs to operations' interfaces and the query role router keeps calling it. P2: the composition root builds the store-forwarding router and passes it to query_role_router, so query no longer names operations and drops it from depends_on."
 
 # Ingest: telemetry admitted within bounded limits, decoded from OTLP, Cloud
 # Logging structured JSON and Prometheus remote write into operational
@@ -806,3 +813,66 @@ rule = "B3"
 paths = ["src/access/interfaces/http/scoped_authorization.rs"]
 subject = "interfaces->infrastructure"
 reason = "service_auth::ScopedAuthorization is implemented directly for SiftVerifier, the infrastructure verifier, and the impl calls its is_kubernetes and authenticate_project; the orphan rule keeps the impl beside a local type, and P1 moves it as-is. P2: the impl moves to a thin interfaces wrapper over an application authorize_request use case that holds the verifier behind a domain port."
+
+# Operations: running Sift as a service. It owns the Sift custom resource and
+# the operator that reconciles it, the deployment artifacts rendered offline
+# from checked-in templates, off-node snapshot backup and restore, the
+# gateway's reverse-proxy route policy, the OTLP/gRPC proxy, and the admin
+# backup and integrity endpoints. It reads the journal for snapshots and
+# integrity reports, the archive for its committed state, and the node's
+# layout manifest, runs access's admin checks, and borrows ingest's gRPC
+# project check for the OTLP/gRPC proxy.
+[[contexts]]
+name = "operations"
+depends_on = ["journal", "archive", "node", "access", "ingest"]
+
+[contexts.layers]
+domain = "src/operations/domain"
+application = "src/operations/application"
+infrastructure = "src/operations/infrastructure"
+interfaces = "src/operations/interfaces"
+
+# Operations dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/operations/domain/image_reference.rs",
+  "src/operations/domain/namespace_name.rs",
+]
+subject = "anyhow"
+reason = "validate_namespace, validate_manifest_value and validate_image return anyhow::Result and reject with bail!; P1 moves them from deploy.rs as-is. P2 (E6): the domain returns a thiserror ManifestValueError, and the manifest bundle converts it at its anyhow boundary."
+
+[[exceptions]]
+rule = "B3"
+paths = [
+  "src/operations/infrastructure/k8s/agent_workloads.rs",
+  "src/operations/infrastructure/k8s/backup_cron_job.rs",
+  "src/operations/infrastructure/k8s/managed_service.rs",
+  "src/operations/infrastructure/k8s/network_policy.rs",
+  "src/operations/infrastructure/k8s/role_workloads.rs",
+]
+subject = "infrastructure->interfaces"
+reason = "The Kubernetes renderers read the Sift custom resource they reconcile: Sift, SiftSpec, AuthMode and BackupSpec, which kube's CustomResource derive generates in the interfaces' crd module, and the ManagedService impl is for Sift; P1 moves operator.rs's renderers as-is. P2: the renderers take a domain InstanceSpec (roles, auth mode, storage, backup and placement) that the interfaces map the CRD onto, and the ManagedService impl moves to a thin interfaces adapter."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/operations/interfaces/http/gateway_proxy.rs"]
+subject = "interfaces->domain"
+reason = "SiftRolePolicy's select_upstream calls is_query_path to send query routes to the query role; P1 moves proxy.rs as-is and §2 puts is_query_path in the domain. P2: operations' application gets a route_upstream use case that owns the route-class decision, and the proxy policy calls it."
+
+[[exceptions]]
+rule = "B4"
+paths = [
+  "src/operations/application/journal_backup.rs",
+  "src/operations/interfaces/http/admin_backup.rs",
+]
+subject = "journal.infrastructure"
+reason = "backup_journal and restore_journal take the DurableJournal, and admin_backup labels the snapshot with the journal's SNAPSHOT_CONTENT_TYPE; P1 moves backup.rs and lib.rs's admin endpoint as-is. P2: journal's application publishes snapshot_journal and restore_journal_from_bytes use cases that return and take the snapshot bytes with their content type, and operations calls them."
+
+[[exceptions]]
+rule = "B4"
+paths = ["src/operations/interfaces/grpc/otlp_proxy.rs"]
+subject = "ingest.interfaces"
+reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project check its direct server runs, before it forwards an export to the store role; P1 moves the proxy out of grpc.rs and leaves the check where commit 5 put it. P2: the gRPC project check moves to access's interfaces, both the server and the proxy call it there, and operations drops ingest from depends_on."
