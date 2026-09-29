@@ -19,6 +19,7 @@ pub mod proxy;
 mod shared_kernel;
 pub mod storage;
 
+pub use crate::projection::interfaces::projection_worker::ProjectionWorker;
 pub use crate::shared_kernel::stored_event::StoredEvent;
 pub use event::{
     decode_event_json, AttributeValue, ContentBlobRef, EventEnvelope, GovernancePolicy,
@@ -2759,13 +2760,6 @@ fn split_governed_batches(events: Vec<EventEnvelope>) -> Result<Vec<Vec<EventEnv
     Ok(chunks)
 }
 
-pub struct ProjectionWorker {
-    shutdown: Option<tokio::sync::watch::Sender<bool>>,
-    task: tokio::task::JoinHandle<()>,
-    projections: Arc<projection::ProjectionRuntime>,
-    journal: Arc<DurableJournal>,
-}
-
 pub struct ArchiveWorker {
     shutdown: Option<tokio::sync::watch::Sender<bool>>,
     task: tokio::task::JoinHandle<()>,
@@ -3073,29 +3067,6 @@ impl ArchiveWorker {
             let _ = shutdown.send(true);
         }
         let _ = self.task.await;
-    }
-}
-
-impl ProjectionWorker {
-    pub async fn stop(mut self) {
-        if let Some(shutdown) = self.shutdown.take() {
-            let _ = shutdown.send(true);
-        }
-        let _ = self.task.await;
-        let journal = self.journal;
-        match tokio::task::spawn_blocking(move || journal.maintain_dedupe_at(Utc::now(), true))
-            .await
-        {
-            Ok(Ok(_)) => {}
-            Ok(Err(error)) => tracing::warn!(%error, "dedupe shutdown flush failed"),
-            Err(error) => tracing::warn!(%error, "dedupe shutdown flush task panicked"),
-        }
-        let projections = self.projections;
-        match tokio::task::spawn_blocking(move || projections.persist_all()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => tracing::warn!(%error, "projection shutdown flush failed"),
-            Err(error) => tracing::warn!(%error, "projection shutdown flush task panicked"),
-        }
     }
 }
 

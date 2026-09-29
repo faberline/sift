@@ -5,6 +5,7 @@
 pub(crate) mod application;
 pub(crate) mod domain;
 pub(crate) mod infrastructure;
+pub(crate) mod interfaces;
 
 pub use application::projection_runtime::{
     Projection, ProjectionRuntime, PROJECTION_BATCH_SIZE, PROJECTION_RETRY_AFTER_SECONDS,

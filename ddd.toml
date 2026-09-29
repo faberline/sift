@@ -199,6 +199,7 @@ depends_on = []
 domain = "src/projection/domain"
 application = "src/projection/application"
 infrastructure = "src/projection/infrastructure"
+interfaces = "src/projection/interfaces"
 
 # Projection dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
