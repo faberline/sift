@@ -43,7 +43,7 @@ fn jsonl(stdout: &[u8]) -> Vec<Value> {
 
 #[test]
 fn architecture_runbook_names_owned_boundaries_and_repro_command() {
-    let runbook = include_str!("../../observability/structured-stdout.md");
+    let runbook = include_str!("../../docs/operations/structured-stdout.md");
     for required in [
         "axiom.service.log.v1",
         "W3C `traceparent`",

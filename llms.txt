@@ -1,8 +1,8 @@
 # Sift agent context
 
 Sift is one Rust SRE product for logs, metrics, and traces. Read README.md
-before changing its public contract. Read HA.md before changing replication,
-Kubernetes, backup, or recovery behavior.
+before changing its public contract. Read docs/operations/ha.md before
+changing replication, Kubernetes, backup, or recovery behavior.
 
 ## Product boundary
 

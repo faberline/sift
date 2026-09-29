@@ -75,6 +75,9 @@ vat = { git = "https://github.com/faberline/vat", rev = "1ba31b2f2ddc49bad1d85a0
 [build-dependencies]
 build-stamp = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
 
+[lints.clippy]
+mod_module_files = "deny"
+
 [profile.release]
 opt-level = 3
 lto = true

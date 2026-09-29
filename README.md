@@ -394,6 +394,6 @@ below is an explicit Cargo test target under `e2e`.
 
 ## Supporting documents
 
-- [High availability operations](HA.md) explains role deployment, peer TLS, backup, and recovery limits.
-- [Structured stdout observability](observability/structured-stdout.md) explains application and collector ownership.
+- [High availability operations](docs/operations/ha.md) explains role deployment, peer TLS, backup, and recovery limits.
+- [Structured stdout observability](docs/operations/structured-stdout.md) explains application and collector ownership.
 - [Agent context](llms.txt) lists the supported build, test, and safety commands.
