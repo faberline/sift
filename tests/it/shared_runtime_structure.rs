@@ -153,8 +153,14 @@ fn shutdown_order_and_task_failures_use_server_lifecycle() {
 
 #[test]
 fn scoped_bearer_middleware_is_owned_by_service_auth() {
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/auth.rs"))
+    let facade = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/auth.rs"))
         .expect("read Sift auth adapter");
+    let scoped = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/access/interfaces/http/scoped_authorization.rs"
+    ))
+    .expect("read Sift scoped authorization");
+    let source = facade + &scoped;
 
     assert!(
         source.contains("impl service_auth::ScopedAuthorization for SiftVerifier"),

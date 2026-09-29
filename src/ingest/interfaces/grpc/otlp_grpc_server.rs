@@ -8,7 +8,8 @@ use axum::http::{HeaderMap, HeaderValue};
 use service_auth::{AuthError, Role};
 use tonic::Status;
 
-use crate::auth::SiftVerifier;
+use crate::access::infrastructure::sift_verifier::SiftVerifier;
+use crate::access::interfaces::http::project_authorization::authorize_project;
 use crate::ingest::interfaces::otlp::otlp_codec::normalize_payload;
 use crate::ServiceState;
 
@@ -153,7 +154,7 @@ pub(crate) async fn authorize(
         .authenticate_project(&headers, &project, Role::Write)
         .await
         .map_err(auth_status)?;
-    crate::authorize_project(Some(&principal), &project)
+    authorize_project(Some(&principal), &project)
         .map_err(|error| Status::permission_denied(error.message))?;
     Ok(project)
 }

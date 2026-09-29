@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use service_auth::RoleMapPrincipal;
 
+use crate::access::interfaces::http::project_authorization::authorize_project_read;
 use crate::query::application::get_query_job::query_job_for_project;
 use crate::query::domain::query_job::QueryJobV1;
 use crate::query::infrastructure::store_query_client::{
@@ -20,7 +21,7 @@ use crate::query::infrastructure::store_query_client::{
 use crate::query::interfaces::http::query_request_v1::{QueryModeV1, QueryRequestV1};
 use crate::query::interfaces::http::query_response_v1::{QueryResponseV1, QueryStatsV1};
 use crate::query::interfaces::http::query_v1::QueryJobHttpQuery;
-use crate::{authorize_project_read, ApiError, ServiceState};
+use crate::{ApiError, ServiceState};
 
 #[derive(Clone)]
 struct QueryRoleState {

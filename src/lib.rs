@@ -2,6 +2,7 @@
 //! WAL is fsynced before acknowledgement. Rebuildable indexes are never a
 //! second source of truth.
 
+mod access;
 pub mod api;
 mod archive;
 pub mod auth;
@@ -58,11 +59,14 @@ use axum::{
 use chrono::Utc;
 use metrics_prometheus::Sample;
 use serde::{Deserialize, Serialize};
-use service_auth::{Role, RoleMapPrincipal};
+use service_auth::RoleMapPrincipal;
 use service_http::{DetailedErrorEnvelope as ErrorEnvelope, ProjectionMetadata};
 use sha2::{Digest, Sha256};
 use utoipa::{OpenApi, ToSchema};
 
+use crate::access::infrastructure::sift_verifier::SiftVerifier;
+use crate::access::interfaces::http::project_authorization::authorize_global_admin;
+use crate::access::interfaces::http::scoped_authorization::auth_middleware;
 use crate::ingest::application::admission_controller::AdmissionController;
 use crate::ingest::domain::admission_error::AdmissionError;
 use crate::ingest::domain::ingest_limits::IngestLimits;
@@ -442,10 +446,10 @@ pub fn router(state: Arc<ServiceState>) -> Router {
 /// Build the production data-plane router. The standard operational probe
 /// router is intentionally composed outside this function, so its endpoints
 /// remain reachable when `SIFT_AUTH=required`.
-pub fn protected_router(state: Arc<ServiceState>, verifier: Arc<auth::SiftVerifier>) -> Router {
+pub fn protected_router(state: Arc<ServiceState>, verifier: Arc<SiftVerifier>) -> Router {
     router(state).layer(axum::middleware::from_fn_with_state(
         verifier,
-        auth::auth_middleware,
+        auth_middleware,
     ))
 }
 
@@ -453,11 +457,11 @@ pub fn protected_router(state: Arc<ServiceState>, verifier: Arc<auth::SiftVerifi
 /// endpoint. MCP tools forward the caller's credential to these same routes.
 pub fn protected_router_with_mcp(
     state: Arc<ServiceState>,
-    verifier: Arc<auth::SiftVerifier>,
+    verifier: Arc<SiftVerifier>,
     internal_endpoint: &str,
 ) -> Result<Router> {
     Ok(router(state).merge(http_router(internal_endpoint)?).layer(
-        axum::middleware::from_fn_with_state(verifier, auth::auth_middleware),
+        axum::middleware::from_fn_with_state(verifier, auth_middleware),
     ))
 }
 
@@ -682,45 +686,6 @@ async fn admin_integrity(
             },
         },
     }))
-}
-
-fn authorize_project(principal: Option<&RoleMapPrincipal>, project: &str) -> Result<(), ApiError> {
-    authorize_project_role(principal, project, Role::Write)
-}
-
-fn authorize_project_read(
-    principal: Option<&RoleMapPrincipal>,
-    project: &str,
-) -> Result<(), ApiError> {
-    authorize_project_role(principal, project, Role::Read)
-}
-
-fn authorize_global_admin(principal: Option<&RoleMapPrincipal>) -> Result<(), ApiError> {
-    match principal {
-        None | Some(RoleMapPrincipal::Open) => Ok(()),
-        Some(principal) => principal.ensure("*", Role::Admin).map_err(|denied| {
-            ApiError::forbidden(format!(
-                "subject `{}` lacks wildcard admin access required for this admin operation",
-                denied.subject
-            ))
-        }),
-    }
-}
-
-fn authorize_project_role(
-    principal: Option<&RoleMapPrincipal>,
-    project: &str,
-    role: Role,
-) -> Result<(), ApiError> {
-    match principal {
-        None | Some(RoleMapPrincipal::Open) => Ok(()),
-        Some(principal) => principal.ensure(project, role).map_err(|denied| {
-            ApiError::forbidden(format!(
-                "subject `{}` lacks {:?} access to project `{}`",
-                denied.subject, denied.needed, denied.resource
-            ))
-        }),
-    }
 }
 
 #[derive(OpenApi)]

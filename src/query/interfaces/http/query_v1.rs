@@ -11,6 +11,7 @@ use axum::Json;
 use serde::Deserialize;
 use service_auth::RoleMapPrincipal;
 
+use crate::access::interfaces::http::project_authorization::authorize_project_read;
 use crate::query::application::execute_query::execute_query_v1;
 use crate::query::application::get_query_job::query_job_for_project;
 use crate::query::domain::query_cursor::encode_query_cursor;
@@ -20,7 +21,7 @@ use crate::query::interfaces::http::query_request_v1::{
     QueryModeV1, QueryRequestV1, QuerySignalV1, TimeRangeV1,
 };
 use crate::query::interfaces::http::query_response_v1::{QueryResponseV1, QueryStatsV1};
-use crate::{authorize_project_read, ApiError, ServiceState};
+use crate::{ApiError, ServiceState};
 
 pub(crate) async fn query_v1(
     State(state): State<Arc<ServiceState>>,

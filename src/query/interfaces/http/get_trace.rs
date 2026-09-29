@@ -8,7 +8,8 @@ use axum::Json;
 use serde::Deserialize;
 use service_auth::RoleMapPrincipal;
 
-use crate::{authorize_project_read, projection, ApiError, ServiceState};
+use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::{projection, ApiError, ServiceState};
 
 const LOG_QUERY_PROJECTION_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
 

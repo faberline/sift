@@ -24,7 +24,7 @@ use opentelemetry_proto::tonic::collector::{
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{codec::CompressionEncoding, transport::Channel, Request, Response, Status};
 
-use crate::auth::SiftVerifier;
+use crate::access::infrastructure::sift_verifier::SiftVerifier;
 use crate::ingest::interfaces::grpc::otlp_grpc_server::authorize;
 
 pub use crate::ingest::interfaces::grpc::otlp_grpc_server::serve;

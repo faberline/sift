@@ -256,10 +256,11 @@ reason = "ProjectionRuntime::open, ProjectionWorker and JournalProjectionSource 
 # Queries: the versioned query API over logs, metrics and traces, its async
 # jobs, the Prometheus-compatible endpoints, the query role and the
 # read-only MCP tools. It reads the projections it answers from, the journal
-# for the services it lists, and the archive for cold queries.
+# for the services it lists, the archive for cold queries, and access for the
+# project checks its handlers run.
 [[contexts]]
 name = "query"
-depends_on = ["projection", "journal", "archive"]
+depends_on = ["projection", "journal", "archive", "access"]
 
 [contexts.layers]
 domain = "src/query/domain"
@@ -382,11 +383,11 @@ reason = "list_services_v1 scans recent events through ServiceState's journal wi
 # Ingest: telemetry admitted within bounded limits, decoded from OTLP, Cloud
 # Logging structured JSON and Prometheus remote write into operational
 # events, governed, and appended through the group-commit queue to the
-# journal. Besides the shared kernel it appends to the journal, and it
-# reaches ServiceState, a crate-root item until commit 11.
+# journal. Besides the shared kernel it appends to the journal, runs access's
+# project checks, and reaches ServiceState, a crate-root item until commit 11.
 [[contexts]]
 name = "ingest"
-depends_on = ["journal"]
+depends_on = ["journal", "access"]
 
 [contexts.layers]
 domain = "src/ingest/domain"
@@ -764,3 +765,44 @@ depends_on = []
 [contexts.layers]
 domain = "src/node/domain"
 infrastructure = "src/node/infrastructure"
+
+# Access: who may call Sift, and for which project. It owns the auth
+# configuration, the verifier that checks a bearer token against a static role
+# map or the Kubernetes API server, the scoped bearer middleware, and the
+# project and admin checks handlers run. It has no application layer, so
+# ingest and query use its interfaces directly.
+[[contexts]]
+name = "access"
+depends_on = []
+
+[contexts.layers]
+domain = "src/access/domain"
+infrastructure = "src/access/infrastructure"
+interfaces = "src/access/interfaces"
+
+# Access dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/access/domain/route_role.rs"]
+subject = "axum"
+reason = "http_role reads the request's axum::http::Method to decide whether a route needs Read or Write; P1 moves it from auth.rs as-is. P2: the domain takes a route kind (method and path as plain values) and the interfaces map the axum request onto it, or http's Method is approved in the domain allowlist."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/access/domain/route_role.rs"]
+subject = "service_auth"
+reason = "http_role returns and role_verb takes service_auth::Role, the Read, Write and Admin roles the shared bearer middleware and RoleMapPrincipal enforce; the role is the shared auth crate's published contract, and P1 moves both as-is. P2: approve service_auth::Role in the domain allowlist, or give access a domain role that the interfaces map onto service_auth::Role."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/access/interfaces/http/scoped_authorization.rs"]
+subject = "interfaces->domain"
+reason = "SiftVerifier's ScopedAuthorization impl calls http_role to pick the role a route needs before it authenticates the project; P1 moves the impl from auth.rs as-is. P2: access gets an application layer with an authorize_request use case that owns the route-to-role decision, and the middleware adapter calls it."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/access/interfaces/http/scoped_authorization.rs"]
+subject = "interfaces->infrastructure"
+reason = "service_auth::ScopedAuthorization is implemented directly for SiftVerifier, the infrastructure verifier, and the impl calls its is_kubernetes and authenticate_project; the orphan rule keeps the impl beside a local type, and P1 moves it as-is. P2: the impl moves to a thin interfaces wrapper over an application authorize_request use case that holds the verifier behind a domain port."

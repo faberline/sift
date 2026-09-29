@@ -10,7 +10,8 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use service_auth::RoleMapPrincipal;
 
-use crate::{authorize_project, retention_rejection, ApiError, ServiceState};
+use crate::access::interfaces::http::project_authorization::authorize_project;
+use crate::{retention_rejection, ApiError, ServiceState};
 
 #[utoipa::path(post, path = "/v1/logs", responses((status = 200, description = "OTLP logs export response")))]
 pub(crate) async fn ingest_logs(

@@ -10,9 +10,10 @@ use axum::extract::{Extension, State};
 use axum::Json;
 use service_auth::RoleMapPrincipal;
 
+use crate::access::interfaces::http::project_authorization::authorize_project_read;
 use crate::query::domain::query_time::parse_query_time_nanos;
 use crate::query::interfaces::http::phase_one::{CorrelationRequestV1, CorrelationResponseV1};
-use crate::{authorize_project_read, projection, ApiError, ServiceState};
+use crate::{projection, ApiError, ServiceState};
 
 pub(crate) async fn correlate_v1(
     State(state): State<Arc<ServiceState>>,
