@@ -4,9 +4,11 @@
 # Sift's own.
 schema = 1
 
-# Report only while the DDD split (P1) is in progress.
+# Enforced since the DDD split's first phase (P1) finished: the check fails on
+# any error that no [[exceptions]] entry below records. The ratchet never lets
+# this go back to false.
 [migration]
-enforce = false
+enforce = true
 
 [policy]
 version = 1
@@ -884,3 +886,81 @@ rule = "B4"
 paths = ["src/operations/interfaces/grpc/otlp_proxy.rs"]
 subject = "ingest.interfaces"
 reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project check its direct server runs, before it forwards an export to the store role; P1 moves the proxy out of grpc.rs and leaves the check where commit 5 put it. P2: the gRPC project check moves to access's interfaces, both the server and the proxy call it there, and operations drops ingest from depends_on."
+
+# The crate's old public modules. Each is now a compatibility facade that only
+# re-exports its items from the context that owns them, so every public path
+# from before the DDD split keeps compiling. They sit outside every context and
+# layer, so B1 reports each one; P2 drops a facade once its callers use the
+# crate-root re-exports or the context paths.
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/api.rs"]
+subject = "src/api"
+reason = "Compat facade: sift::api was a public module, and api.rs now only re-exports the query requests and responses, the filter expression and evaluator, and the query job types from the query context so the public path keeps compiling. P2: drop the facade once callers use the query context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/auth.rs"]
+subject = "src/auth"
+reason = "Compat facade: sift::auth was a public module, and auth.rs now only re-exports SiftAuthConfig, SiftVerifier and auth_middleware from the access context so the public path keeps compiling. P2: drop the facade once callers use the access context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/backup.rs"]
+subject = "src/backup"
+reason = "Compat facade: sift::backup was a public module, and backup.rs now only re-exports backup_journal, restore_journal and the live snapshot client functions from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/deploy.rs"]
+subject = "src/deploy"
+reason = "Compat facade: sift::deploy was a public module, and deploy.rs now only re-exports the manifest bundle's renderers, DockerfileVariant, InstanceProfile and DEFAULT_OPERATOR_IMAGE from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/durability.rs"]
+subject = "src/durability"
+reason = "Compat facade: sift::durability was a public module, and durability.rs now only re-exports the Raft batch limits, the diagnostics encoders, SiftStateMachine and SNAPSHOT_CONTENT_TYPE from the journal context so the public path keeps compiling. P2: drop the facade once callers use the journal context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/event.rs"]
+subject = "src/event"
+reason = "Compat facade: sift::event was a public module, and event.rs now only re-exports the event model from the shared kernel and GovernancePolicy and GovernancePolicySet from ingest so the public path keeps compiling. The crate root's own event re-exports also go through it. P2: point the crate-root re-exports at the shared kernel, and drop the facade once callers use them."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/grpc.rs"]
+subject = "src/grpc"
+reason = "Compat facade: sift::grpc was a public module, and grpc.rs now only re-exports ingest's OTLP/gRPC serve and operations' serve_proxy so the public path keeps compiling. P2: drop the facade once callers use the ingest and operations paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/mcp.rs"]
+subject = "src/mcp"
+reason = "Compat facade: sift::mcp was a public module, and mcp.rs now only re-exports SiftApiClient, http_router, serve_stdio and tool_names from the query context so the public path keeps compiling. P2: drop the facade once callers use the query context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/operator.rs"]
+subject = "src/operator"
+reason = "Compat facade: sift::operator was a public module, and operator.rs now only re-exports the Sift custom resource types and the operator's run from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/prometheus.rs"]
+subject = "src/prometheus"
+reason = "Compat facade: sift::prometheus was a public module, and prometheus.rs now only re-exports PromQL and the query parameters from the query context, remote-write decoding from ingest, and the metrics_remote_write proto and PROMETHEUS_STALE_NAN_BITS so the public path keeps compiling. P2: drop the facade once callers use the query and ingest paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/proxy.rs"]
+subject = "src/proxy"
+reason = "Compat facade: sift::proxy was a public module, and proxy.rs now only re-exports gateway_router and query_router from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
+
+[[exceptions]]
+rule = "B1"
+paths = ["src/storage.rs"]
+subject = "src/storage"
+reason = "Compat facade: sift::storage was a public module, and storage.rs now only declares storage::archive and re-exports the journal's storage types and the node's layout and capacity types, and storage/archive.rs only re-exports the archive's use cases, receipts and manifest types, so the public paths keep compiling. P2: drop the facade once callers use the journal, node and archive paths."
