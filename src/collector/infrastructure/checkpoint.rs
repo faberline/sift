@@ -1,13 +1,17 @@
-// HANDWRITE-BEGIN gap="missing-generator:logic:4643a21b" tracker="1873" reason="Persist collector.checkpoint.v1 by atomic fsynced replace and collector.rejection.v1 by bounded append diagnostics."
+//! The file and stdin source's checkpoint (collector.checkpoint.v1), bound to
+//! one source id and replaced atomically through service_collector.
+
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use crate::collector::domain::quarantine::{
+    QuarantineEntry, MAX_REJECTION_ERROR_BYTES, MAX_REJECTION_PREVIEW_BYTES,
+};
+
 pub const CHECKPOINT_SCHEMA: &str = "collector.checkpoint.v1";
-pub const REJECTION_SCHEMA: &str = "collector.rejection.v1";
-pub const MAX_REJECTION_PREVIEW_BYTES: usize = 1024;
-pub const MAX_REJECTION_ERROR_BYTES: usize = 512;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CollectorCheckpoint {
@@ -60,49 +64,6 @@ impl CollectorCheckpoint {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct QuarantineEntry {
-    pub schema: String,
-    pub source_id: String,
-    pub line: u64,
-    pub offset: u64,
-    pub code: String,
-    pub message: String,
-    pub preview: String,
-}
-
-impl QuarantineEntry {
-    pub fn invalid_line(
-        source_id: &str,
-        line: u64,
-        offset: u64,
-        code: impl Into<String>,
-        message: impl AsRef<str>,
-        bytes: &[u8],
-    ) -> Self {
-        Self {
-            schema: REJECTION_SCHEMA.to_string(),
-            source_id: source_id.to_string(),
-            line,
-            offset,
-            code: code.into(),
-            message: truncate_utf8(message.as_ref(), MAX_REJECTION_ERROR_BYTES),
-            preview: truncate_utf8(&String::from_utf8_lossy(bytes), MAX_REJECTION_PREVIEW_BYTES),
-        }
-    }
-}
-
-fn truncate_utf8(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.to_string();
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,4 +104,3 @@ mod tests {
         assert_eq!(decoded.preview.len(), MAX_REJECTION_PREVIEW_BYTES);
     }
 }
-// HANDWRITE-END

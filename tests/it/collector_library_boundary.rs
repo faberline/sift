@@ -6,17 +6,17 @@ fn sift_collector_is_domain_hooks_over_service_collector() {
         .expect("read Sift manifest");
     let runtime = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/collector/runtime.rs"
+        "/src/collector/application/runtime.rs"
     ))
     .expect("read Sift collector adapter");
     let checkpoint = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/collector/checkpoint.rs"
+        "/src/collector/infrastructure/checkpoint.rs"
     ))
     .expect("read Sift checkpoint adapter");
     let client = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/collector/client.rs"
+        "/src/collector/infrastructure/client.rs"
     ))
     .expect("read Sift collector sink");
 

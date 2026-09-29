@@ -1,13 +1,17 @@
-// HANDWRITE-BEGIN gap="missing-generator:logic:d9e63ee1" tracker="1873" reason="Run the sole bounded decode, quarantine, delivery, ack, and checkpoint loop over source-neutral records."
+//! One collector run: a single source through service_collector's bounded
+//! decode, quarantine, delivery, ack and checkpoint loop.
+
 use std::time::Duration;
 
 use anyhow::Result;
 
-use super::checkpoint::QuarantineEntry;
-use super::client::CollectorClient;
-use super::model::decode_service_log_enriched;
-use super::source::{open_source, RawRecord};
-use super::{CollectorConfig, CollectorSummary};
+use crate::collector::application::run_collector::CollectorSummary;
+use crate::collector::domain::config::CollectorConfig;
+use crate::collector::domain::quarantine::QuarantineEntry;
+use crate::collector::domain::record::RawRecord;
+use crate::collector::infrastructure::client::CollectorClient;
+use crate::collector::infrastructure::service_log_mapper::decode_service_log_enriched;
+use crate::collector::infrastructure::source::open_source;
 
 struct SiftRecordDecoder<'a> {
     project: &'a str,
@@ -40,7 +44,6 @@ impl service_collector::RecordDecoder<RawRecord> for SiftRecordDecoder<'_> {
     }
 }
 
-// <HANDWRITE gap="missing-generator:logic" tracker="1675" reason="Drive file, stdin, and CRI through one shared collector core.">
 pub async fn run(config: CollectorConfig) -> Result<CollectorSummary> {
     let mut source = open_source(&config)?;
     let mut client = CollectorClient::new(
@@ -93,17 +96,16 @@ pub async fn run(config: CollectorConfig) -> Result<CollectorSummary> {
         lost_sources: report.progress.lost_sources,
     })
 }
-// </HANDWRITE>
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::collector::{
-        CollectorCheckpoint, SourceSpec, DEFAULT_BATCH_SIZE, DEFAULT_MAX_LINE_BYTES,
-        DEFAULT_MAX_RETRIES,
+    use crate::collector::domain::config::{
+        SourceSpec, DEFAULT_BATCH_SIZE, DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_RETRIES,
     };
+    use crate::collector::infrastructure::checkpoint::CollectorCheckpoint;
 
     #[tokio::test]
     async fn truncated_file_is_refused_before_delivery() {
@@ -137,4 +139,3 @@ mod tests {
         assert!(error.contains("truncated or rotated"));
     }
 }
-// HANDWRITE-END

@@ -1,35 +1,22 @@
-// HANDWRITE-BEGIN gap="missing-generator:logic:255e6322" tracker="1675" reason="Own source-neutral records, enrichment, opaque commit cursors, outcomes, CollectorSource, and linear file/stdin framing."
-use std::collections::BTreeMap;
+//! Opening the configured source, the file and stdin source with its linear
+//! framing, and the bindings of the collector's records to service_collector's
+//! traits.
+
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use crate::AttributeValue;
-
-use super::checkpoint::{CollectorCheckpoint, QuarantineEntry};
-use super::cri::CriSource;
-use super::{CollectorConfig, SourceSpec};
+use crate::collector::domain::config::{CollectorConfig, SourceSpec};
+use crate::collector::domain::quarantine::QuarantineEntry;
+use crate::collector::domain::record::{
+    RawRecord, RecordEnrichment, SourceCursor, SourceRejection,
+};
+use crate::collector::infrastructure::checkpoint::CollectorCheckpoint;
+use crate::collector::infrastructure::cri_source::CriSource;
 
 pub(crate) use service_collector::CommitStats;
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct RecordEnrichment {
-    pub(crate) resource: BTreeMap<String, String>,
-    pub(crate) attributes: BTreeMap<String, AttributeValue>,
-    pub(crate) cloud_logging_coexistence: bool,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct RawRecord {
-    pub(crate) source_id: String,
-    pub(crate) line: u64,
-    pub(crate) offset: u64,
-    pub(crate) bytes: Vec<u8>,
-    pub(crate) cursor: SourceCursor,
-    pub(crate) enrichment: RecordEnrichment,
-}
 
 impl service_collector::CollectorRecord for RawRecord {
     type Cursor = SourceCursor;
@@ -39,12 +26,6 @@ impl service_collector::CollectorRecord for RawRecord {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct SourceRejection {
-    pub(crate) entry: QuarantineEntry,
-    pub(crate) cursor: SourceCursor,
-}
-
 impl service_collector::CollectorRejection for SourceRejection {
     type Cursor = SourceCursor;
     type Entry = QuarantineEntry;
@@ -52,24 +33,6 @@ impl service_collector::CollectorRejection for SourceRejection {
     fn into_parts(self) -> (Self::Entry, Self::Cursor) {
         (self.entry, self.cursor)
     }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum SourceCursor {
-    Linear {
-        next_offset: u64,
-        next_line: u64,
-    },
-    Cri {
-        identity: String,
-        next_offset: u64,
-        next_line: u64,
-        observed_len: u64,
-    },
-    CriLoss {
-        identity: String,
-        lost_bytes: u64,
-    },
 }
 
 pub(crate) type ReadOutcome = service_collector::ReadOutcome<RawRecord, SourceRejection>;
@@ -367,5 +330,3 @@ mod tests {
         assert!(discard_acknowledged(&mut Cursor::new(b"short".to_vec()), 9).is_err());
     }
 }
-
-// HANDWRITE-END

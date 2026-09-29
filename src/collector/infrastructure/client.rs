@@ -1,4 +1,6 @@
-// HANDWRITE-BEGIN gap="missing-generator:logic:d8653acc" tracker="1873" reason="POST official OTLP logs JSON with bounded retries and advance checkpoints only after full success."
+//! POST official OTLP logs JSON with bounded retries and advance checkpoints
+//! only after full success.
+
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{bail, Context, Result};
@@ -304,4 +306,3 @@ mod tests {
         );
     }
 }
-// HANDWRITE-END

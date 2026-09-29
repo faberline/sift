@@ -149,3 +149,40 @@ rule = "B2"
 paths = ["src/shared_kernel/event.rs"]
 subject = "chrono::Utc::now"
 reason = "OperationalEventV2::for_project (and ::new through it) stamps occurred_at and observed_at with Utc::now; P1 moves the constructors without rewriting them (E7). P2: a for_project_at(now) constructor in the kernel and a Clock port the callers pass the time through."
+
+# The collector: the agent that reads service logs from a file, stdin or a
+# node's CRI log root and delivers them to Sift over OTLP. It reads nothing
+# of Sift's but the shared kernel.
+[[contexts]]
+name = "collector"
+depends_on = []
+
+[contexts.layers]
+domain = "src/collector/domain"
+application = "src/collector/application"
+infrastructure = "src/collector/infrastructure"
+
+# Collector dependencies the P1 split moves as-is; P2 settles each one as the
+# reason says.
+
+[[exceptions]]
+rule = "B2"
+paths = [
+  "src/collector/domain/config.rs",
+  "src/collector/domain/cri.rs",
+  "src/collector/domain/service_log.rs",
+]
+subject = "anyhow"
+reason = "CollectorConfig::validate, parse_cri_frame, parse_workload_path and the service-log validators return anyhow errors whose text is the CLI's error for a bad flag and the error a quarantine entry records for a rejected line, so converting them is not a move (E6). P2: a collector domain error (thiserror) with the same Display text, which the runtime and the bin convert."
+
+[[exceptions]]
+rule = "B2"
+paths = ["src/collector/domain/service_log.rs"]
+subject = "service_observability"
+reason = "validate checks a StructuredServiceLogV1 against its schema id and the core crate's bounds (MAX_EVENT_BYTES, MAX_ATTRIBUTES and the rest): the log shape is the core library's published contract, not Sift's (E14). P2: approve service_observability in the domain allowlist, or wrap the log in a collector newtype if review wants the domain free of it."
+
+[[exceptions]]
+rule = "B3"
+paths = ["src/collector/application/runtime.rs"]
+subject = "application->infrastructure"
+reason = "run opens its source with open_source and delivers through CollectorClient, SiftRecordDecoder maps each record with decode_service_log_enriched, and the truncated-file test seeds a CollectorCheckpoint; P1 moves runtime.rs whole. P2: the composition root opens the source and builds the client and passes them to run as service_collector's CollectorSource and BatchSink, the decoder takes the mapper injected, and the test moves with that wiring."

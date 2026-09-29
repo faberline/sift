@@ -1,19 +1,10 @@
-// HANDWRITE-BEGIN gap="missing-generator:logic:ca755a11" tracker="1873" reason="Own CollectorConfig, SourceSpec, CollectorSummary, validation defaults, module exports, and run_collector."
+//! What a collector run is configured with, the bounds it is validated against,
+//! and the CRI metadata every record from a node carries.
+
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
-use serde::{Deserialize, Serialize};
-
-mod checkpoint;
-mod client;
-mod cri;
-mod model;
-mod runtime;
-mod source;
-
-pub use checkpoint::{CollectorCheckpoint, QuarantineEntry};
-pub use model::decode_service_log;
 
 pub const DEFAULT_BATCH_SIZE: usize = 100;
 pub const MAX_BATCH_SIZE: usize = 1000;
@@ -21,7 +12,6 @@ pub const DEFAULT_MAX_LINE_BYTES: usize = 512 * 1024;
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 
-// <HANDWRITE gap="missing-generator:logic" tracker="1675" reason="Add typed CRI source configuration and metadata over the shared collector runtime.">
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CriMetadata {
     pub gcp_project: String,
@@ -42,7 +32,6 @@ pub enum SourceSpec {
     Stdin,
     Cri(CriSourceConfig),
 }
-// </HANDWRITE>
 
 #[derive(Clone, Debug)]
 pub struct CollectorConfig {
@@ -128,24 +117,6 @@ fn validate_metadata(name: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct CollectorSummary {
-    pub source_id: String,
-    pub start_offset: u64,
-    pub final_offset: u64,
-    pub lines: u64,
-    pub accepted: u64,
-    pub duplicates: u64,
-    pub rejected: u64,
-    pub lost_bytes: u64,
-    pub lost_sources: u64,
-}
-
-pub async fn run_collector(config: CollectorConfig) -> Result<CollectorSummary> {
-    config.validate()?;
-    runtime::run(config).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,4 +159,3 @@ mod tests {
         assert!(invalid.validate().is_err());
     }
 }
-// HANDWRITE-END
