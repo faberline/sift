@@ -1,6 +1,6 @@
 //! The archive worker handle ServiceState starts, and stopping it.
 
-use crate::ServiceState;
+use crate::app::service_state::ServiceState;
 
 impl ServiceState {
     /// Start the store lifecycle worker. A replicated follower stays idle.

@@ -2,7 +2,7 @@
 
 use axum::Router;
 
-use crate::ServiceState;
+use crate::app::service_state::ServiceState;
 
 impl ServiceState {
     /// Return the dedicated mutually authenticated Raft listener parts.

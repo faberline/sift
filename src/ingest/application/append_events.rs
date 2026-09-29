@@ -3,16 +3,13 @@
 
 use anyhow::{bail, Result};
 
+use crate::app::service_state::ServiceState;
 use crate::event::EventEnvelope;
 use crate::ingest::domain::raft_batch_splitter::split_governed_batches;
 use crate::ingest::infrastructure::ingest_batch_coordinator::IngestBatchRequest;
+use crate::journal::application::commit_append_batch::CommitContext;
+use crate::journal::domain::append_result::AppendResult;
 use crate::shared_kernel::single_signal_batch::ensure_single_signal;
-use crate::{
-    journal::{
-        application::commit_append_batch::CommitContext, domain::append_result::AppendResult,
-    },
-    ServiceState,
-};
 
 impl ServiceState {
     /// Govern and durably commit one Raft batch. Every returned event shares

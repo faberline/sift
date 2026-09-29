@@ -10,8 +10,10 @@ use axum::response::Response;
 use service_auth::RoleMapPrincipal;
 
 use crate::access::interfaces::http::project_authorization::authorize_project;
+use crate::app::interfaces::http::api_error::ApiError;
+use crate::app::service_state::ServiceState;
+use crate::ingest::application::retention_admission::retention_rejection;
 use crate::ingest::domain::admission_error::AdmissionError;
-use crate::{retention_rejection, ApiError, ServiceState};
 
 pub(crate) async fn prometheus_remote_write(
     State(state): State<Arc<ServiceState>>,

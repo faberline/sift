@@ -3,8 +3,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 
+use crate::app::interfaces::http::api_error::ApiError;
 use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
-use crate::ApiError;
 
 pub(in crate::query) fn cold_query_requested(request: &QueryRequestV1) -> bool {
     let Some(start) = request.time_range.start.as_deref() else {

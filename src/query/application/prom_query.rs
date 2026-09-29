@@ -3,13 +3,14 @@
 
 use anyhow::Result;
 
+use crate::app::interfaces::http::api_error::ApiError;
 use crate::event::AttributeValue;
+use crate::projection;
 use crate::query::domain::promql::{ParsedPromQuery, PromFunction};
 use crate::query::domain::promql_evaluator::{
     prom_latest_values, prom_nanos_to_seconds, prom_number, prom_rate_values, prom_series_labels,
     PromStepAggregate,
 };
-use crate::{projection, ApiError};
 
 pub(in crate::query) fn prom_metric_query(
     project: &str,

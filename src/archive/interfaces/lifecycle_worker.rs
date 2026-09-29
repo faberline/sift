@@ -1,6 +1,7 @@
 //! The leader's lifecycle loop: archive, evict, expire and collect on each
 //! tick.
 
+use crate::app::service_state::ServiceState;
 use crate::archive::application::compact_journal::{
     compact_remote_quorum_without_gc, compact_resident_all_voters,
 };
@@ -14,7 +15,6 @@ use crate::archive::domain::lifecycle_settings::{
     ALL_VOTER_CHECKPOINT_ATTEMPT, ARCHIVE_GC_BATCH_OBJECTS,
 };
 use crate::archive::interfaces::archive_worker::ArchiveWorker;
-use crate::ServiceState;
 
 impl ServiceState {
     pub(super) fn start_lifecycle_worker(

@@ -2,9 +2,9 @@
 
 use anyhow::Result;
 
+use crate::app::service_state::ServiceState;
 use crate::ingest::domain::admission_error::AdmissionError;
 use crate::ingest::domain::storage_reservation::storage_reservation;
-use crate::ServiceState;
 
 impl ServiceState {
     pub(crate) fn ensure_local_capacity(

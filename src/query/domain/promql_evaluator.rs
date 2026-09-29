@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 
+use crate::app::interfaces::http::api_error::ApiError;
 use crate::event::AttributeValue;
+use crate::projection;
 use crate::query::domain::promql::PromFunction;
-use crate::{projection, ApiError};
 
 pub(in crate::query) fn ensure_complete_prom_metric_page(
     page: &projection::MetricPage,

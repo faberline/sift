@@ -150,6 +150,13 @@ paths = ["src/shared_kernel/event.rs"]
 subject = "chrono::Utc::now"
 reason = "OperationalEventV2::for_project (and ::new through it) stamps occurred_at and observed_at with Utc::now; P1 moves the constructors without rewriting them (E7). P2: a for_project_at(now) constructor in the kernel and a Clock port the callers pass the time through."
 
+# The assembly root: the service state every context's handlers share, the
+# readiness and metrics hooks, and the HTTP router, API error and OpenAPI
+# document. Like lib.rs and the bin it wires the contexts together, so the
+# layer and context rules do not apply to it.
+[assembly]
+modules = ["src/app"]
+
 # The collector: the agent that reads service logs from a file, stdin or a
 # node's CRI log root and delivers them to Sift over OTLP. It reads nothing
 # of Sift's but the shared kernel.
@@ -391,7 +398,8 @@ reason = "query_role_router falls back to query_router, the gateway proxy's reve
 # Logging structured JSON and Prometheus remote write into operational
 # events, governed, and appended through the group-commit queue to the
 # journal. Besides the shared kernel it appends to the journal, runs access's
-# project checks, and reaches ServiceState, a crate-root item until commit 11.
+# project checks, and runs on the app's ServiceState and ApiError, which are
+# assembly code the context rules do not cover.
 [[contexts]]
 name = "ingest"
 depends_on = ["journal", "access"]

@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
 
-use crate::ServiceState;
+use crate::app::service_state::ServiceState;
 
 impl ServiceState {
     pub fn start_drain(&self) {

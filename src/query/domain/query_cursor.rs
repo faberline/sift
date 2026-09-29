@@ -4,7 +4,7 @@ use anyhow::Result;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 
-use crate::ApiError;
+use crate::app::interfaces::http::api_error::ApiError;
 
 pub(in crate::query) fn encode_query_cursor(signal: &str, value: &str) -> String {
     format!("{signal}:{}", URL_SAFE_NO_PAD.encode(value.as_bytes()))

@@ -9,6 +9,9 @@ use chrono::Utc;
 use service_auth::RoleMapPrincipal;
 
 use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::app::interfaces::http::api_error::ApiError;
+use crate::app::service_state::ServiceState;
+use crate::projection;
 use crate::query::application::prom_query::{prom_metric_query, prom_range_result};
 use crate::query::domain::promql::{parse_promql, PromFunction};
 use crate::query::domain::promql_evaluator::{
@@ -20,7 +23,6 @@ use crate::query::interfaces::http::prom_query_params::{
     nanos_rfc3339, parse_prom_duration_nanos, parse_prom_time_nanos, InstantQueryParams,
     RangeQueryParams,
 };
-use crate::{projection, ApiError, ServiceState};
 
 pub(crate) async fn prometheus_instant_query(
     State(state): State<Arc<ServiceState>>,

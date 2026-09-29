@@ -4,7 +4,7 @@
 use anyhow::Result;
 use service_auth::{Role, RoleMapPrincipal};
 
-use crate::ApiError;
+use crate::app::interfaces::http::api_error::ApiError;
 
 pub(crate) fn authorize_project(
     principal: Option<&RoleMapPrincipal>,

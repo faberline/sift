@@ -4,8 +4,21 @@
 fn group_commit_is_owned_by_service_executor() {
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
         .expect("read Sift manifest");
-    let library = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
-        .expect("read Sift library source");
+    let library: String = [
+        "/src/lib.rs",
+        "/src/app/service_state.rs",
+        "/src/app/interfaces/readiness_hook.rs",
+        "/src/app/interfaces/metrics_provider.rs",
+        "/src/app/interfaces/http/api_error.rs",
+        "/src/app/interfaces/http/router.rs",
+        "/src/app/interfaces/http/openapi.rs",
+    ]
+    .iter()
+    .map(|path| {
+        std::fs::read_to_string(format!("{}{path}", env!("CARGO_MANIFEST_DIR")))
+            .expect("read Sift library source")
+    })
+    .collect();
     let coordinator = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/ingest/infrastructure/ingest_batch_coordinator.rs"
@@ -111,8 +124,21 @@ fn reverse_proxy_runtime_is_owned_by_service_http() {
 
 #[test]
 fn persistent_query_job_transitions_use_service_executor() {
-    let library = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
-        .expect("read Sift library source");
+    let library: String = [
+        "/src/lib.rs",
+        "/src/app/service_state.rs",
+        "/src/app/interfaces/readiness_hook.rs",
+        "/src/app/interfaces/metrics_provider.rs",
+        "/src/app/interfaces/http/api_error.rs",
+        "/src/app/interfaces/http/router.rs",
+        "/src/app/interfaces/http/openapi.rs",
+    ]
+    .iter()
+    .map(|path| {
+        std::fs::read_to_string(format!("{}{path}", env!("CARGO_MANIFEST_DIR")))
+            .expect("read Sift library source")
+    })
+    .collect();
     let query_v1 = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/query/interfaces/http/query_v1.rs"
@@ -181,8 +207,21 @@ fn scoped_bearer_middleware_is_owned_by_service_auth() {
 
 #[test]
 fn replicated_host_startup_is_owned_by_raft_runtime() {
-    let library = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
-        .expect("read Sift library source");
+    let library: String = [
+        "/src/lib.rs",
+        "/src/app/service_state.rs",
+        "/src/app/interfaces/readiness_hook.rs",
+        "/src/app/interfaces/metrics_provider.rs",
+        "/src/app/interfaces/http/api_error.rs",
+        "/src/app/interfaces/http/router.rs",
+        "/src/app/interfaces/http/openapi.rs",
+    ]
+    .iter()
+    .map(|path| {
+        std::fs::read_to_string(format!("{}{path}", env!("CARGO_MANIFEST_DIR")))
+            .expect("read Sift library source")
+    })
+    .collect();
     let membership = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/journal/infrastructure/raft/sift_membership_policy.rs"

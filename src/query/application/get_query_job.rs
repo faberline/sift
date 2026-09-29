@@ -5,8 +5,9 @@ use axum::extract::Extension;
 use service_auth::RoleMapPrincipal;
 
 use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::app::interfaces::http::api_error::ApiError;
+use crate::app::service_state::ServiceState;
 use crate::query::domain::query_job::QueryJobV1;
-use crate::{ApiError, ServiceState};
 
 pub(in crate::query) fn query_job_for_project(
     state: &ServiceState,

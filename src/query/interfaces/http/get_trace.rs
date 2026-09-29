@@ -9,7 +9,9 @@ use serde::Deserialize;
 use service_auth::RoleMapPrincipal;
 
 use crate::access::interfaces::http::project_authorization::authorize_project_read;
-use crate::{projection, ApiError, ServiceState};
+use crate::app::interfaces::http::api_error::ApiError;
+use crate::app::service_state::ServiceState;
+use crate::projection;
 
 const LOG_QUERY_PROJECTION_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
 

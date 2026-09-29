@@ -10,8 +10,9 @@ use tonic::Status;
 
 use crate::access::infrastructure::sift_verifier::SiftVerifier;
 use crate::access::interfaces::http::project_authorization::authorize_project;
+use crate::app::service_state::ServiceState;
+use crate::ingest::application::retention_admission::retention_rejection;
 use crate::ingest::interfaces::otlp::otlp_codec::normalize_payload;
-use crate::ServiceState;
 
 #[derive(Clone)]
 struct SiftGrpcConsumer {
@@ -101,7 +102,7 @@ impl transport_otlp::OtlpConsumer for SiftGrpcConsumer {
                 push_message(&mut messages, error.message);
                 continue;
             }
-            if let Some(message) = crate::retention_rejection(&event) {
+            if let Some(message) = retention_rejection(&event) {
                 rejected += 1;
                 push_message(&mut messages, message);
                 continue;
