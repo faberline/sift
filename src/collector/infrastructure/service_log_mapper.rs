@@ -44,8 +44,14 @@ pub(crate) fn decode_service_log_enriched(
 
     let event_id = deterministic_event_id(source_id, offset, raw_line);
     let payload = serde_json::to_value(&log)?;
-    let mut event =
-        OperationalEventV2::for_project(project, environment, event_id, SignalKind::Log, payload);
+    let mut event = OperationalEventV2::for_project_at(
+        project,
+        environment,
+        event_id,
+        SignalKind::Log,
+        payload,
+        Utc::now(),
+    );
     event.occurred_at = log.timestamp.clone();
     event.observed_at = Utc::now().to_rfc3339();
     event

@@ -5,12 +5,15 @@ use chrono::{DateTime, Utc};
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
 
-pub(in crate::query) fn cold_query_requested(request: &QueryRequestV1) -> bool {
+pub(in crate::query) fn cold_query_requested_at(
+    request: &QueryRequestV1,
+    now: DateTime<Utc>,
+) -> bool {
     let Some(start) = request.time_range.start.as_deref() else {
         return false;
     };
     DateTime::parse_from_rfc3339(start)
-        .map(|start| start.with_timezone(&Utc) < Utc::now() - chrono::Duration::days(30))
+        .map(|start| start.with_timezone(&Utc) < now - chrono::Duration::days(30))
         .unwrap_or(false)
 }
 

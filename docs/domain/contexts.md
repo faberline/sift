@@ -19,9 +19,10 @@ context.
   `archive_watermarks`, `retention_boundary`, `cloud_logging_event_id`.
 - **Errors:** thiserror types: `EventError` for event validation and decode,
   `DigestError` and `SingleSignalError`.
-- **Exceptions:** `utoipa` on the event and `StoredEvent` (E1),
-  `clap::ValueEnum` on `SignalKind`, and `Utc::now` in the event constructors
-  (E7).
+- **Time:** `OperationalEventV2::for_project_at` takes the time. `for_project`
+  and `new` read the system clock; they are in `src/app/system_clock.rs`.
+- **Exceptions:** `utoipa` on the event and `StoredEvent` (E1), and
+  `clap::ValueEnum` on `SignalKind`.
 
 ## collector
 
@@ -90,8 +91,7 @@ to the projections and queries.
 - **Errors:** the domain returns thiserror types: `AppendPolicyError`,
   `ContentDigestError`, `IdempotencyWindowError`, `InvalidAcknowledgedAt` and
   `EpochMapError`. The application and infrastructure convert them with `?`.
-- **Exceptions:** `utoipa` on `AppendResult` and `Utc::now` in
-  `SiftCommandV1` (B2); use cases that are `impl DurableJournal` blocks over
+- **Exceptions:** `utoipa` on `AppendResult` (B2); use cases that are `impl DurableJournal` blocks over
   the storage, and the command committer and metrics that sit in other layers
   (B3); and its uses of the archive's committed state, control records and
   manifest, and of ingest's governance and storage reservation (B4). Declaring
@@ -202,7 +202,6 @@ Prometheus-compatible endpoints, the query role, and the read-only MCP tools.
   time and PromQL evaluation modules return the API's `ApiError`. The
   application and handlers convert them with `?` or put their text in the
   `invalid_query` response.
-- **Exceptions:** `base64` in the query cursor and `Utc::now` in `query_time`
-  (B2); layer breaks between the handlers, DTOs and use cases (B3); and its
+- **Exceptions:** `base64` in the query cursor (B2); layer breaks between the handlers, DTOs and use cases (B3); and its
   uses of projection types, the journal's domain and the gateway's
   store-forwarding router (B4).

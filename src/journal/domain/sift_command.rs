@@ -42,10 +42,6 @@ impl SiftCommandV1 {
         }
     }
 
-    pub(crate) fn append_events_now(events: Vec<EventEnvelope>) -> Self {
-        Self::append_events_at(events, Utc::now())
-    }
-
     pub(crate) fn append_events_size_bound(events: Vec<EventEnvelope>) -> Self {
         Self::AppendEvents {
             acknowledged_at: Some("9999-12-31T23:59:59.999999999Z".to_string()),

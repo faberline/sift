@@ -4,6 +4,7 @@
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
@@ -14,7 +15,7 @@ use crate::query::application::archive_query_status::{
 use crate::query::application::replay_cold_query::{replay_cold_query, ColdQueryScope};
 use crate::query::domain::filter_evaluator::evaluate_filter;
 use crate::query::domain::query_cursor::{decode_query_cursor, encode_query_cursor};
-use crate::query::domain::query_time::{cold_query_requested, parse_query_time_nanos};
+use crate::query::domain::query_time::{cold_query_requested_at, parse_query_time_nanos};
 use crate::query::interfaces::http::query_request_v1::{
     MetricFunctionV1, QueryRequestV1, QuerySignalV1,
 };
@@ -54,7 +55,7 @@ pub(in crate::query) fn execute_query_v1(
             query.end_time = request.time_range.end.clone();
             query.after_cursor = after_cursor;
             query.limit = projection::MAX_LOG_QUERY_LIMIT;
-            let (page, archive_status) = if cold_query_requested(request) {
+            let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
                 let archived = projection::LoggingProjection::new()
                     .map_err(|error| ApiError::internal(error.to_string()))?;
                 let status = replay_cold_query(
@@ -154,7 +155,7 @@ pub(in crate::query) fn execute_query_v1(
             };
             query.after_series_id = decode_query_cursor("metrics", request.cursor.as_deref())?;
             query.limit = projection::MAX_METRIC_QUERY_LIMIT;
-            let (page, archive_status) = if cold_query_requested(request) {
+            let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
                 let archived = projection::MetricProjection::new();
                 let status = replay_cold_query(
                     state,
@@ -279,7 +280,7 @@ pub(in crate::query) fn execute_query_v1(
                 .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?;
             query.after_trace_id = decode_query_cursor("traces", request.cursor.as_deref())?;
             query.limit = projection::MAX_TRACE_QUERY_LIMIT;
-            let (page, archive_status) = if cold_query_requested(request) {
+            let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
                 let archived = projection::TraceProjection::new();
                 let status = replay_cold_query(
                     state,

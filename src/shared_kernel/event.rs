@@ -205,20 +205,17 @@ pub struct OperationalEventV2 {
 pub use self::OperationalEventV2 as EventEnvelope;
 
 impl OperationalEventV2 {
-    /// Compatibility constructor for bootstrap callers. Ingest producers
-    /// should use [`for_project`](Self::for_project) with explicit tenancy.
-    pub fn new(event_id: impl Into<String>, signal: SignalKind, payload: Value) -> Self {
-        Self::for_project("default", "default", event_id, signal, payload)
-    }
-
-    pub fn for_project(
+    /// An event that occurred and was observed at `now`. The constructors
+    /// that read the system clock are in `src/app/system_clock.rs`.
+    pub fn for_project_at(
         project: impl Into<String>,
         environment: impl Into<String>,
         event_id: impl Into<String>,
         signal: SignalKind,
         payload: Value,
+        now: DateTime<Utc>,
     ) -> Self {
-        let now = Utc::now().to_rfc3339();
+        let now = now.to_rfc3339();
         Self {
             schema_version: EVENT_SCHEMA_VERSION,
             schema_url: EVENT_SCHEMA_URL.to_string(),

@@ -136,12 +136,6 @@ paths = ["src/shared_kernel/event.rs"]
 subject = "clap"
 reason = "SignalKind derives clap::ValueEnum so the CLI's --signal flags parse straight into it; the mapping keeps the derive (Q9). P2: approve it individually, or give the bin its own ValueEnum that maps onto SignalKind if the kernel must drop clap."
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/shared_kernel/event.rs"]
-subject = "chrono::Utc::now"
-reason = "OperationalEventV2::for_project (and ::new through it) stamps occurred_at and observed_at with Utc::now; P1 moves the constructors without rewriting them (E7). P2: a for_project_at(now) constructor in the kernel and a Clock port the callers pass the time through."
-
 # The assembly root: the service state every context's handlers share, the
 # readiness and metrics hooks, and the HTTP router, API error and OpenAPI
 # document. Like lib.rs and the bin it wires the contexts together, so the
@@ -253,12 +247,6 @@ rule = "B2"
 paths = ["src/query/domain/query_cursor.rs"]
 subject = "base64"
 reason = "encode_query_cursor and decode_query_cursor write the opaque page cursor as base64url (URL_SAFE_NO_PAD) JSON; the cursor text is the API's wire and clients hand it back, so P1 moves the codec as-is. P2: the domain keeps the cursor as a typed value and an interfaces codec writes and reads the base64url text, or base64 is approved in the domain allowlist."
-
-[[exceptions]]
-rule = "B2"
-paths = ["src/query/domain/query_time.rs"]
-subject = "chrono::Utc::now"
-reason = "cold_query_requested compares the query's start with Utc::now minus 30 days to decide whether the archive is read; P1 moves it without rewriting it (E7). P2: it takes now as an argument and the application reads it from a Clock port."
 
 [[exceptions]]
 rule = "B3"
@@ -432,12 +420,6 @@ rule = "B2"
 paths = ["src/journal/domain/append_result.rs"]
 subject = "utoipa"
 reason = "AppendResult derives ToSchema and is re-exported as sift::AppendResult; no OpenAPI path registers it today, but dropping a derive from a public type is not a move (E1). P2: drop the derive if nothing registers the schema, or approve AppendResult as published language in the domain allowlist."
-
-[[exceptions]]
-rule = "B2"
-paths = ["src/journal/domain/sift_command.rs"]
-subject = "chrono::Utc::now"
-reason = "SiftCommandV1::append_events_now stamps acknowledged_at with Utc::now for the diagnostics encoders; P1 moves it without rewriting it (E7). P2: the diagnostics take the time from a Clock port and pass it to append_events_at, and append_events_now goes."
 
 [[exceptions]]
 rule = "B3"

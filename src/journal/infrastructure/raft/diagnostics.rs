@@ -9,12 +9,12 @@ use crate::EventEnvelope;
 
 #[doc(hidden)]
 pub fn encode_raft_batch_for_diagnostics(events: Vec<EventEnvelope>) -> Result<Vec<u8>> {
-    SiftCommandV1::append_events_now(events).encoded_compressed()
+    SiftCommandV1::append_events_at(events, Utc::now()).encoded_compressed()
 }
 
 #[doc(hidden)]
 pub fn encode_default_raft_batch_for_diagnostics(events: Vec<EventEnvelope>) -> Result<Vec<u8>> {
-    SiftCommandV1::append_events_now(events).encoded()
+    SiftCommandV1::append_events_at(events, Utc::now()).encoded()
 }
 
 #[doc(hidden)]

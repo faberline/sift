@@ -94,12 +94,12 @@ macros. The policy table is copied from the workspace's canonical
 `policy.toml` and is not edited here.
 
 Sift's domain layers break these rules in known places, each recorded as an
-exception: `Utc::now` in the event constructors, query time and the Raft
-command (E7), `utoipa` schemas on the published event and the projection
-records (E1), and core-crate types that are part of a domain signature (E14).
-ADR 0001 lists them. Domain errors are thiserror types whose Display text is
-the text an HTTP 400 body or a log line shows; [ADR 0002](adr/0002-ddd-p2.md)
-records the rules.
+exception: `utoipa` schemas on the published event and the projection records
+(E1), and core-crate types that are part of a domain signature (E14). ADR 0001
+lists them. Domain errors are thiserror types whose Display text is the text
+an HTTP 400 body or a log line shows, and a domain function that needs the
+time takes `now` as an argument; [ADR 0002](adr/0002-ddd-p2.md) records the
+rules.
 
 ## Public API
 
@@ -176,7 +176,6 @@ Each reason says what P2 does about it; a B3 reason names the types involved.
 | Category | Rule | Examples | Fate |
 |----------|------|----------|------|
 | Domain uses a non-allowlisted crate | B2 | `utoipa` on the published event, the projection records and `AppendResult` (E1), `clap::ValueEnum` on `SignalKind`, core types such as `storage_segment::CatalogRoot` (E14), `axum` and `service_auth` in access's route roles | P2 approves the crate as part of the model, or moves its use out of the domain. |
-| Domain reads the clock | B2 | `Utc::now` in the event constructors, `query_time.rs` and `sift_command.rs` (E7) | P2 adds `*_at(now)` forms and a `Clock` port. |
 | Same-context layer direction | B3 | the collector runtime building its source and client, the operator's renderers reading the CRD types | P2 moves the wiring to the assembly root or splits the type. |
 | Cross-context use outside the published language | B4 | archive and projections holding `DurableJournal`, the journal validating an `ArchiveManifest`, ingest sizing batches by the journal's Raft limits | P2 publishes the use through the owner's application layer or a port. The journal–archive pair needs a port before Sift can split into crates. |
 
