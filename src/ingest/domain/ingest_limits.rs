@@ -1,5 +1,7 @@
 //! The limits an ingest request is held to, and their validation.
 
+use thiserror::Error;
+
 #[derive(Clone, Debug)]
 pub struct IngestLimits {
     pub max_compressed_body_bytes: usize,
@@ -29,8 +31,16 @@ impl Default for IngestLimits {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum IngestLimitsError {
+    #[error("all ingest limits must be greater than zero")]
+    ZeroLimit,
+    #[error("compressed body limit must not exceed decoded body limit")]
+    CompressedAboveDecoded,
+}
+
 impl IngestLimits {
-    pub fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> Result<(), IngestLimitsError> {
         if self.max_compressed_body_bytes == 0
             || self.max_decoded_body_bytes == 0
             || self.max_event_bytes == 0
@@ -41,10 +51,10 @@ impl IngestLimits {
             || self.max_local_storage_bytes == 0
             || self.min_local_free_bytes == 0
         {
-            anyhow::bail!("all ingest limits must be greater than zero");
+            return Err(IngestLimitsError::ZeroLimit);
         }
         if self.max_compressed_body_bytes > self.max_decoded_body_bytes {
-            anyhow::bail!("compressed body limit must not exceed decoded body limit");
+            return Err(IngestLimitsError::CompressedAboveDecoded);
         }
         Ok(())
     }

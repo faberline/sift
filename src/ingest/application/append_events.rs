@@ -4,7 +4,7 @@
 use anyhow::{bail, Result};
 
 use crate::app::service_state::ServiceState;
-use crate::ingest::domain::raft_batch_splitter::split_governed_batches;
+use crate::ingest::application::raft_batch_splitter::split_governed_batches;
 use crate::ingest::infrastructure::ingest_batch_coordinator::IngestBatchRequest;
 use crate::journal::application::commit_append_batch::CommitContext;
 use crate::journal::domain::append_result::AppendResult;

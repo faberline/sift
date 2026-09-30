@@ -10,7 +10,10 @@ pub(crate) mod interfaces;
 
 pub use crate::ingest::{
     application::admission_controller::{AdmissionController, AdmissionPermit},
-    domain::{admission_error::AdmissionError, ingest_limits::IngestLimits},
+    domain::{
+        admission_error::AdmissionError,
+        ingest_limits::{IngestLimits, IngestLimitsError},
+    },
     interfaces::{
         grpc::otlp_grpc_server::serve as serve_otlp_grpc,
         otlp::otlp_codec::{

@@ -106,7 +106,7 @@ impl DurableJournal {
     }
 
     pub fn govern_event(&self, event: EventEnvelope) -> Result<EventEnvelope> {
-        self.governance.govern(event)
+        Ok(self.governance.govern(event)?)
     }
 
     pub fn storage(&self) -> &crate::journal::infrastructure::storage::raw_storage::RawStorage {

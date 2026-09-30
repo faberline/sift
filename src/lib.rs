@@ -20,7 +20,9 @@ pub use crate::app::interfaces::http::router::{
 };
 pub use crate::app::service_state::ServiceState;
 pub use crate::archive::interfaces::archive_worker::ArchiveWorker;
-pub use crate::ingest::domain::governance_policy::{GovernancePolicy, GovernancePolicySet};
+pub use crate::ingest::domain::governance_policy::{
+    GovernanceError, GovernancePolicy, GovernancePolicySet,
+};
 pub use crate::journal::domain::append_result::AppendResult;
 pub use crate::journal::domain::event_query::EventQuery;
 pub use crate::journal::infrastructure::durable_journal::DurableJournal;
