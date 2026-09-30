@@ -103,14 +103,14 @@ them.
 ## Public API and compatibility facades
 
 Tests and other repos import Sift by module paths such as
-`sift::storage::archive::…`, `sift::durability::…` or `sift::auth::SiftAuthConfig`.
-P1 keeps every one of them:
+`sift::storage::archive::…` or `sift::durability::…`. P1 kept every one of
+them:
 
 - Every `pub use` at the crate root stays: `ServiceState`, `DurableJournal`,
   `router`, `openapi` and the others listed in `src/lib.rs`.
 - Every old `pub mod` that is not itself a context became a **compatibility
   facade**: a file that holds only `pub use` lines pointing at the item's new
-  home. They are `src/{api,auth,backup,deploy,durability,event,grpc,mcp,operator,prometheus,proxy,storage}.rs`,
+  home. They are `src/{api,backup,deploy,durability,event,grpc,mcp,operator,prometheus,proxy,storage}.rs`,
   `src/storage/archive.rs`, and `src/ingest/{limits,otlp}.rs`.
 - `collector`, `ingest` and `projection` kept their names as contexts, so their
   module files serve as their own facades.
@@ -118,7 +118,9 @@ P1 keeps every one of them:
   unchanged.
 
 The facades do not follow the layer naming, so each has a B1 exception. P2
-deletes a facade once nothing imports it by its old path.
+deletes a facade once nothing imports it by its old path, and makes the
+context that owns its items public in its place: `sift::auth` is gone, and
+`sift::access::{SiftAuthConfig, SiftVerifier, auth_middleware}` replaces it.
 
 ## File size
 

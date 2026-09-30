@@ -7,7 +7,7 @@ use opentelemetry_proto::tonic::{
     resource::v1::Resource,
 };
 use sift::{
-    auth::{SiftAuthConfig, SiftVerifier},
+    access::{SiftAuthConfig, SiftVerifier},
     EventQuery, ServiceState, SignalKind,
 };
 use tonic::{codec::CompressionEncoding, Request};

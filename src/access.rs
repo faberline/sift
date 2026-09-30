@@ -10,3 +10,8 @@
 pub(crate) mod domain;
 pub(crate) mod infrastructure;
 pub(crate) mod interfaces;
+
+pub use crate::access::{
+    infrastructure::{auth_config::SiftAuthConfig, sift_verifier::SiftVerifier},
+    interfaces::http::scoped_authorization::auth_middleware,
+};

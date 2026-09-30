@@ -2,11 +2,10 @@
 //! WAL is fsynced before acknowledgement. Rebuildable indexes are never a
 //! second source of truth.
 
-mod access;
+pub mod access;
 pub mod api;
 mod app;
 mod archive;
-pub mod auth;
 pub mod backup;
 pub mod collector;
 pub mod deploy;

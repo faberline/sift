@@ -883,12 +883,6 @@ reason = "Compat facade: sift::api was a public module, and api.rs now only re-e
 
 [[exceptions]]
 rule = "B1"
-paths = ["src/auth.rs"]
-subject = "src/auth"
-reason = "Compat facade: sift::auth was a public module, and auth.rs now only re-exports SiftAuthConfig, SiftVerifier and auth_middleware from the access context so the public path keeps compiling. P2: drop the facade once callers use the access context's paths."
-
-[[exceptions]]
-rule = "B1"
 paths = ["src/backup.rs"]
 subject = "src/backup"
 reason = "Compat facade: sift::backup was a public module, and backup.rs now only re-exports backup_journal, restore_journal and the live snapshot client functions from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."

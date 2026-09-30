@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::extract::DefaultBodyLimit;
-use sift::{auth::SiftVerifier, ServiceState};
+use sift::{access::SiftVerifier, ServiceState};
 
 use crate::serve_args::{LogFormat, RunRole, ServeArgs};
 
@@ -223,14 +223,14 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
                 .merge(sift::mcp::http_router(&internal_endpoint)?)
                 .layer(axum::middleware::from_fn_with_state(
                     verifier,
-                    sift::auth::auth_middleware,
+                    sift::access::auth_middleware,
                 ))
         }
         RunRole::Query => {
             let store = std::env::var("SIFT_STORE_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
             sift::query_role_router(state.clone(), &store, config.body_limit_bytes)?.layer(
-                axum::middleware::from_fn_with_state(verifier, sift::auth::auth_middleware),
+                axum::middleware::from_fn_with_state(verifier, sift::access::auth_middleware),
             )
         }
         _ => sift::protected_router_with_mcp(state.clone(), verifier, &internal_endpoint)?,

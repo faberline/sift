@@ -9,7 +9,7 @@ use flate2::{write::GzEncoder, Compression};
 use prost14::Message;
 use service_auth::{Role, TokenClaims};
 use sift::{
-    auth::{SiftAuthConfig, SiftVerifier},
+    access::{SiftAuthConfig, SiftVerifier},
     ingest::{
         otlp::wire::{
             any_value, AnyValue, ExportLogsServiceRequest, ExportTraceServiceRequest, KeyValue,
