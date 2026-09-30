@@ -3,9 +3,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::AttributeValue;
@@ -103,17 +103,17 @@ impl LogQuery {
         }
     }
 
-    pub(in crate::projection) fn validate(&self) -> Result<QueryBounds> {
+    pub(in crate::projection) fn validate(&self) -> Result<QueryBounds, LogQueryError> {
         if self.project.trim().is_empty() {
-            bail!("project must not be empty");
+            return Err(LogQueryError::EmptyProject);
         }
         if self.limit == 0 || self.limit > MAX_LOG_QUERY_LIMIT {
-            bail!("limit must be between 1 and {MAX_LOG_QUERY_LIMIT}");
+            return Err(LogQueryError::Limit);
         }
         let start = parse_optional_time("start_time", self.start_time.as_deref())?;
         let end = parse_optional_time("end_time", self.end_time.as_deref())?;
         if start.zip(end).is_some_and(|(start, end)| start >= end) {
-            bail!("start_time must be earlier than end_time");
+            return Err(LogQueryError::TimeOrder);
         }
         Ok(QueryBounds { start, end })
     }
@@ -189,11 +189,30 @@ fn matches_optional(actual: &Option<String>, expected: &Option<String>) -> bool 
         .is_none_or(|value| actual.as_ref() == Some(value))
 }
 
-fn parse_optional_time(name: &str, value: Option<&str>) -> Result<Option<DateTime<Utc>>> {
+#[derive(Debug, Error)]
+pub(in crate::projection) enum LogQueryError {
+    #[error("project must not be empty")]
+    EmptyProject,
+    #[error("limit must be between 1 and {max}", max = MAX_LOG_QUERY_LIMIT)]
+    Limit,
+    #[error("{name} must be RFC3339")]
+    TimeNotRfc3339 {
+        name: &'static str,
+        #[source]
+        source: chrono::ParseError,
+    },
+    #[error("start_time must be earlier than end_time")]
+    TimeOrder,
+}
+
+fn parse_optional_time(
+    name: &'static str,
+    value: Option<&str>,
+) -> Result<Option<DateTime<Utc>>, LogQueryError> {
     value
         .map(|value| {
             DateTime::parse_from_rfc3339(value)
-                .with_context(|| format!("{name} must be RFC3339"))
+                .map_err(|source| LogQueryError::TimeNotRfc3339 { name, source })
                 .map(|value| value.with_timezone(&Utc))
         })
         .transpose()

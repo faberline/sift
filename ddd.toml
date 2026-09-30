@@ -197,19 +197,6 @@ rule = "B2"
 paths = [
   "src/projection/domain/log.rs",
   "src/projection/domain/metric.rs",
-  "src/projection/domain/metric_aggregation.rs",
-  "src/projection/domain/metric_memory_size.rs",
-  "src/projection/domain/metric_series.rs",
-  "src/projection/domain/trace.rs",
-]
-subject = "anyhow"
-reason = "The query validators (LogQuery, TraceQuery, MetricQuery), histogram validation and merging, series identity, chunk and size checks and the rollups return anyhow errors whose text is the API's invalid_query message and the error apply and restore report, so converting them is not a move (E6). P2: a projection domain error (thiserror) with the same Display text, which the runtime and the API convert."
-
-[[exceptions]]
-rule = "B2"
-paths = [
-  "src/projection/domain/log.rs",
-  "src/projection/domain/metric.rs",
   "src/projection/domain/trace.rs",
 ]
 subject = "utoipa"

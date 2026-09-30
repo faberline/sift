@@ -127,10 +127,13 @@ answers queries from. They can always be rebuilt from the journal.
 | interfaces | `projection_worker` (`ProjectionWorker`) |
 
 - **Depends on:** journal.
-- **Exceptions:** `anyhow` and `utoipa` on the `*V1` records (B2, E1); the
-  runtime building the three projections, and the projections implementing
-  the application's `Projection` trait (B3); and the runtime holding a
-  `DurableJournal` (B4).
+- **Errors:** the domain returns thiserror types: `LogQueryError`,
+  `TraceQueryError`, `MetricError` for metric queries, histograms and rollups,
+  `MetricSeriesError` and `MetricMemoryError`. The application and
+  infrastructure convert them with `?`.
+- **Exceptions:** `utoipa` on the `*V1` records (B2, E1); the runtime building
+  the three projections, and the projections implementing the application's
+  `Projection` trait (B3); and the runtime holding a `DurableJournal` (B4).
 
 ## ingest
 

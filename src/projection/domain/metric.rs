@@ -5,9 +5,9 @@
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
-use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::projection::domain::metric_aggregation::{merge_counts, optional_max, optional_min};
@@ -59,17 +59,59 @@ pub struct MetricHistogramV1 {
     pub max: Option<f64>,
 }
 
+#[derive(Debug, Error)]
+pub(in crate::projection) enum MetricError {
+    #[error("histogram numbers must be finite")]
+    HistogramNotFinite,
+    #[error("histogram min must not exceed max")]
+    HistogramMinAboveMax,
+    #[error("explicit histogram cannot contain exponential buckets")]
+    ExplicitWithExponentialBuckets,
+    #[error("explicit histogram bucket_counts must have bounds length plus one")]
+    ExplicitBucketCount,
+    #[error("explicit histogram bounds must be strictly increasing")]
+    ExplicitBoundsOrder,
+    #[error("explicit histogram buckets must sum to count")]
+    ExplicitBucketSum,
+    #[error("exponential histogram requires scale and no explicit buckets")]
+    ExponentialShape,
+    #[error("exponential histogram buckets must sum to count")]
+    ExponentialBucketSum,
+    #[error("histogram schemas are not merge compatible")]
+    IncompatibleSchemas,
+    #[error("project must not be empty")]
+    EmptyProject,
+    #[error("limit must be between 1 and {max}", max = MAX_METRIC_QUERY_LIMIT)]
+    Limit,
+    #[error("start_time must be earlier than end_time")]
+    TimeOrder,
+    #[error("{name} must be RFC3339")]
+    TimeNotRfc3339 {
+        name: &'static str,
+        #[source]
+        source: Box<MetricError>,
+    },
+    #[error("invalid RFC3339 timestamp `{value}`")]
+    InvalidTimestamp {
+        value: String,
+        #[source]
+        source: chrono::ParseError,
+    },
+    #[error("timestamp is outside nanosecond range")]
+    TimestampOutOfRange,
+}
+
 impl MetricHistogramV1 {
-    pub(in crate::projection) fn validate(&self) -> Result<()> {
+    pub(in crate::projection) fn validate(&self) -> Result<(), MetricError> {
         if !self.sum.is_finite()
             || self.min.is_some_and(|value| !value.is_finite())
             || self.max.is_some_and(|value| !value.is_finite())
             || self.explicit_bounds.iter().any(|value| !value.is_finite())
         {
-            bail!("histogram numbers must be finite");
+            return Err(MetricError::HistogramNotFinite);
         }
         if self.min.zip(self.max).is_some_and(|(min, max)| min > max) {
-            bail!("histogram min must not exceed max");
+            return Err(MetricError::HistogramMinAboveMax);
         }
         match self.kind {
             HistogramKind::Explicit => {
@@ -77,20 +119,20 @@ impl MetricHistogramV1 {
                     || !self.positive_bucket_counts.is_empty()
                     || !self.negative_bucket_counts.is_empty()
                 {
-                    bail!("explicit histogram cannot contain exponential buckets");
+                    return Err(MetricError::ExplicitWithExponentialBuckets);
                 }
                 if self.bucket_counts.len() != self.explicit_bounds.len() + 1 {
-                    bail!("explicit histogram bucket_counts must have bounds length plus one");
+                    return Err(MetricError::ExplicitBucketCount);
                 }
                 if !self
                     .explicit_bounds
                     .windows(2)
                     .all(|window| window[0] < window[1])
                 {
-                    bail!("explicit histogram bounds must be strictly increasing");
+                    return Err(MetricError::ExplicitBoundsOrder);
                 }
                 if self.bucket_counts.iter().sum::<u64>() != self.count {
-                    bail!("explicit histogram buckets must sum to count");
+                    return Err(MetricError::ExplicitBucketSum);
                 }
             }
             HistogramKind::Exponential => {
@@ -98,20 +140,20 @@ impl MetricHistogramV1 {
                     || !self.explicit_bounds.is_empty()
                     || !self.bucket_counts.is_empty()
                 {
-                    bail!("exponential histogram requires scale and no explicit buckets");
+                    return Err(MetricError::ExponentialShape);
                 }
                 let total = self.zero_count
                     + self.positive_bucket_counts.iter().sum::<u64>()
                     + self.negative_bucket_counts.iter().sum::<u64>();
                 if total != self.count {
-                    bail!("exponential histogram buckets must sum to count");
+                    return Err(MetricError::ExponentialBucketSum);
                 }
             }
         }
         Ok(())
     }
 
-    pub(super) fn merge(&mut self, other: &Self) -> Result<()> {
+    pub(super) fn merge(&mut self, other: &Self) -> Result<(), MetricError> {
         self.validate()?;
         other.validate()?;
         if self.kind != other.kind
@@ -123,7 +165,7 @@ impl MetricHistogramV1 {
             || self.positive_bucket_counts.len() != other.positive_bucket_counts.len()
             || self.negative_bucket_counts.len() != other.negative_bucket_counts.len()
         {
-            bail!("histogram schemas are not merge compatible");
+            return Err(MetricError::IncompatibleSchemas);
         }
         self.count = self.count.saturating_add(other.count);
         self.sum += other.sum;
@@ -259,17 +301,19 @@ impl MetricQuery {
         }
     }
 
-    pub(in crate::projection) fn validate(&self) -> Result<(Option<i64>, Option<i64>)> {
+    pub(in crate::projection) fn validate(
+        &self,
+    ) -> Result<(Option<i64>, Option<i64>), MetricError> {
         if self.project.trim().is_empty() {
-            bail!("project must not be empty");
+            return Err(MetricError::EmptyProject);
         }
         if self.limit == 0 || self.limit > MAX_METRIC_QUERY_LIMIT {
-            bail!("limit must be between 1 and {MAX_METRIC_QUERY_LIMIT}");
+            return Err(MetricError::Limit);
         }
         let start = parse_optional_time("start_time", self.start_time.as_deref())?;
         let end = parse_optional_time("end_time", self.end_time.as_deref())?;
         if start.zip(end).is_some_and(|(start, end)| start >= end) {
-            bail!("start_time must be earlier than end_time");
+            return Err(MetricError::TimeOrder);
         }
         Ok((start, end))
     }
@@ -308,18 +352,29 @@ pub struct MetricPage {
     pub overflowed_points: u64,
 }
 
-fn parse_optional_time(name: &str, value: Option<&str>) -> Result<Option<i64>> {
+fn parse_optional_time(
+    name: &'static str,
+    value: Option<&str>,
+) -> Result<Option<i64>, MetricError> {
     value
-        .map(|value| parse_time(value).with_context(|| format!("{name} must be RFC3339")))
+        .map(|value| {
+            parse_time(value).map_err(|source| MetricError::TimeNotRfc3339 {
+                name,
+                source: Box::new(source),
+            })
+        })
         .transpose()
 }
 
-pub(in crate::projection) fn parse_time(value: &str) -> Result<i64> {
+pub(in crate::projection) fn parse_time(value: &str) -> Result<i64, MetricError> {
     DateTime::parse_from_rfc3339(value)
-        .with_context(|| format!("invalid RFC3339 timestamp `{value}`"))?
+        .map_err(|source| MetricError::InvalidTimestamp {
+            value: value.to_owned(),
+            source,
+        })?
         .with_timezone(&Utc)
         .timestamp_nanos_opt()
-        .context("timestamp is outside nanosecond range")
+        .ok_or(MetricError::TimestampOutOfRange)
 }
 
 const fn default_query_limit() -> usize {

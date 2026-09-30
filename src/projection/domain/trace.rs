@@ -4,8 +4,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::{AttributeValue, InstrumentationScope};
@@ -135,29 +135,41 @@ impl TraceQuery {
         }
     }
 
-    pub(in crate::projection) fn validate(&self) -> Result<()> {
+    pub(in crate::projection) fn validate(&self) -> Result<(), TraceQueryError> {
         if self.project.trim().is_empty() {
-            bail!("project must not be empty");
+            return Err(TraceQueryError::EmptyProject);
         }
         if self.limit == 0 || self.limit > MAX_TRACE_QUERY_LIMIT {
-            bail!("limit must be between 1 and {MAX_TRACE_QUERY_LIMIT}");
+            return Err(TraceQueryError::Limit);
         }
         if self
             .start_time_unix_nano
             .zip(self.end_time_unix_nano)
             .is_some_and(|(start, end)| start >= end)
         {
-            bail!("start_time_unix_nano must be earlier than end_time_unix_nano");
+            return Err(TraceQueryError::TimeOrder);
         }
         if self
             .min_duration_unix_nano
             .zip(self.max_duration_unix_nano)
             .is_some_and(|(min, max)| min > max)
         {
-            bail!("minimum trace duration must not exceed maximum trace duration");
+            return Err(TraceQueryError::DurationOrder);
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Error)]
+pub(in crate::projection) enum TraceQueryError {
+    #[error("project must not be empty")]
+    EmptyProject,
+    #[error("limit must be between 1 and {max}", max = MAX_TRACE_QUERY_LIMIT)]
+    Limit,
+    #[error("start_time_unix_nano must be earlier than end_time_unix_nano")]
+    TimeOrder,
+    #[error("minimum trace duration must not exceed maximum trace duration")]
+    DurationOrder,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
