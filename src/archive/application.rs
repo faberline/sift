@@ -16,7 +16,6 @@ pub(crate) mod finalize_archive_gc;
 pub(crate) mod inspect_archive_catalog;
 pub(crate) mod prepare_retention_fence;
 pub(crate) mod reconcile_committed_retention;
-pub(crate) mod replay_cold_query;
 pub(crate) mod replay_committed_events;
 pub(crate) mod replay_recent_committed;
 pub(crate) mod restore_gcs;

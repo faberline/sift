@@ -7,11 +7,11 @@ use anyhow::{Context, Result};
 
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
-use crate::archive::application::replay_cold_query::replay_cold_query;
 use crate::projection;
 use crate::query::application::archive_query_status::{
     apply_archive_query_status, ArchiveQueryStatus,
 };
+use crate::query::application::replay_cold_query::{replay_cold_query, ColdQueryScope};
 use crate::query::domain::filter_evaluator::evaluate_filter;
 use crate::query::domain::query_cursor::{decode_query_cursor, encode_query_cursor};
 use crate::query::domain::query_time::{cold_query_requested, parse_query_time_nanos};
@@ -57,7 +57,12 @@ pub(in crate::query) fn execute_query_v1(
             let (page, archive_status) = if cold_query_requested(request) {
                 let archived = projection::LoggingProjection::new()
                     .map_err(|error| ApiError::internal(error.to_string()))?;
-                let status = replay_cold_query(state, request, SignalKind::Log, &archived);
+                let status = replay_cold_query(
+                    state,
+                    &cold_query_scope(request),
+                    SignalKind::Log,
+                    &archived,
+                );
                 let page = match status {
                     ArchiveQueryStatus::Ready(_) => archived.query(&query),
                     ArchiveQueryStatus::NotRequired | ArchiveQueryStatus::Unavailable(_) => {
@@ -149,7 +154,12 @@ pub(in crate::query) fn execute_query_v1(
             query.limit = projection::MAX_METRIC_QUERY_LIMIT;
             let (page, archive_status) = if cold_query_requested(request) {
                 let archived = projection::MetricProjection::new();
-                let status = replay_cold_query(state, request, SignalKind::Metric, &archived);
+                let status = replay_cold_query(
+                    state,
+                    &cold_query_scope(request),
+                    SignalKind::Metric,
+                    &archived,
+                );
                 let page = match status {
                     ArchiveQueryStatus::Ready(_) => archived.query(&query),
                     ArchiveQueryStatus::NotRequired | ArchiveQueryStatus::Unavailable(_) => {
@@ -267,7 +277,12 @@ pub(in crate::query) fn execute_query_v1(
             query.limit = projection::MAX_TRACE_QUERY_LIMIT;
             let (page, archive_status) = if cold_query_requested(request) {
                 let archived = projection::TraceProjection::new();
-                let status = replay_cold_query(state, request, SignalKind::Span, &archived);
+                let status = replay_cold_query(
+                    state,
+                    &cold_query_scope(request),
+                    SignalKind::Span,
+                    &archived,
+                );
                 let page = match status {
                     ArchiveQueryStatus::Ready(_) => archived.query(&query),
                     ArchiveQueryStatus::NotRequired | ArchiveQueryStatus::Unavailable(_) => {
@@ -328,5 +343,14 @@ pub(in crate::query) fn execute_query_v1(
                 archive_status,
             ))
         }
+    }
+}
+
+fn cold_query_scope(request: &QueryRequestV1) -> ColdQueryScope<'_> {
+    ColdQueryScope {
+        project: &request.project,
+        environment: request.environment.as_deref(),
+        start: request.time_range.start.as_deref(),
+        end: request.time_range.end.as_deref(),
     }
 }

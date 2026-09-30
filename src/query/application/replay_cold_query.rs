@@ -7,22 +7,30 @@ use chrono::{DateTime, Utc};
 use crate::app::service_state::ServiceState;
 use crate::journal::domain::event_query::EventQuery;
 use crate::query::application::archive_query_status::ArchiveQueryStatus;
-use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
 use crate::shared_kernel::event::SignalKind;
+
+/// The part of a query a cold-query replay reads: the project, the optional
+/// environment, and the RFC 3339 time range.
+pub(crate) struct ColdQueryScope<'a> {
+    pub(crate) project: &'a str,
+    pub(crate) environment: Option<&'a str>,
+    pub(crate) start: Option<&'a str>,
+    pub(crate) end: Option<&'a str>,
+}
 
 pub(crate) fn replay_cold_query(
     state: &ServiceState,
-    request: &QueryRequestV1,
+    scope: &ColdQueryScope<'_>,
     signal: SignalKind,
     projection: &dyn crate::projection::Projection,
 ) -> ArchiveQueryStatus {
     let replay = crate::archive::application::replay_committed_events::replay_committed_events(
         state.journal().storage().root(),
         signal,
-        &request.project,
-        request.environment.as_deref(),
-        request.time_range.start.as_deref(),
-        request.time_range.end.as_deref(),
+        scope.project,
+        scope.environment,
+        scope.start,
+        scope.end,
         |event| projection.apply_idempotent(&event),
     );
     let replay = match replay {
@@ -39,7 +47,7 @@ pub(crate) fn replay_cold_query(
         }
     };
     if let Err(error) =
-        replay_local_events_after_archive(state, request, signal, replay.watermark, projection)
+        replay_local_events_after_archive(state, scope, signal, replay.watermark, projection)
     {
         return ArchiveQueryStatus::Unavailable(format!(
             "local hot data could not be joined to the archive: {error}"
@@ -50,7 +58,7 @@ pub(crate) fn replay_cold_query(
 
 fn replay_local_events_after_archive(
     state: &ServiceState,
-    request: &QueryRequestV1,
+    scope: &ColdQueryScope<'_>,
     signal: SignalKind,
     mut after: u64,
     projection: &dyn crate::projection::Projection,
@@ -66,28 +74,23 @@ fn replay_local_events_after_archive(
         };
         after = last.cursor;
         for event in events {
-            if event.event.project != request.project
-                || request
+            if event.event.project != scope.project
+                || scope
                     .environment
-                    .as_ref()
-                    .is_some_and(|environment| event.event.environment != *environment)
+                    .is_some_and(|environment| event.event.environment != environment)
             {
                 continue;
             }
             let occurred = DateTime::parse_from_rfc3339(&event.event.occurred_at)
                 .context("local event occurred_at must be RFC3339")?
                 .with_timezone(&Utc);
-            let start = request
-                .time_range
+            let start = scope
                 .start
-                .as_deref()
                 .map(DateTime::parse_from_rfc3339)
                 .transpose()?
                 .map(|value| value.with_timezone(&Utc));
-            let end = request
-                .time_range
+            let end = scope
                 .end
-                .as_deref()
                 .map(DateTime::parse_from_rfc3339)
                 .transpose()?
                 .map(|value| value.with_timezone(&Utc));

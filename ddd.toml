@@ -386,9 +386,12 @@ reason = "execute_query_v1 replays the archive into fresh LoggingProjection, Met
 
 [[exceptions]]
 rule = "B4"
-paths = ["src/query/interfaces/http/list_services_v1.rs"]
+paths = [
+  "src/query/application/replay_cold_query.rs",
+  "src/query/interfaces/http/list_services_v1.rs",
+]
 subject = "journal.domain"
-reason = "list_services_v1 scans recent events through ServiceState's journal with an EventQuery; P1 moves the handler whole. P2: journal's application publishes query_events with EventQuery as its input, and the handler calls it through a query use case, or the listing reads a projection instead."
+reason = "list_services_v1 scans recent events through ServiceState's journal with an EventQuery, and replay_cold_query, which P2 moved here from the archive, pages through the hot events after the archive the same way; P1 moves the handler whole. P2: journal's application publishes query_events with EventQuery as its input; the handler calls it through a query use case, or the listing reads a projection instead, and replay_cold_query calls it directly."
 
 [[exceptions]]
 rule = "B4"
@@ -682,7 +685,6 @@ paths = [
   "src/archive/application/archive_raw_storage_to_gcs.rs",
   "src/archive/application/expire_committed_events.rs",
   "src/archive/application/prepare_retention_fence.rs",
-  "src/archive/application/replay_cold_query.rs",
   "src/archive/application/replay_recent_committed.rs",
   "src/archive/application/retention_due.rs",
   "src/archive/application/run_lifecycle_attempt.rs",
@@ -692,7 +694,7 @@ paths = [
   "src/archive/interfaces/lifecycle_worker.rs",
 ]
 subject = "journal.domain"
-reason = "The archive stores the journal's own records: the uploads and the local commit state read the journal's SegmentManifest, the dedupe-receipt archive and replay hold DedupeReceipt, expiration and retention_due keep IDEMPOTENCY_WINDOW_SECONDS of receipts, the retention fence and the lifecycle build RetentionFenceV1 and propose SiftCommandV1 barriers, and replay_cold_query builds an EventQuery; P1 moves them as-is. P2: the journal's application publishes the segment manifest, dedupe receipt, idempotency window, retention fence and the commands the archive proposes, or they become shared kernel as the journal-archive published language."
+reason = "The archive stores the journal's own records: the uploads and the local commit state read the journal's SegmentManifest, the dedupe-receipt archive and replay hold DedupeReceipt, expiration and retention_due keep IDEMPOTENCY_WINDOW_SECONDS of receipts, and the retention fence and the lifecycle build RetentionFenceV1 and propose SiftCommandV1 barriers; P1 moves them as-is. P2: the journal's application publishes the segment manifest, dedupe receipt, idempotency window, retention fence and the commands the archive proposes, or they become shared kernel as the journal-archive published language."
 
 [[exceptions]]
 rule = "B4"
@@ -722,24 +724,6 @@ paths = [
 ]
 subject = "journal.infrastructure"
 reason = "The archive use cases act on the journal's live stores: they take DurableJournal to capture, evict, expire, compact, reconcile and restore sealed segments, read segments and blobs through RawStorage and BlobStore, restore writes the epoch maps with write_epoch_maps, and the lifecycle, retention fence and compaction propose and apply through SiftStateMachine; P1 moves them as-is. P2: the journal's application exposes the snapshot, eviction, expiration, compaction and restore operations the archive needs, and the archive holds that port instead of DurableJournal, RawStorage and SiftStateMachine."
-
-[[exceptions]]
-rule = "B4"
-paths = ["src/archive/application/replay_cold_query.rs"]
-subject = "query.application"
-reason = "replay_cold_query, which §2.1 puts in the archive, returns ArchiveQueryStatus, the query's own cold-query outcome; declaring query in depends_on would close an archive-query cycle, since query reads the archive for cold queries. §2 wins over the dependency direction here. P2: replay_cold_query moves to query's application, which calls the archive's replay_committed_events and builds ArchiveQueryStatus itself."
-
-[[exceptions]]
-rule = "B4"
-paths = ["src/archive/application/replay_cold_query.rs"]
-subject = "query.interfaces"
-reason = "replay_cold_query, which §2.1 puts in the archive, reads the project, environment and time range from QueryRequestV1, the query's HTTP request; declaring query in depends_on would close an archive-query cycle. P2: replay_cold_query moves to query's application, and the archive's replay_committed_events keeps taking the project, environment and time range as plain arguments."
-
-[[exceptions]]
-rule = "B4"
-paths = ["src/archive/application/replay_cold_query.rs"]
-subject = "projection.application"
-reason = "replay_cold_query, which §2.1 puts in the archive, applies each replayed event to the query's &dyn Projection (apply_idempotent); P1 moves it as-is. P2: replay_cold_query moves to query's application, so the archive's replay only hands events to a callback and the archive no longer names the Projection trait."
 
 # The node: one Sift process's own data root. It owns the private, versioned
 # data directory with its layout manifest, the role the process runs as, and
@@ -857,9 +841,10 @@ paths = ["src/operations/interfaces/grpc/otlp_proxy.rs"]
 subject = "ingest.interfaces"
 reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project check its direct server runs, before it forwards an export to the store role; P1 moves the proxy out of grpc.rs and leaves the check where commit 5 put it. P2: the gRPC project check moves to access's interfaces, both the server and the proxy call it there, and operations drops ingest from depends_on."
 
-# The crate's old public modules. Each is now a compatibility facade that only
-# re-exports its items from the context that owns them, so every public path
-# from before the DDD split keeps compiling. They sit outside every context and
-# layer, so B1 reports each one; P2 drops a facade once its callers use the
-# crate-root re-exports or the context paths.
+# Files P2 moved or split. The ratchet lets each new path take the old path's
+# place in the exceptions above; once main has the new paths these entries
+# can go.
 
+[[renames]]
+from = "src/archive/application/replay_cold_query.rs"
+to = ["src/query/application/replay_cold_query.rs"]
