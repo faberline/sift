@@ -17,7 +17,7 @@ context.
   `decode_event_json`, `SignalKind`), `event_error` (`EventError`),
   `stored_event`, `event_content_digest`, `single_signal_batch`,
   `archive_watermarks`, `retention_boundary`, `cloud_logging_event_id`,
-  `query_limit`, `sha256_hex`.
+  `query_limit`, `sha256_hex`, `utf8_truncate`.
 - **Errors:** thiserror types: `EventError` for event validation and decode,
   `DigestError` and `SingleSignalError`.
 - **Time:** `OperationalEventV2::for_project_at` takes the time. `for_project`

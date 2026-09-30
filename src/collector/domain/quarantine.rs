@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::shared_kernel::utf8_truncate::truncate_utf8;
+
 pub const REJECTION_SCHEMA: &str = "collector.rejection.v1";
 pub const MAX_REJECTION_PREVIEW_BYTES: usize = 1024;
 pub const MAX_REJECTION_ERROR_BYTES: usize = 512;
@@ -33,19 +35,9 @@ impl QuarantineEntry {
             line,
             offset,
             code: code.into(),
-            message: truncate_utf8(message.as_ref(), MAX_REJECTION_ERROR_BYTES),
-            preview: truncate_utf8(&String::from_utf8_lossy(bytes), MAX_REJECTION_PREVIEW_BYTES),
+            message: truncate_utf8(message.as_ref(), MAX_REJECTION_ERROR_BYTES).to_string(),
+            preview: truncate_utf8(&String::from_utf8_lossy(bytes), MAX_REJECTION_PREVIEW_BYTES)
+                .to_string(),
         }
     }
-}
-
-fn truncate_utf8(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.to_string();
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_string()
 }

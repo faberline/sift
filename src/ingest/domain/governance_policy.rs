@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use crate::shared_kernel::event::{AttributeValue, OperationalEventV2};
 use crate::shared_kernel::event_error::EventError;
+use crate::shared_kernel::utf8_truncate;
 
 const DEFAULT_MAX_STRING_BYTES: usize = 4_096;
 
@@ -248,12 +249,6 @@ fn is_base64_key(key: &str) -> bool {
 }
 
 fn truncate_utf8(value: &mut String, max_bytes: usize) {
-    if value.len() <= max_bytes {
-        return;
-    }
-    let mut boundary = max_bytes;
-    while boundary > 0 && !value.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    value.truncate(boundary);
+    let kept = utf8_truncate::truncate_utf8(value, max_bytes).len();
+    value.truncate(kept);
 }

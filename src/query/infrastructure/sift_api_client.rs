@@ -14,6 +14,7 @@ use url::Url;
 use crate::query::interfaces::http::phase_one::{CorrelationRequestV1, LogTailRequestV1};
 use crate::query::interfaces::http::query_request_v1::{QueryModeV1, QueryRequestV1};
 use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::utf8_truncate::truncate_utf8;
 
 const SIFT_API_MAX_RETRIES: usize = 2;
 const SIFT_API_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
@@ -199,19 +200,11 @@ impl SiftApiClient {
                 }
             }
             let message = String::from_utf8_lossy(&body);
-            bail!("Sift API returned {status}: {}", truncate(&message, 8_192));
+            bail!(
+                "Sift API returned {status}: {}",
+                truncate_utf8(&message, 8_192)
+            );
         }
         unreachable!("bounded Sift API retry loop always returns")
     }
-}
-
-fn truncate(value: &str, max_bytes: usize) -> &str {
-    if value.len() <= max_bytes {
-        return value;
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    &value[..end]
 }
