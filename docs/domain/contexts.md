@@ -36,8 +36,11 @@ Sift's but the shared kernel.
 | infrastructure | `source`, `cri_source`, `cri_discovery`, `checkpoint`, `cri_checkpoint`, `client`, `service_log_mapper` |
 
 - **Depends on:** nothing. The CLI that starts it is `src/bin/sift/collect.rs`.
-- **Exceptions:** `anyhow` (E6), `service_observability::StructuredServiceLogV1`
-  in the domain (E14), and the runtime building its own source and client (B3).
+- **Errors:** the domain returns thiserror types: `CollectorConfigError`,
+  `CriError` and `ServiceLogError`. The application and infrastructure convert
+  them with `?`.
+- **Exceptions:** `service_observability::StructuredServiceLogV1` in the domain
+  (E14), and the runtime building its own source and client (B3).
 
 ## node
 

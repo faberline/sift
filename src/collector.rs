@@ -9,8 +9,9 @@ pub(crate) mod infrastructure;
 
 pub use application::run_collector::{run_collector, CollectorSummary};
 pub use domain::config::{
-    CollectorConfig, CriMetadata, CriSourceConfig, SourceSpec, DEFAULT_BATCH_SIZE,
-    DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_RETRIES, MAX_BATCH_SIZE, MAX_LINE_BYTES,
+    CollectorConfig, CollectorConfigError, CriMetadata, CriSourceConfig, SourceSpec,
+    DEFAULT_BATCH_SIZE, DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_RETRIES, MAX_BATCH_SIZE,
+    MAX_LINE_BYTES,
 };
 pub use domain::quarantine::QuarantineEntry;
 pub use infrastructure::checkpoint::CollectorCheckpoint;

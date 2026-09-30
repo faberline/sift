@@ -2,7 +2,6 @@
 //! the stable id a stdout line gets from its source and offset, and
 //! line-ending trimming.
 
-use anyhow::{bail, Context, Result};
 use chrono::DateTime;
 use serde_json::Value;
 use service_observability::{
@@ -10,36 +9,68 @@ use service_observability::{
     MAX_EVENT_BYTES, MAX_REQUEST_ID_BYTES, SERVICE_LOG_SCHEMA_V1,
 };
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 
-pub(in crate::collector) fn validate(log: &StructuredServiceLogV1) -> Result<()> {
+#[derive(Debug, Error)]
+pub(in crate::collector) enum ServiceLogError {
+    #[error("unsupported service log schema {0}; expected {expected}", expected = SERVICE_LOG_SCHEMA_V1)]
+    UnsupportedSchema(String),
+    #[error("service log timestamp must be RFC3339")]
+    TimestampNotRfc3339(#[source] chrono::ParseError),
+    #[error("unsupported service log severity {0}")]
+    UnsupportedSeverity(String),
+    #[error("service log message exceeds {max} bytes", max = MAX_ATTRIBUTE_VALUE_BYTES)]
+    MessageTooLong,
+    #[error("service log attributes exceed {max} entries", max = MAX_ATTRIBUTES)]
+    TooManyAttributes,
+    #[error("invalid service log attribute {key}")]
+    InvalidAttribute {
+        key: String,
+        #[source]
+        source: Box<ServiceLogError>,
+    },
+    #[error("invalid service log request_id")]
+    InvalidRequestId,
+    #[error("{0} must not be empty")]
+    Empty(String),
+    #[error("{name} exceeds {max} bytes")]
+    TooLong { name: String, max: usize },
+    #[error("string exceeds {max} bytes", max = MAX_ATTRIBUTE_VALUE_BYTES)]
+    StringTooLong,
+    #[error("number must be finite")]
+    NonFiniteNumber,
+    #[error("collector attributes must be primitive JSON values")]
+    NotPrimitive,
+    #[error("invalid service log {0}")]
+    InvalidHex(String),
+}
+
+pub(in crate::collector) fn validate(log: &StructuredServiceLogV1) -> Result<(), ServiceLogError> {
     if log.schema != SERVICE_LOG_SCHEMA_V1 {
-        bail!(
-            "unsupported service log schema {}; expected {}",
-            log.schema,
-            SERVICE_LOG_SCHEMA_V1
-        );
+        return Err(ServiceLogError::UnsupportedSchema(log.schema.clone()));
     }
-    DateTime::parse_from_rfc3339(&log.timestamp)
-        .context("service log timestamp must be RFC3339")?;
+    DateTime::parse_from_rfc3339(&log.timestamp).map_err(ServiceLogError::TimestampNotRfc3339)?;
     if !matches!(
         log.severity.as_str(),
         "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR"
     ) {
-        bail!("unsupported service log severity {}", log.severity);
+        return Err(ServiceLogError::UnsupportedSeverity(log.severity.clone()));
     }
     bounded_nonempty("service.name", &log.service.name, MAX_EVENT_BYTES)?;
     bounded_nonempty("service.version", &log.service.version, MAX_EVENT_BYTES)?;
     bounded_nonempty("event", &log.event, MAX_EVENT_BYTES)?;
     if log.message.len() > MAX_ATTRIBUTE_VALUE_BYTES {
-        bail!("service log message exceeds {MAX_ATTRIBUTE_VALUE_BYTES} bytes");
+        return Err(ServiceLogError::MessageTooLong);
     }
     if log.attributes.len() > MAX_ATTRIBUTES {
-        bail!("service log attributes exceed {MAX_ATTRIBUTES} entries");
+        return Err(ServiceLogError::TooManyAttributes);
     }
     for (key, value) in &log.attributes {
         bounded_nonempty("attribute key", key, MAX_ATTRIBUTE_KEY_BYTES)?;
-        validate_attribute(value)
-            .with_context(|| format!("invalid service log attribute {key}"))?;
+        validate_attribute(value).map_err(|source| ServiceLogError::InvalidAttribute {
+            key: key.clone(),
+            source: Box::new(source),
+        })?;
     }
     validate_optional_hex("trace_id", log.trace_id.as_deref(), 32, true)?;
     validate_optional_hex("span_id", log.span_id.as_deref(), 16, true)?;
@@ -50,33 +81,34 @@ pub(in crate::collector) fn validate(log: &StructuredServiceLogV1) -> Result<()>
             || request_id.len() > MAX_REQUEST_ID_BYTES
             || request_id.chars().any(char::is_control)
         {
-            bail!("invalid service log request_id");
+            return Err(ServiceLogError::InvalidRequestId);
         }
     }
     Ok(())
 }
 
-fn bounded_nonempty(name: &str, value: &str, max: usize) -> Result<()> {
+fn bounded_nonempty(name: &str, value: &str, max: usize) -> Result<(), ServiceLogError> {
     if value.trim().is_empty() {
-        bail!("{name} must not be empty");
+        return Err(ServiceLogError::Empty(name.to_owned()));
     }
     if value.len() > max {
-        bail!("{name} exceeds {max} bytes");
+        return Err(ServiceLogError::TooLong {
+            name: name.to_owned(),
+            max,
+        });
     }
     Ok(())
 }
 
-fn validate_attribute(value: &Value) -> Result<()> {
+fn validate_attribute(value: &Value) -> Result<(), ServiceLogError> {
     match value {
         Value::String(value) if value.len() > MAX_ATTRIBUTE_VALUE_BYTES => {
-            bail!("string exceeds {MAX_ATTRIBUTE_VALUE_BYTES} bytes")
+            Err(ServiceLogError::StringTooLong)
         }
         Value::String(_) | Value::Bool(_) | Value::Null => Ok(()),
         Value::Number(value) if value.as_f64().is_some_and(f64::is_finite) => Ok(()),
-        Value::Number(_) => bail!("number must be finite"),
-        Value::Array(_) | Value::Object(_) => {
-            bail!("collector attributes must be primitive JSON values")
-        }
+        Value::Number(_) => Err(ServiceLogError::NonFiniteNumber),
+        Value::Array(_) | Value::Object(_) => Err(ServiceLogError::NotPrimitive),
     }
 }
 
@@ -85,7 +117,7 @@ fn validate_optional_hex(
     value: Option<&str>,
     len: usize,
     reject_zero: bool,
-) -> Result<()> {
+) -> Result<(), ServiceLogError> {
     let Some(value) = value else {
         return Ok(());
     };
@@ -95,7 +127,7 @@ fn validate_optional_hex(
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         && (!reject_zero || value.bytes().any(|byte| byte != b'0'));
     if !valid {
-        bail!("invalid service log {name}");
+        return Err(ServiceLogError::InvalidHex(name.to_owned()));
     }
     Ok(())
 }
