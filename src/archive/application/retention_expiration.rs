@@ -29,13 +29,14 @@ use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
 use crate::archive::infrastructure::archive_commit_state::{read_commit_state, ArchiveCommitState};
-use crate::archive::infrastructure::archive_integrity::{sha256, verify_archive_segment};
+use crate::archive::infrastructure::archive_integrity::verify_archive_segment;
 use crate::archive::infrastructure::archive_segment_cache::cached_segment_bytes;
 use crate::archive::infrastructure::dedupe_receipt_archive::fetch_dedupe_receipts;
 use crate::archive::infrastructure::gc_plan_builder::build_gc_catalog_from_spills;
 use crate::archive::infrastructure::gcs_uri::{gcs_uri, split_gcs_uri};
 use crate::archive::infrastructure::parquet_event_codec::decode_parquet;
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 /// Remove events older than the fixed 180-day boundary from the committed
 /// manifest. A mixed Parquet segment is rewritten with only retained rows.
@@ -336,7 +337,7 @@ fn resume_uploaded_retention_manifest(
             validate_archive_manifest(&manifest)?;
             let receipt = ArchiveReceipt {
                 manifest_uri: gcs_uri(bucket, manifest_key),
-                manifest_sha256: sha256(&object.bytes),
+                manifest_sha256: sha256_hex(&object.bytes),
                 manifest,
             };
             validate_retention_receipt_source(&receipt, current_state)?;

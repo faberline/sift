@@ -5,7 +5,6 @@ use std::io::{Read, Write};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 
 use crate::journal::domain::append_policy::validate_retention_fence;
 use crate::journal::domain::retention_fence::RetentionFenceV1;
@@ -14,6 +13,7 @@ use crate::journal::infrastructure::raft::archive_checkpoint_install::{
     archive_checkpoint_install_mode, ArchiveCheckpointInstallMode, ValidatedArchiveStage,
 };
 use crate::journal::infrastructure::raft::snapshot_format::{read_one_or_eof, SnapshotMetadata};
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(super) const ARCHIVE_CHECKPOINT_MAGIC: &[u8; 8] = b"SIFTRCP1";
 
@@ -126,7 +126,7 @@ pub(super) fn restore_archive_checkpoint(
 ) -> Result<SnapshotMetadata> {
     let manifest_bytes = service_backup::fetch_backup_object(&checkpoint.manifest_uri)
         .context("fetch Sift archive checkpoint manifest")?;
-    let actual_hash = hex::encode(sha2::Sha256::digest(&manifest_bytes));
+    let actual_hash = sha256_hex(&manifest_bytes);
     if actual_hash != checkpoint.manifest_sha256 {
         bail!("Sift archive checkpoint manifest failed its SHA-256 check");
     }

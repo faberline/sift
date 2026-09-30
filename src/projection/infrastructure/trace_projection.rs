@@ -8,7 +8,6 @@ use std::sync::RwLock;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use service_projection::ProjectionDescriptor;
-use sha2::{Digest, Sha256};
 
 use crate::projection::application::projection_runtime::Projection;
 use crate::projection::domain::trace::{
@@ -16,6 +15,7 @@ use crate::projection::domain::trace::{
     SpanEventV1, SpanLinkV1, SpanRecordV1, TraceLocation, TracePage, TraceQuery, TraceResultV1,
     TraceState, DEFAULT_RETAINED_TRACE_SPANS, PROJECTION_TRACE_STORE, TRACE_SCHEMA_VERSION,
 };
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
@@ -358,7 +358,7 @@ impl Projection for TraceProjection {
     }
 
     fn semantic_digest(&self) -> Result<String> {
-        Ok(hex::encode(Sha256::digest(self.snapshot()?)))
+        Ok(sha256_hex(self.snapshot()?))
     }
 }
 

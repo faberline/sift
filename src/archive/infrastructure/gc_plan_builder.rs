@@ -11,8 +11,8 @@ use crate::archive::infrastructure::archive_control_paths::ARCHIVE_GC_PATH;
 use crate::archive::infrastructure::archive_gc_pending_store::{
     read_archive_gc_pending, reconcile_staged_archive_gc, remove_archive_gc_pending,
 };
-use crate::archive::infrastructure::archive_integrity::sha256;
 use crate::archive::infrastructure::spill_catalog::SpillCatalog;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(in crate::archive) fn spill_pending_archive_gc(
     root: &Path,
@@ -74,7 +74,7 @@ impl Iterator for FilteredGcEntries<'_> {
                 Ok(true) => continue,
                 Ok(false) => {
                     return Some(Ok(storage_segment::CatalogEntry {
-                        key: format!("gc/{}", sha256(uri.as_bytes())),
+                        key: format!("gc/{}", sha256_hex(uri.as_bytes())),
                         value: uri.into_bytes(),
                     }))
                 }
@@ -122,7 +122,7 @@ pub(in crate::archive) fn record_catalog_page(
 ) -> storage_segment::Result<()> {
     ledger
         .upsert(
-            format!("page/{}", sha256(reference.key.as_bytes())),
+            format!("page/{}", sha256_hex(reference.key.as_bytes())),
             reference.key.as_bytes().to_vec(),
         )
         .map_err(|error| storage_segment::SegmentError::Serialization {

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::archive::infrastructure::archive_integrity::sha256;
 use crate::archive::infrastructure::ephemeral_file_object_store::EphemeralFileObjectStore;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::ContentBlobRef;
 
 const ARCHIVE_SPILL_PREFIXES: [&str; 8] = [
@@ -152,18 +152,18 @@ impl SpillCatalog {
 
     pub(in crate::archive) fn insert_uri(&mut self, uri: &str) -> Result<()> {
         self.upsert(
-            format!("uri/{}", sha256(uri.as_bytes())),
+            format!("uri/{}", sha256_hex(uri.as_bytes())),
             uri.as_bytes().to_vec(),
         )
     }
 
     pub(in crate::archive) fn remove_uri(&mut self, uri: &str) -> Result<()> {
-        self.remove(&format!("uri/{}", sha256(uri.as_bytes())))
+        self.remove(&format!("uri/{}", sha256_hex(uri.as_bytes())))
     }
 
     pub(super) fn contains_uri(&self, uri: &str) -> Result<bool> {
         Ok(self
-            .lookup(&format!("uri/{}", sha256(uri.as_bytes())))?
+            .lookup(&format!("uri/{}", sha256_hex(uri.as_bytes())))?
             .is_some())
     }
 

@@ -9,10 +9,10 @@ use crate::archive::domain::archive_event_time::{
     acknowledgement_time_bounds, event_time_unix_nano,
 };
 use crate::archive::domain::archive_manifest::ArchiveSegment;
-use crate::archive::infrastructure::archive_integrity::sha256;
 use crate::archive::infrastructure::dedupe_receipt_archive::archive_dedupe_receipts;
 use crate::archive::infrastructure::gcs_uri::gcs_uri;
 use crate::archive::infrastructure::parquet_event_codec::encode_parquet;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 /// Write a replacement for a segment that keeps only its retained events,
@@ -26,7 +26,7 @@ pub(super) fn rewrite_retained_segment(
     rewrite_prefix: &str,
 ) -> Result<ArchiveSegment> {
     let parquet = encode_parquet(retained)?;
-    let parquet_sha256 = sha256(&parquet);
+    let parquet_sha256 = sha256_hex(&parquet);
     let key = format!(
         "{rewrite_prefix}/segments/{}/{}.parquet",
         segment.signal, parquet_sha256

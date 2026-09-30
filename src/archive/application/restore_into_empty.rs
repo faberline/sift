@@ -16,7 +16,6 @@ use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
 use crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt;
-use crate::archive::infrastructure::archive_integrity::sha256;
 use crate::archive::infrastructure::archive_signal_stream::ArchiveSignalStream;
 use crate::archive::infrastructure::dedupe_receipt_archive::fetch_dedupe_receipts;
 use crate::archive::infrastructure::restore_state::require_empty_restore_target;
@@ -26,13 +25,14 @@ use crate::journal::infrastructure::storage::shard_router::write_epoch_maps;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::data_layout::DataLayout;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
 pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Result<ArchiveManifest> {
     require_empty_restore_target(target)?;
     let manifest_bytes = service_backup::fetch_backup_object(manifest_uri)?;
-    let manifest_sha256 = sha256(&manifest_bytes);
+    let manifest_sha256 = sha256_hex(&manifest_bytes);
     let mut manifest: ArchiveManifest =
         serde_json::from_slice(&manifest_bytes).context("decode Sift archive manifest")?;
     validate_archive_manifest(&manifest)?;
@@ -158,7 +158,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
             );
         }
         let bytes = service_backup::fetch_backup_object(&blob.object_uri)?;
-        let actual_hash = format!("sha256:{}", sha256(&bytes));
+        let actual_hash = format!("sha256:{}", sha256_hex(&bytes));
         if actual_hash != blob.reference.hash || bytes.len() as u64 != blob.reference.size {
             bail!(
                 "restored blob {} failed hash/size verification",

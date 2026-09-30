@@ -17,10 +17,10 @@ use crate::projection::domain::metric_memory_size::{
     metric_chunk_memory_bytes, metric_series_memory_bytes,
 };
 use crate::projection::domain::metric_series::{
-    identity_material, make_chunks, point_order, push_metric_point, sha256, MetricState,
-    StoredMetricSeries,
+    identity_material, make_chunks, point_order, push_metric_point, MetricState, StoredMetricSeries,
 };
 use crate::projection::infrastructure::metric_projection::MetricProjection;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
@@ -71,7 +71,7 @@ impl Projection for MetricProjection {
             histogram.validate()?;
         }
         let timestamp = parse_time(&event.occurred_at)?;
-        let exact_id = sha256(
+        let exact_id = sha256_hex(
             identity_material(
                 &event.project,
                 &event.environment,
@@ -95,7 +95,7 @@ impl Projection for MetricProjection {
         let series_id = if overflow {
             state.overflowed_identities.insert(exact_id.clone());
             state.overflowed_points = state.overflowed_points.saturating_add(1);
-            sha256(
+            sha256_hex(
                 identity_material(
                     &event.project,
                     &event.environment,
@@ -291,6 +291,6 @@ impl Projection for MetricProjection {
     }
 
     fn semantic_digest(&self) -> Result<String> {
-        Ok(sha256(&self.snapshot()?))
+        Ok(sha256_hex(&self.snapshot()?))
     }
 }

@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use chrono::DateTime;
-use sha2::{Digest, Sha256};
 
 use crate::journal::domain::segment_manifest::SegmentManifest;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(super) fn read_events(path: &Path) -> Result<Vec<StoredEvent>> {
@@ -55,7 +55,7 @@ pub(super) fn read_events_after(path: &Path, after: u64, limit: usize) -> Result
 }
 
 pub(super) fn sha256_file(path: &Path) -> Result<String> {
-    Ok(hex::encode(Sha256::digest(fs::read(path)?)))
+    Ok(sha256_hex(fs::read(path)?))
 }
 
 pub(super) fn verify_segment(manifest: &SegmentManifest) -> Result<()> {

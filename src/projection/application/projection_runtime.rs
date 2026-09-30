@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use service_projection::{ProjectionLag, RebuildComparison};
-use sha2::{Digest, Sha256};
 
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::projection::domain::log::{LogPage, LogQuery, PROJECTION_LOGGING_STORE};
@@ -20,6 +19,7 @@ use crate::projection::infrastructure::logging_projection::LoggingProjection;
 use crate::projection::infrastructure::metric_projection::MetricProjection;
 use crate::projection::infrastructure::service_projection_adapter::JournalProjectionSource;
 use crate::projection::infrastructure::trace_projection::TraceProjection;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub const PROJECTION_BATCH_SIZE: usize = 1_000;
@@ -38,7 +38,7 @@ pub trait Projection: Send + Sync + 'static {
     }
 
     fn semantic_digest(&self) -> Result<String> {
-        Ok(hex::encode(Sha256::digest(self.snapshot()?)))
+        Ok(sha256_hex(self.snapshot()?))
     }
 }
 

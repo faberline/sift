@@ -24,7 +24,6 @@ use crate::archive::infrastructure::archive_catalog::{
 };
 use crate::archive::infrastructure::archive_commit_state::read_commit_state;
 use crate::archive::infrastructure::archive_gc_pending_store::reconcile_staged_archive_gc;
-use crate::archive::infrastructure::archive_integrity::sha256;
 use crate::archive::infrastructure::archive_upload_intent::{
     prepare_archive_upload_intent, recover_uploaded_archive,
 };
@@ -40,6 +39,7 @@ use crate::archive::infrastructure::spill_catalog::{
 };
 use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::storage::raw_storage::RawStorage;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::SignalKind;
 
 pub(super) fn archive_gcs_captured_streaming(
@@ -206,7 +206,7 @@ pub(super) fn archive_gcs_captured_streaming(
             }
         }
         let parquet = encode_parquet(&events)?;
-        let parquet_sha256 = sha256(&parquet);
+        let parquet_sha256 = sha256_hex(&parquet);
         let key = format!(
             "{archive_prefix}/segments/{partition}/{}.parquet",
             source.segment_id

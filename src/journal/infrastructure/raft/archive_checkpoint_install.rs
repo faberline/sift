@@ -1,10 +1,10 @@
 //! Validating a staged archive checkpoint and choosing how to install it.
 
 use anyhow::{bail, Context, Result};
-use sha2::Digest;
 
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::archive_checkpoint::ArchiveCheckpointV1;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(super) struct ValidatedArchiveStage {
     pub(super) checkpoint: ArchiveCheckpointV1,
@@ -25,7 +25,7 @@ pub(super) fn validate_archive_checkpoint_install(
 ) -> Result<Option<ValidatedArchiveStage>> {
     let manifest_bytes = service_backup::fetch_backup_object(&checkpoint.manifest_uri)
         .context("fetch Sift archive checkpoint manifest during validation")?;
-    let actual_hash = hex::encode(sha2::Sha256::digest(&manifest_bytes));
+    let actual_hash = sha256_hex(&manifest_bytes);
     if actual_hash != checkpoint.manifest_sha256 {
         bail!("Sift archive checkpoint manifest failed its SHA-256 check");
     }

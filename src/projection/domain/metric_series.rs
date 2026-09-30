@@ -5,7 +5,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::projection::domain::metric::{
@@ -277,8 +276,4 @@ pub(in crate::projection) fn resident_metric_chunk(
         point_count,
         materialized_bytes,
     })
-}
-
-pub(in crate::projection) fn sha256(bytes: impl AsRef<[u8]>) -> String {
-    hex::encode(Sha256::digest(bytes.as_ref()))
 }

@@ -14,8 +14,8 @@ use crate::archive::infrastructure::archive_commit_state::{read_commit_state, Ar
 use crate::archive::infrastructure::archive_control_paths::{
     ARCHIVE_UPLOAD_INTENT_FORMAT_VERSION, ARCHIVE_UPLOAD_INTENT_PATH,
 };
-use crate::archive::infrastructure::archive_integrity::sha256;
 use crate::archive::infrastructure::gcs_uri::split_gcs_uri;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
@@ -70,7 +70,7 @@ pub(in crate::archive) fn prepare_archive_upload_intent(
         .unwrap_or_else(|| "root".to_string());
     let archive_id = format!(
         "{}-c{captured_cursor:020}-s{source_token}",
-        &sha256(cluster_id.as_bytes())[..16]
+        &sha256_hex(cluster_id.as_bytes())[..16]
     );
     let archive_prefix = format!("{destination_prefix}/archives/{archive_id}");
     let intent = ArchiveUploadIntent {
@@ -98,7 +98,7 @@ pub(in crate::archive) fn recover_uploaded_archive(
         Err(storage_object::ObjectStoreError::NotFound { .. }) => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    let manifest_sha256 = sha256(&object.bytes);
+    let manifest_sha256 = sha256_hex(&object.bytes);
     let manifest: ArchiveManifest = serde_json::from_slice(&object.bytes)
         .context("decode manifest recovered from archive upload intent")?;
     validate_archive_manifest(&manifest)?;
