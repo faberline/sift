@@ -22,7 +22,6 @@ pub use crate::archive::{
         archive_status_queries::{committed_status, verify_committed_manifest_available},
         committed_event_reader::CommittedEventReader,
         evict_cold_segments::evict_committed_cold_segments_at,
-        expire_committed_events::expire_committed_events_at,
         finalize_archive_gc::{
             finalize_archive_gc_after_checkpoint, finalize_archive_gc_batch_after_checkpoint,
         },
@@ -31,6 +30,7 @@ pub use crate::archive::{
         restore_gcs::{bootstrap_gcs_if_needed, restore_gcs},
         resume_local_blob_gc::resume_local_blob_gc_batch,
         retention_due::retention_due_at,
+        retention_expiration::expire_committed_events_at,
     },
     domain::archive_manifest::{
         ArchiveBlob, ArchiveDedupeReceipt, ArchiveManifest, ArchiveRetentionDelta,

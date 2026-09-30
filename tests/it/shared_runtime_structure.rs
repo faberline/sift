@@ -350,7 +350,7 @@ fn manifest_last_archive_flow_is_owned_by_storage_segment() {
     .expect("read Sift archive upload");
     let expire = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/archive/application/expire_committed_events.rs"
+        "/src/archive/application/retention_expiration.rs"
     ))
     .expect("read Sift archive expiration");
     let codec = std::fs::read_to_string(concat!(

@@ -159,14 +159,15 @@ What replaced each facade path:
 
 The checker measures non-test source files under `src/`: above 400 lines is a
 warning (C1), above 1000 lines is an error (C2). P1 split every file above 400
-lines except two, each holding one function that a move cannot shorten (E9):
+lines except two, each holding one function that a move cannot shorten (E9).
+P2 split retention expiration (534 lines) into `retention_expiration.rs`,
+`retention_pass.rs` and `rewrite_retained_segment.rs`. One is left:
 
 | File | Lines | Function |
 |------|-------|----------|
-| `src/archive/application/expire_committed_events.rs` | 534 | retention expiration |
 | `src/archive/interfaces/lifecycle_worker.rs` | 458 | `start_lifecycle_worker` |
 
-They stay C1 warnings, which cannot be suppressed, until P2 splits each
+It stays a C1 warning, which cannot be suppressed, until P2 splits the
 function in its own extract-function commit. Integration tests under `tests/`
 are not measured.
 

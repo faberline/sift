@@ -642,7 +642,6 @@ paths = [
   "src/archive/application/archive_status_queries.rs",
   "src/archive/application/committed_event_reader.rs",
   "src/archive/application/evict_cold_segments.rs",
-  "src/archive/application/expire_committed_events.rs",
   "src/archive/application/finalize_archive_gc.rs",
   "src/archive/application/inspect_archive_catalog.rs",
   "src/archive/application/reconcile_committed_retention.rs",
@@ -653,7 +652,10 @@ paths = [
   "src/archive/application/resume_local_blob_gc.rs",
   "src/archive/application/retention_catalog_ops.rs",
   "src/archive/application/retention_due.rs",
+  "src/archive/application/retention_expiration.rs",
   "src/archive/application/retention_manifest_commit.rs",
+  "src/archive/application/retention_pass.rs",
+  "src/archive/application/rewrite_retained_segment.rs",
   "src/archive/application/run_lifecycle_attempt.rs",
   "src/archive/application/upload_archive_snapshot.rs",
 ]
@@ -683,10 +685,11 @@ paths = [
   "src/archive/application/archive_journal_local.rs",
   "src/archive/application/archive_journal_to_gcs.rs",
   "src/archive/application/archive_raw_storage_to_gcs.rs",
-  "src/archive/application/expire_committed_events.rs",
   "src/archive/application/prepare_retention_fence.rs",
   "src/archive/application/replay_recent_committed.rs",
   "src/archive/application/retention_due.rs",
+  "src/archive/application/retention_expiration.rs",
+  "src/archive/application/retention_pass.rs",
   "src/archive/application/run_lifecycle_attempt.rs",
   "src/archive/application/upload_archive_snapshot.rs",
   "src/archive/infrastructure/dedupe_receipt_archive.rs",
@@ -713,11 +716,11 @@ paths = [
   "src/archive/application/archive_raw_storage_to_gcs.rs",
   "src/archive/application/compact_journal.rs",
   "src/archive/application/evict_cold_segments.rs",
-  "src/archive/application/expire_committed_events.rs",
   "src/archive/application/prepare_retention_fence.rs",
   "src/archive/application/reconcile_committed_retention.rs",
   "src/archive/application/restore_into_empty.rs",
   "src/archive/application/resume_local_blob_gc.rs",
+  "src/archive/application/retention_expiration.rs",
   "src/archive/application/retention_manifest_commit.rs",
   "src/archive/application/run_lifecycle_attempt.rs",
   "src/archive/application/upload_archive_snapshot.rs",
@@ -848,3 +851,11 @@ reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project c
 [[renames]]
 from = "src/archive/application/replay_cold_query.rs"
 to = ["src/query/application/replay_cold_query.rs"]
+
+[[renames]]
+from = "src/archive/application/expire_committed_events.rs"
+to = [
+  "src/archive/application/retention_expiration.rs",
+  "src/archive/application/retention_pass.rs",
+  "src/archive/application/rewrite_retained_segment.rs",
+]

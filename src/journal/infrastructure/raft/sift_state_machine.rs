@@ -222,7 +222,7 @@ impl SiftStateMachine {
             || self.journal.total_event_count() != expected_local_events
             || self.journal.retention_generation() != remote.retention_generation;
         let receipt =
-            crate::archive::application::expire_committed_events::expire_committed_events_at(
+            crate::archive::application::retention_expiration::expire_committed_events_at(
                 &self.journal,
                 now,
             )?;
