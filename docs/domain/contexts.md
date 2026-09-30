@@ -162,9 +162,11 @@ the OTLP/gRPC proxy, and the admin backup and integrity endpoints.
 | interfaces | `crd/sift_spec` (`Sift`, `SiftSpec`, `SiftStatus`), `operator` (`run`), `http/gateway_proxy`, `http/admin_backup`, `http/admin_integrity`, `http/integrity_report_v1`, `grpc/otlp_proxy` |
 
 - **Depends on:** journal, archive, node, access, ingest.
-- **Exceptions:** `anyhow` in the domain (B2); the renderers reading the CRD
-  types and the proxy reaching the domain (B3); and its uses of
-  `DurableJournal` and ingest's gRPC project check (B4).
+- **Errors:** the domain returns thiserror types, `ManifestValueError` and
+  `InvalidNamespace`; the manifest bundle converts them with `?`.
+- **Exceptions:** the renderers reading the CRD types and the proxy reaching
+  the domain (B3); and its uses of `DurableJournal` and ingest's gRPC project
+  check (B4).
 
 ## query
 

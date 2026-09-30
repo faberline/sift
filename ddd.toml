@@ -787,15 +787,6 @@ interfaces = "src/operations/interfaces"
 # reason says.
 
 [[exceptions]]
-rule = "B2"
-paths = [
-  "src/operations/domain/image_reference.rs",
-  "src/operations/domain/namespace_name.rs",
-]
-subject = "anyhow"
-reason = "validate_namespace, validate_manifest_value and validate_image return anyhow::Result and reject with bail!; P1 moves them from deploy.rs as-is. P2 (E6): the domain returns a thiserror ManifestValueError, and the manifest bundle converts it at its anyhow boundary."
-
-[[exceptions]]
 rule = "B3"
 paths = [
   "src/operations/infrastructure/k8s/agent_workloads.rs",
