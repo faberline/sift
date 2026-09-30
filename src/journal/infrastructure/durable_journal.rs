@@ -19,10 +19,11 @@ use crate::node::infrastructure::data_layout::DataLayout;
 /// making a successful [`append`](Self::append) acknowledgement durable.
 pub struct DurableJournal {
     pub(in crate::journal) _layout: DataLayout,
-    pub(in crate::journal) wal: crate::storage::SignalWal,
+    pub(in crate::journal) wal: crate::journal::infrastructure::storage::wal::SignalWal,
     pub(in crate::journal) storage:
         crate::journal::infrastructure::storage::raw_storage::RawStorage,
-    pub(in crate::journal) dedupe: crate::storage::DedupeIndex,
+    pub(in crate::journal) dedupe:
+        crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
     pub(in crate::journal) blob_gate: Mutex<()>,
     pub(in crate::journal) state: RwLock<JournalState>,
     pub(in crate::journal) resident_limit: usize,

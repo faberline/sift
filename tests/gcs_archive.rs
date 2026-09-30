@@ -10,8 +10,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{SecondsFormat, Utc};
 use sha2::Digest;
 use sift::{
-    durability, storage::archive, DurableJournal, EventEnvelope, EventQuery, MetricPoint,
-    MetricTemporality, SignalKind, StoredEvent,
+    archive, journal, DurableJournal, EventEnvelope, EventQuery, MetricPoint, MetricTemporality,
+    SignalKind, StoredEvent,
 };
 use storage_object::{ObjectStore, PutCondition};
 
@@ -387,14 +387,14 @@ async fn vat_gcs_archive_manifest_is_written_last_and_cold_restore_is_equal() {
 
         let rebuild_source_dir = tempfile::tempdir().unwrap();
         let rebuild_source = Arc::new(DurableJournal::open(rebuild_source_dir.path()).unwrap());
-        let rebuild_machine = durability::SiftStateMachine::new(rebuild_source.clone());
+        let rebuild_machine = journal::SiftStateMachine::new(rebuild_source.clone());
         let recent_acceptance = Utc::now();
         let old_acceptance = recent_acceptance - chrono::Duration::hours(12);
         let mut old_event = stored(1).event;
         old_event.event_id = "dedupe-rebuild-old".into();
         old_event.occurred_at = old_acceptance.to_rfc3339_opts(SecondsFormat::Nanos, true);
         old_event.observed_at.clone_from(&old_event.occurred_at);
-        let old_command = durability::encode_raft_batch_at_for_diagnostics(
+        let old_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![old_event],
             &old_acceptance.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -408,7 +408,7 @@ async fn vat_gcs_archive_manifest_is_written_last_and_cold_restore_is_equal() {
 
         let mut recent_event = stored(1).event;
         recent_event.event_id = "dedupe-rebuild-recent".into();
-        let recent_command = durability::encode_raft_batch_at_for_diagnostics(
+        let recent_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![recent_event.clone()],
             &recent_acceptance.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )

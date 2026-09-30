@@ -13,6 +13,7 @@ use crate::journal::domain::append_result::AppendResult;
 use crate::journal::domain::checkpoint_position::CheckpointPosition;
 use crate::journal::domain::control_state::{ControlState, CONTROL_STATE_FORMAT_VERSION};
 use crate::journal::domain::retention_fence::RetentionFenceV1;
+use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::archive_checkpoint::ArchiveCheckpointV1;
 use crate::journal::infrastructure::raft::archive_checkpoint_install::ValidatedArchiveStage;
@@ -21,7 +22,6 @@ use crate::journal::infrastructure::raft::control_state_store::{
 };
 use crate::journal::infrastructure::raft::local_checkpoint::LocalCheckpointV1;
 use crate::journal::infrastructure::raft::resident_checkpoint::ResidentCheckpointV1;
-use crate::storage::SegmentManifest;
 use crate::SignalKind;
 
 #[cfg(any(not(unix), unix))]

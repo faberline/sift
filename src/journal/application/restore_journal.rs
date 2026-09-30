@@ -89,11 +89,14 @@ impl DurableJournal {
         for event in events {
             Self::push_resident(&mut state, event, self.resident_limit)?;
         }
-        crate::storage::JournalHead::new(state.last_cursor, state.total_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())
-            .context("persist restored journal head")?;
+        crate::journal::domain::journal_head::JournalHead::new(
+            state.last_cursor,
+            state.total_events,
+        )
+        .with_projection_generation(state.projection_generation)
+        .with_retention_generation(state.retention_generation)
+        .persist(self.data_dir())
+        .context("persist restored journal head")?;
         self.accepted.add(restored_events);
         Ok(())
     }
@@ -108,7 +111,7 @@ impl DurableJournal {
 
     pub(crate) fn restore_archive_receipts(
         &self,
-        receipts: &[crate::storage::DedupeReceipt],
+        receipts: &[crate::journal::domain::dedupe_receipt::DedupeReceipt],
         indexed_through_cursor: u64,
     ) -> Result<()> {
         self.dedupe
@@ -126,7 +129,8 @@ impl DurableJournal {
             .mark_rebuilt_through(manifest.raft_snapshot_index)?;
         let dedupe = self.dedupe.stats()?;
         if dedupe.newest_cursor > manifest.raft_snapshot_index
-            || dedupe.window_seconds != crate::storage::IDEMPOTENCY_WINDOW_SECONDS as u64
+            || dedupe.window_seconds
+                != crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS as u64
         {
             bail!("restored archive dedupe index disagrees with its manifest");
         }
@@ -146,10 +150,13 @@ impl DurableJournal {
         state.retention_generation = manifest.retention_generation;
         state.event_content_digest = event_content_digest;
         state.projection_generation = state.projection_generation.saturating_add(1);
-        crate::storage::JournalHead::new(state.last_cursor, state.total_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())?;
+        crate::journal::domain::journal_head::JournalHead::new(
+            state.last_cursor,
+            state.total_events,
+        )
+        .with_projection_generation(state.projection_generation)
+        .with_retention_generation(state.retention_generation)
+        .persist(self.data_dir())?;
         self.accepted.add(newly_counted);
         Ok(())
     }

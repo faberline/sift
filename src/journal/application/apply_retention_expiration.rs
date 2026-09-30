@@ -107,7 +107,7 @@ impl DurableJournal {
         state.event_content_digest = xor_digest(retained_prefix_digest, suffix_digest);
         state.retention_generation = retention_generation;
         let last_cursor = state.last_cursor;
-        crate::storage::JournalHead::new(last_cursor, retained_events)
+        crate::journal::domain::journal_head::JournalHead::new(last_cursor, retained_events)
             .with_projection_generation(state.projection_generation)
             .with_retention_generation(retention_generation)
             .persist(self.data_dir())?;

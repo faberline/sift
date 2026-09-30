@@ -83,11 +83,12 @@ pub(in crate::archive) fn publish_restore_stage(target: &Path) -> Result<()> {
     }
     let stage = target.join(RESTORE_STAGE_DIR);
     if !stage.exists() {
-        let layout: crate::storage::LayoutManifest = serde_json::from_slice(
-            &std::fs::read(target.join("layout.json"))
-                .context("resume cold restore publication without a layout")?,
-        )
-        .context("decode resumed cold restore layout")?;
+        let layout: crate::node::infrastructure::data_layout::LayoutManifest =
+            serde_json::from_slice(
+                &std::fs::read(target.join("layout.json"))
+                    .context("resume cold restore publication without a layout")?,
+            )
+            .context("decode resumed cold restore layout")?;
         if layout.restored_from.as_deref() != Some(state.manifest_uri.as_str()) {
             bail!("resumed cold restore layout has the wrong source manifest");
         }

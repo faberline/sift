@@ -4,18 +4,16 @@
 
 pub mod access;
 mod app;
-mod archive;
+pub mod archive;
 pub mod collector;
-pub mod durability;
 pub mod event;
 pub mod ingest;
-mod journal;
-mod node;
+pub mod journal;
+pub mod node;
 pub mod operations;
 pub mod projection;
 pub mod query;
 mod shared_kernel;
-pub mod storage;
 
 pub use crate::app::interfaces::http::openapi::{openapi, openapi_json};
 pub use crate::app::interfaces::http::router::{

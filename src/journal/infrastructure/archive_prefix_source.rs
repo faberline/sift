@@ -14,7 +14,13 @@ impl DurableJournal {
     /// earlier cursor from another signal.
     pub(crate) fn seal_archive_prefix(
         &self,
-    ) -> Result<(u64, Vec<(SignalKind, crate::storage::SegmentManifest)>)> {
+    ) -> Result<(
+        u64,
+        Vec<(
+            SignalKind,
+            crate::journal::domain::segment_manifest::SegmentManifest,
+        )>,
+    )> {
         let state = self.state.write().expect("journal state lock poisoned");
         let captured_cursor = state.last_cursor;
         let segments = self.storage.seal_all_with_signal()?;

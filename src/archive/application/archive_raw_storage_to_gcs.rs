@@ -4,8 +4,8 @@ use anyhow::{bail, Context, Result};
 
 use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::application::upload_archive_snapshot::archive_gcs_captured_streaming;
+use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::storage::raw_storage::RawStorage;
-use crate::storage::SegmentManifest;
 use crate::SignalKind;
 
 /// Upload every immutable object first. The manifest upload is the commit point.

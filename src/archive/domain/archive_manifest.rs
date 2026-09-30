@@ -3,8 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::journal::domain::{segment_manifest::SegmentManifest, shard_route::EpochMap};
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
-use crate::storage::{EpochMap, SegmentManifest};
 use crate::{ContentBlobRef, SignalKind};
 
 pub(in crate::archive) const ARCHIVE_FORMAT_VERSION: u16 = 10;

@@ -45,7 +45,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
     if matches!(args.role, RunRole::All | RunRole::Store) {
         if let Ok(manifest_uri) = std::env::var("SIFT_BOOTSTRAP_ARCHIVE_MANIFEST_URI") {
             if !manifest_uri.trim().is_empty() {
-                match sift::storage::archive::bootstrap_gcs_if_needed(&manifest_uri, data_dir)? {
+                match sift::archive::bootstrap_gcs_if_needed(&manifest_uri, data_dir)? {
                     Some(manifest) => tracing::info!(
                         source_manifest = manifest_uri,
                         source_cluster_id = manifest.source_cluster_id,

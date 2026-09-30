@@ -9,7 +9,7 @@ pub(in crate::journal) struct CanonicalRecoveryReader<'a> {
     pub(in crate::journal) storage:
         &'a crate::journal::infrastructure::storage::raw_storage::RawStorage,
     segments: crate::journal::infrastructure::storage::raw_storage::RawStorageReader,
-    pub(in crate::journal) wal: crate::storage::SignalWalReader,
+    pub(in crate::journal) wal: crate::journal::infrastructure::storage::wal::SignalWalReader,
     archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     repair_segments: bool,
     segment_next: Option<StoredEvent>,
@@ -20,7 +20,7 @@ pub(in crate::journal) struct CanonicalRecoveryReader<'a> {
 impl<'a> CanonicalRecoveryReader<'a> {
     pub(in crate::journal) fn open(
         storage: &'a crate::journal::infrastructure::storage::raw_storage::RawStorage,
-        wal: &'a crate::storage::SignalWal,
+        wal: &'a crate::journal::infrastructure::storage::wal::SignalWal,
         archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
         after: u64,
         repair_segments: bool,

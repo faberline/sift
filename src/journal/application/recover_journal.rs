@@ -38,10 +38,10 @@ impl DurableJournal {
         crate::archive::infrastructure::archive_gc_pending_store::reconcile_staged_archive_gc(
             &data_dir,
         )?;
-        let wal = crate::storage::SignalWal::open(&data_dir)?;
+        let wal = crate::journal::infrastructure::storage::wal::SignalWal::open(&data_dir)?;
         let storage =
             crate::journal::infrastructure::storage::raw_storage::RawStorage::open(&data_dir)?;
-        let stored_head = crate::storage::JournalHead::load(&data_dir)?;
+        let stored_head = crate::journal::domain::journal_head::JournalHead::load(&data_dir)?;
         crate::archive::application::reconcile_committed_retention::reconcile_committed_retention(
             &data_dir,
             &storage,
@@ -59,7 +59,8 @@ impl DurableJournal {
         let remote_retained =
             crate::archive::application::archive_status_queries::remote_retained_state(&data_dir)?;
         let mut state = JournalState::default();
-        let (dedupe, dedupe_stats) = crate::storage::DedupeIndex::open(&data_dir)?;
+        let (dedupe, dedupe_stats) =
+            crate::journal::infrastructure::storage::dedupe_index::DedupeIndex::open(&data_dir)?;
         let recovery_time = Utc::now();
         let mut recovery = CanonicalRecoveryReader::open(&storage, &wal, archived, 0, true)?;
         let mut dedupe_matches = true;
@@ -92,7 +93,7 @@ impl DurableJournal {
         }
 
         let mut head = stored_head.unwrap_or_else(|| {
-            crate::storage::JournalHead::new(
+            crate::journal::domain::journal_head::JournalHead::new(
                 state.last_cursor.max(archived.max_cursor()),
                 state.total_events,
             )

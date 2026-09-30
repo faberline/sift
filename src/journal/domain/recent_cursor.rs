@@ -25,7 +25,11 @@ impl RecentCursor {
     }
 
     fn active_at(&self, now: DateTime<Utc>) -> bool {
-        self.acknowledged_at >= now - Duration::seconds(crate::storage::IDEMPOTENCY_WINDOW_SECONDS)
+        self.acknowledged_at
+            >= now
+                - Duration::seconds(
+                    crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+                )
     }
 }
 

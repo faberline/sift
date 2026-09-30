@@ -877,18 +877,7 @@ reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project c
 
 [[exceptions]]
 rule = "B1"
-paths = ["src/durability.rs"]
-subject = "src/durability"
-reason = "Compat facade: sift::durability was a public module, and durability.rs now only re-exports the Raft batch limits, the diagnostics encoders, SiftStateMachine and SNAPSHOT_CONTENT_TYPE from the journal context so the public path keeps compiling. P2: drop the facade once callers use the journal context's paths."
-
-[[exceptions]]
-rule = "B1"
 paths = ["src/event.rs"]
 subject = "src/event"
 reason = "Compat facade: sift::event was a public module, and event.rs now only re-exports the event model from the shared kernel and GovernancePolicy and GovernancePolicySet from ingest so the public path keeps compiling. The crate root's own event re-exports also go through it. P2: point the crate-root re-exports at the shared kernel, and drop the facade once callers use them."
 
-[[exceptions]]
-rule = "B1"
-paths = ["src/storage.rs"]
-subject = "src/storage"
-reason = "Compat facade: sift::storage was a public module, and storage.rs now only declares storage::archive and re-exports the journal's storage types and the node's layout and capacity types, and storage/archive.rs only re-exports the archive's use cases, receipts and manifest types, so the public paths keep compiling. P2: drop the facade once callers use the journal, node and archive paths."

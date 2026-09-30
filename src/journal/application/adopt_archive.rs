@@ -107,10 +107,13 @@ impl DurableJournal {
             .try_into()
             .map_err(|_| anyhow::anyhow!("archive event content digest must be 32 bytes"))?;
         rebuilt.event_content_digest = xor_digest(archived_digest, local_after_archive_digest);
-        crate::storage::JournalHead::new(rebuilt.last_cursor, retained_events)
-            .with_projection_generation(projection_generation)
-            .with_retention_generation(rebuilt.retention_generation)
-            .persist(self.data_dir())?;
+        crate::journal::domain::journal_head::JournalHead::new(
+            rebuilt.last_cursor,
+            retained_events,
+        )
+        .with_projection_generation(projection_generation)
+        .with_retention_generation(rebuilt.retention_generation)
+        .persist(self.data_dir())?;
         *state = rebuilt;
         drop(state);
         crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
@@ -222,10 +225,13 @@ impl DurableJournal {
                 receipt,
             )?;
         state.retention_generation = receipt.manifest.retention_generation;
-        crate::storage::JournalHead::new(state.last_cursor, state.total_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())?;
+        crate::journal::domain::journal_head::JournalHead::new(
+            state.last_cursor,
+            state.total_events,
+        )
+        .with_projection_generation(state.projection_generation)
+        .with_retention_generation(state.retention_generation)
+        .persist(self.data_dir())?;
         self.wal.compact_through(watermarks)?;
         self.recovery_required.store(false, Ordering::Release);
         Ok(())

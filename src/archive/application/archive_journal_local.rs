@@ -12,8 +12,8 @@ use crate::archive::infrastructure::archive_control_paths::{
 use crate::archive::infrastructure::local_segment_commit_state::{
     LocalCommittedSegment, LocalSegmentCommitState,
 };
+use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
-use crate::storage::SegmentManifest;
 use crate::SignalKind;
 
 #[cfg(any(not(unix), unix))]

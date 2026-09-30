@@ -14,8 +14,8 @@ use crate::shared_kernel::stored_event::StoredEvent;
 pub(super) fn rebuild_dedupe_index(
     root: &Path,
     storage: &crate::journal::infrastructure::storage::raw_storage::RawStorage,
-    wal: &crate::storage::SignalWal,
-    dedupe: &crate::storage::DedupeIndex,
+    wal: &crate::journal::infrastructure::storage::wal::SignalWal,
+    dedupe: &crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
     archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     expected_last_cursor: u64,
 ) -> Result<()> {
@@ -23,7 +23,8 @@ pub(super) fn rebuild_dedupe_index(
     let mut page = Vec::with_capacity(RECOVERY_PAGE_EVENTS);
     let now = Utc::now();
 
-    let cutoff = now - Duration::seconds(crate::storage::IDEMPOTENCY_WINDOW_SECONDS);
+    let cutoff = now
+        - Duration::seconds(crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS);
     let remote =
         crate::archive::application::replay_recent_committed::replay_recent_committed_events(
             root,
@@ -43,7 +44,9 @@ pub(super) fn rebuild_dedupe_index(
     }
 
     let mut receipt_page =
-        Vec::<crate::storage::DedupeReceipt>::with_capacity(RECOVERY_PAGE_EVENTS);
+        Vec::<crate::journal::domain::dedupe_receipt::DedupeReceipt>::with_capacity(
+            RECOVERY_PAGE_EVENTS,
+        );
     crate::archive::application::replay_recent_committed::replay_recent_committed_receipts(
         root,
         cutoff,
@@ -92,14 +95,14 @@ pub(super) fn rebuild_dedupe_index(
 }
 
 pub(super) fn append_unique_dedupe_page(
-    dedupe: &crate::storage::DedupeIndex,
+    dedupe: &crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
     page: &mut Vec<StoredEvent>,
 ) -> Result<()> {
     append_unique_dedupe_page_at(dedupe, page, Utc::now())
 }
 
 fn append_unique_dedupe_page_at(
-    dedupe: &crate::storage::DedupeIndex,
+    dedupe: &crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
     page: &mut Vec<StoredEvent>,
     now: DateTime<Utc>,
 ) -> Result<()> {

@@ -346,11 +346,6 @@ fn logging_text_index_is_owned_by_index_text() {
 
 #[test]
 fn manifest_last_archive_flow_is_owned_by_storage_segment() {
-    let facade = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/storage/archive.rs"
-    ))
-    .expect("read Sift archive adapter");
     let upload = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/archive/application/upload_archive_snapshot.rs"
@@ -366,7 +361,7 @@ fn manifest_last_archive_flow_is_owned_by_storage_segment() {
         "/src/archive/infrastructure/parquet_event_codec.rs"
     ))
     .expect("read Sift archive codec");
-    let source = facade + &upload + &expire + &codec;
+    let source = upload + &expire + &codec;
 
     assert!(source.contains("storage_segment::ArchiveCoordinator"));
     assert!(source.contains("impl storage_segment::RecordCodec<StoredEvent>"));

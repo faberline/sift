@@ -177,11 +177,14 @@ impl DurableJournal {
             for stored in staged {
                 Self::push_resident(&mut state, stored, self.resident_limit)?;
             }
-            crate::storage::JournalHead::new(state.last_cursor, state.total_events)
-                .with_projection_generation(state.projection_generation)
-                .with_retention_generation(state.retention_generation)
-                .persist(self.data_dir())
-                .context("persist journal head before acknowledging the durable batch")?;
+            crate::journal::domain::journal_head::JournalHead::new(
+                state.last_cursor,
+                state.total_events,
+            )
+            .with_projection_generation(state.projection_generation)
+            .with_retention_generation(state.retention_generation)
+            .persist(self.data_dir())
+            .context("persist journal head before acknowledging the durable batch")?;
             self.accepted.add(staged_cursors.len() as u64);
         }
         Ok(results)

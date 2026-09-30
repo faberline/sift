@@ -10,7 +10,7 @@ use crate::terminal_output::print_json_terminal;
 
 #[derive(Args)]
 pub(super) struct RestoreArgs {
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::node::DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
     /// Source URI accepted by service-backup, for example file:///backup/sift.json.
     #[arg(long)]

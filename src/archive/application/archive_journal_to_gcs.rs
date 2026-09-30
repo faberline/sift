@@ -12,7 +12,7 @@ use crate::archive::infrastructure::archive_gc_pending_store::{
 };
 use crate::archive::infrastructure::archive_upload_intent::clear_archive_upload_intent;
 use crate::archive::infrastructure::local_segment_commit_state::retire_local_commit;
-use crate::storage::SegmentManifest;
+use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 /// Commit a remote archive locally before any canonical WAL bytes are removed.

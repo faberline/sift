@@ -89,11 +89,12 @@ pub fn bootstrap_gcs_if_needed(
     }
     let layout_path = target.join("layout.json");
     if layout_path.exists() {
-        let layout: crate::storage::LayoutManifest = serde_json::from_slice(
-            &std::fs::read(&layout_path)
-                .with_context(|| format!("read bootstrap layout {}", layout_path.display()))?,
-        )
-        .with_context(|| format!("decode bootstrap layout {}", layout_path.display()))?;
+        let layout: crate::node::infrastructure::data_layout::LayoutManifest =
+            serde_json::from_slice(
+                &std::fs::read(&layout_path)
+                    .with_context(|| format!("read bootstrap layout {}", layout_path.display()))?,
+            )
+            .with_context(|| format!("decode bootstrap layout {}", layout_path.display()))?;
         if layout.restored_from.as_deref() == Some(manifest_uri) {
             return Ok(None);
         }

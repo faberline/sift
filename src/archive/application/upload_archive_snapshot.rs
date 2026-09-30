@@ -38,8 +38,8 @@ use crate::archive::infrastructure::parquet_event_codec::{encode_parquet, SiftSi
 use crate::archive::infrastructure::spill_catalog::{
     add_spill_blob_reference, SpillBlobReference, SpillCatalog,
 };
+use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::storage::raw_storage::RawStorage;
-use crate::storage::SegmentManifest;
 use crate::SignalKind;
 
 pub(super) fn archive_gcs_captured_streaming(
@@ -51,7 +51,7 @@ pub(super) fn archive_gcs_captured_streaming(
     let destination = service_backup::BackupDestination::from_uri(destination_uri)?;
     let (bucket, prefix) = gcs_destination(&destination)?;
     reconcile_staged_archive_gc(storage.root())?;
-    let layout: crate::storage::LayoutManifest = serde_json::from_slice(
+    let layout: crate::node::infrastructure::data_layout::LayoutManifest = serde_json::from_slice(
         &std::fs::read(storage.root().join("layout.json"))
             .context("read Sift layout for archive identity")?,
     )
