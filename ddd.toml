@@ -417,18 +417,6 @@ interfaces = "src/ingest/interfaces"
 
 [[exceptions]]
 rule = "B1"
-paths = ["src/ingest/batch.rs"]
-subject = "src/ingest/batch"
-reason = "Compat facade: sift::ingest::batch was a public module, and batch.rs now only re-exports the event batch schemas, decode_item and event_id_hint from interfaces/http/batch.rs so the public path keeps compiling. P2: drop the facade once callers use the ingest root re-exports or the layer paths."
-
-[[exceptions]]
-rule = "B1"
-paths = ["src/ingest/gcp.rs"]
-subject = "src/ingest/gcp"
-reason = "Compat facade: sift::ingest::gcp was a public module, and gcp.rs now only re-exports looks_like_structured_log and normalize_structured_log from infrastructure/gcp.rs so the public path keeps compiling. P2: drop the facade once callers use the layer path or an ingest root re-export."
-
-[[exceptions]]
-rule = "B1"
 paths = ["src/ingest/limits.rs"]
 subject = "src/ingest/limits"
 reason = "Compat facade: sift::ingest::limits was a public module, and limits.rs now only re-exports AdmissionController, AdmissionPermit, AdmissionError and IngestLimits from their layers so the public path keeps compiling. P2: drop the facade; the ingest root already re-exports all four."
@@ -460,12 +448,6 @@ rule = "B3"
 paths = ["src/ingest/application/append_events.rs"]
 subject = "application->infrastructure"
 reason = "ServiceState::append_events wraps each governed chunk in an IngestBatchRequest and submits it to the group-commit queue that ingest_batch_queue starts on IngestBatchCoordinator; P1 moves the use case whole. P2: an application port for submitting a batch, with the composition root injecting the coordinator behind it."
-
-[[exceptions]]
-rule = "B3"
-paths = ["src/ingest/interfaces/http/batch.rs"]
-subject = "interfaces->infrastructure"
-reason = "decode_item routes a Cloud Logging structured entry through gcp::looks_like_structured_log and gcp::normalize_structured_log before the plain event path; P1 moves the batch schemas and decode_item whole. P2: an application use case that decodes a batch item, with the GCP normalizer injected behind a port."
 
 [[exceptions]]
 rule = "B3"

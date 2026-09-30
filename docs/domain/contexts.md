@@ -133,19 +133,19 @@ answers queries from. They can always be rebuilt from the journal.
 
 ## ingest
 
-Telemetry admitted within bounded limits, decoded from OTLP, Cloud Logging
-structured JSON and Prometheus remote write into operational events, governed,
-and appended through the group-commit queue to the journal.
+Telemetry admitted within bounded limits, decoded from OTLP and Prometheus
+remote write into operational events, governed, and appended through the
+group-commit queue to the journal.
 
 | Layer | Holds |
 |-------|-------|
 | domain | `ingest_limits`, `admission_error`, `governance_policy`, `otlp_event_id`, `storage_reservation`, `raft_batch_splitter` |
 | application | `admission_controller`, `append_events`, `drain_ingest`, `ensure_local_capacity`, `retention_admission` |
-| infrastructure | `ingest_limits_env`, `governance_policy_file`, `gcp` (the Cloud Logging normalizer), `ingest_batch_coordinator` |
+| infrastructure | `ingest_limits_env`, `governance_policy_file`, `ingest_batch_coordinator` |
 | interfaces | `http/` (OTLP handlers, remote write, request-body decoding), `grpc/otlp_grpc_server`, `otlp/` (the JSON and protobuf decoders), `remote_write/` |
 
 - **Depends on:** journal, access.
-- **Exceptions:** the compatibility facades `ingest::{batch,gcp,limits,otlp}`
+- **Exceptions:** the compatibility facades `ingest::{limits,otlp}`
   (B1); `anyhow` and `axum` in `admission_error` (B2); layer breaks in the
   append path and handlers (B3); and sizing batches by the journal's Raft
   limits (B4).

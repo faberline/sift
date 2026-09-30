@@ -28,7 +28,7 @@ close one are recorded as exceptions (see [Exceptions](#exceptions)).
 | `journal` | all four | node | The durable, replicated event log: Raft, the WAL, sealed segments, the idempotency window, blobs, recovery, archive-checkpoint adoption and the reads the projections and queries run. |
 | `archive` | all four | journal, node | The cold tier: upload to GCS or a local archive under a verified manifest, hot-tier eviction, retention expiration, blob GC, restore of an empty node, and cold-query replay. |
 | `projection` | all four | journal | The rebuildable logging, metric and trace read models built from the journal. |
-| `ingest` | all four | journal, access | Admission within bounded limits, OTLP, Cloud Logging and Prometheus remote-write decoding, governance, and the group-commit append to the journal. |
+| `ingest` | all four | journal, access | Admission within bounded limits, OTLP and Prometheus remote-write decoding, governance, and the group-commit append to the journal. |
 | `operations` | all four | journal, archive, node, access, ingest | Running Sift as a service: the `Sift` custom resource and its operator, the deployment artifacts, snapshot backup and restore, the gateway's reverse proxy, the OTLP/gRPC proxy, and the admin backup and integrity endpoints. |
 | `query` | all four | projection, journal, archive, access, operations | The versioned query API over logs, metrics and traces, async query jobs, the Prometheus-compatible endpoints, the query role, and the read-only MCP tools. |
 
@@ -111,7 +111,7 @@ P1 keeps every one of them:
 - Every old `pub mod` that is not itself a context became a **compatibility
   facade**: a file that holds only `pub use` lines pointing at the item's new
   home. They are `src/{api,auth,backup,deploy,durability,event,grpc,mcp,operator,prometheus,proxy,storage}.rs`,
-  `src/storage/archive.rs`, and `src/ingest/{batch,gcp,limits,otlp}.rs`.
+  `src/storage/archive.rs`, and `src/ingest/{limits,otlp}.rs`.
 - `collector`, `ingest` and `projection` kept their names as contexts, so their
   module files serve as their own facades.
 - The binary's name, subcommands, flags, environment variables and output are
@@ -143,7 +143,7 @@ Each reason says what P2 does about it; a B3 reason names the types involved.
 
 | Category | Rule | Examples | Fate |
 |----------|------|----------|------|
-| Compatibility facade | B1 | the old top-level modules and `ingest::{batch,gcp,limits,otlp}` | P2 deletes the facade. |
+| Compatibility facade | B1 | the old top-level modules and `ingest::{limits,otlp}` | P2 deletes the facade. |
 | Domain uses a non-allowlisted crate | B2 | `anyhow` (E6), `utoipa` on the published event, the projection records and `AppendResult` (E1), `clap::ValueEnum` on `SignalKind`, core types such as `storage_segment::CatalogRoot` (E14), `axum` and `service_auth` in access's route roles | P2 converts to thiserror with the same text, or approves the crate as part of the model. |
 | Domain reads the clock | B2 | `Utc::now` in the event constructors, `query_time.rs` and `sift_command.rs` (E7) | P2 adds `*_at(now)` forms and a `Clock` port. |
 | Same-context layer direction | B3 | the collector runtime building its source and client, the operator's renderers reading the CRD types | P2 moves the wiring to the assembly root or splits the type. |

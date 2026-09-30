@@ -109,7 +109,7 @@ code.
 | **storage reservation** | The local disk bytes an append reserves before it is admitted: three times the encoded bytes plus 128 bytes per event. |
 | **governance policy** | A per-project privacy and cardinality policy (string cap, attribute allow and deny lists, redaction text, GenAI capture) applied before an event enters Raft. |
 | **GenAI content capture** | A policy flag, off by default. When off, GenAI prompt, completion and message attributes are redacted. |
-| **Cloud Logging coexistence identity** | A stable event id (`gcp-log-…`) computed from project, monitored resource, timestamp and canonical payload, so the Cloud Logging normalizer and CRI collection give one line one id and dual delivery is duplicate-safe. |
+| **Cloud Logging coexistence identity** | A stable event id (`gcp-log-…`) computed from project, monitored resource, timestamp and canonical payload. CRI collection derives it when Cloud Logging coexistence is on. |
 | **drain** | Refusing new ingest batches and waiting until every accepted batch has a durable result; readiness reports not ready meanwhile. |
 
 ## Collector
