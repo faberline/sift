@@ -877,18 +877,6 @@ reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project c
 
 [[exceptions]]
 rule = "B1"
-paths = ["src/backup.rs"]
-subject = "src/backup"
-reason = "Compat facade: sift::backup was a public module, and backup.rs now only re-exports backup_journal, restore_journal and the live snapshot client functions from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
-
-[[exceptions]]
-rule = "B1"
-paths = ["src/deploy.rs"]
-subject = "src/deploy"
-reason = "Compat facade: sift::deploy was a public module, and deploy.rs now only re-exports the manifest bundle's renderers, DockerfileVariant, InstanceProfile and DEFAULT_OPERATOR_IMAGE from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
-
-[[exceptions]]
-rule = "B1"
 paths = ["src/durability.rs"]
 subject = "src/durability"
 reason = "Compat facade: sift::durability was a public module, and durability.rs now only re-exports the Raft batch limits, the diagnostics encoders, SiftStateMachine and SNAPSHOT_CONTENT_TYPE from the journal context so the public path keeps compiling. P2: drop the facade once callers use the journal context's paths."
@@ -898,24 +886,6 @@ rule = "B1"
 paths = ["src/event.rs"]
 subject = "src/event"
 reason = "Compat facade: sift::event was a public module, and event.rs now only re-exports the event model from the shared kernel and GovernancePolicy and GovernancePolicySet from ingest so the public path keeps compiling. The crate root's own event re-exports also go through it. P2: point the crate-root re-exports at the shared kernel, and drop the facade once callers use them."
-
-[[exceptions]]
-rule = "B1"
-paths = ["src/grpc.rs"]
-subject = "src/grpc"
-reason = "Compat facade: sift::grpc was a public module, and grpc.rs now only re-exports ingest's OTLP/gRPC serve and operations' serve_proxy so the public path keeps compiling. P2: drop the facade once callers use the ingest and operations paths."
-
-[[exceptions]]
-rule = "B1"
-paths = ["src/operator.rs"]
-subject = "src/operator"
-reason = "Compat facade: sift::operator was a public module, and operator.rs now only re-exports the Sift custom resource types and the operator's run from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
-
-[[exceptions]]
-rule = "B1"
-paths = ["src/proxy.rs"]
-subject = "src/proxy"
-reason = "Compat facade: sift::proxy was a public module, and proxy.rs now only re-exports gateway_router and query_router from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
 
 [[exceptions]]
 rule = "B1"

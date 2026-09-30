@@ -189,7 +189,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
         tracing::info!(%address, "sift serving OTLP/gRPC");
         let task = tokio::spawn(async move {
             if let Some(store) = grpc_store {
-                sift::grpc::serve_proxy(
+                sift::operations::serve_otlp_grpc_proxy(
                     listener,
                     &store,
                     grpc_verifier,
@@ -200,7 +200,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
                 )
                 .await
             } else {
-                sift::grpc::serve(listener, grpc_state, grpc_verifier, async {
+                sift::ingest::serve_otlp_grpc(listener, grpc_state, grpc_verifier, async {
                     let _ = shutdown_rx.await;
                 })
                 .await
@@ -219,7 +219,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
             let store = std::env::var("SIFT_STORE_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
             let query = std::env::var("SIFT_QUERY_ENDPOINT").unwrap_or_else(|_| store.clone());
-            sift::proxy::gateway_router(&store, &query, config.body_limit_bytes)?
+            sift::operations::gateway_router(&store, &query, config.body_limit_bytes)?
                 .merge(sift::query::mcp_http_router(&internal_endpoint)?)
                 .layer(axum::middleware::from_fn_with_state(
                     verifier,

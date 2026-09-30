@@ -8,7 +8,7 @@ use axum::{
 use service_auth::{Role, TokenClaims};
 use sift::{
     access::{SiftAuthConfig, SiftVerifier},
-    backup::{backup_live_journal, fetch_live_snapshot},
+    operations::{backup_live_journal, fetch_live_snapshot},
     protected_router, EventEnvelope, ServiceState, SignalKind,
 };
 use tower::ServiceExt;

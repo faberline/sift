@@ -19,7 +19,7 @@ pub(super) struct RestoreArgs {
 
 pub(super) fn restore(args: RestoreArgs) -> Result<()> {
     let journal = DurableJournal::open(&args.data_dir)?;
-    sift::backup::restore_journal(&journal, &args.source)?;
+    sift::operations::restore_journal(&journal, &args.source)?;
     print_json_terminal(serde_json::json!({
         "status": "restored",
         "source": args.source,

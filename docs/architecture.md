@@ -110,7 +110,7 @@ them:
   `router`, `openapi` and the others listed in `src/lib.rs`.
 - Every old `pub mod` that is not itself a context became a **compatibility
   facade**: a file that holds only `pub use` lines pointing at the item's new
-  home. They are `src/{backup,deploy,durability,event,grpc,operator,proxy,storage}.rs`,
+  home. They are `src/{durability,event,storage}.rs`,
   `src/storage/archive.rs`, and `src/ingest/{limits,otlp}.rs`.
 - `collector`, `ingest` and `projection` kept their names as contexts, so their
   module files serve as their own facades.
@@ -129,6 +129,10 @@ context that owns its items public in its place:
   `sift::ingest::{decode_remote_write, DecodedWrite}`. Callers take the
   remote-write wire types and `PROMETHEUS_STALE_NAN_BITS` from
   `metrics_remote_write` directly.
+- `sift::{backup,deploy,proxy}` and `sift::operator` became
+  `sift::operations`, with the operator loop renamed to `run_operator`.
+  `sift::grpc::serve_proxy` became `sift::operations::serve_otlp_grpc_proxy`,
+  and `sift::grpc::serve` became `sift::ingest::serve_otlp_grpc`.
 
 ## File size
 

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
-use sift::deploy::{DockerfileVariant, InstanceProfile};
+use sift::operations::{DockerfileVariant, InstanceProfile};
 
 #[derive(Args)]
 pub(super) struct DockerfileArgs {
@@ -69,7 +69,7 @@ enum K8sCollectorCommand {
 struct K8sCollectorRenderArgs {
     #[arg(long, default_value = "sift-system")]
     namespace: String,
-    #[arg(long, default_value = sift::deploy::DEFAULT_OPERATOR_IMAGE)]
+    #[arg(long, default_value = sift::operations::DEFAULT_OPERATOR_IMAGE)]
     image: String,
     #[arg(long)]
     out: Option<PathBuf>,
@@ -104,7 +104,7 @@ enum K8sOperatorCommand {
 struct K8sOperatorRenderArgs {
     #[arg(long, default_value = "sift-system")]
     namespace: String,
-    #[arg(long, default_value = sift::deploy::DEFAULT_OPERATOR_IMAGE)]
+    #[arg(long, default_value = sift::operations::DEFAULT_OPERATOR_IMAGE)]
     image: String,
     #[arg(long)]
     out: Option<PathBuf>,
@@ -150,7 +150,7 @@ pub(super) fn dockerfile(args: DockerfileArgs) -> Result<()> {
                 DockerfileVariantArg::Source => DockerfileVariant::Source,
                 DockerfileVariantArg::Release => DockerfileVariant::Release,
             };
-            let body = sift::deploy::dockerfile(variant, args.version.as_deref())?;
+            let body = sift::operations::dockerfile(variant, args.version.as_deref())?;
             let file_name = match variant {
                 DockerfileVariant::Source => "Dockerfile",
                 DockerfileVariant::Release => "Dockerfile.release",
@@ -171,7 +171,7 @@ pub(super) async fn k8s(args: K8sArgs) -> Result<()> {
             K8sCrdCommand::Render(args) => write_artifact(
                 args.out.as_deref(),
                 "sift-crd.yaml",
-                &sift::deploy::crd_yaml(),
+                &sift::operations::crd_yaml(),
                 "kubectl apply -f -",
             ),
         },
@@ -179,7 +179,7 @@ pub(super) async fn k8s(args: K8sArgs) -> Result<()> {
             K8sOperatorCommand::Render(args) => write_artifact(
                 args.out.as_deref(),
                 "sift-operator.yaml",
-                &sift::deploy::operator_yaml_with_image(&args.namespace, &args.image)?,
+                &sift::operations::operator_yaml_with_image(&args.namespace, &args.image)?,
                 "kubectl apply -f -",
             ),
             K8sOperatorCommand::Run => operator_run().await,
@@ -195,7 +195,7 @@ pub(super) async fn k8s(args: K8sArgs) -> Result<()> {
                 write_artifact(
                     args.out.as_deref(),
                     "sift.yaml",
-                    &sift::deploy::instance_yaml(profile),
+                    &sift::operations::instance_yaml(profile),
                     "kubectl apply -f -",
                 )
             }
@@ -204,7 +204,7 @@ pub(super) async fn k8s(args: K8sArgs) -> Result<()> {
             K8sCollectorCommand::Render(args) => write_artifact(
                 args.out.as_deref(),
                 "sift-collector.yaml",
-                &sift::deploy::collector_yaml(&args.namespace, &args.image)?,
+                &sift::operations::collector_yaml(&args.namespace, &args.image)?,
                 "kubectl apply -f -",
             ),
         },
@@ -212,7 +212,7 @@ pub(super) async fn k8s(args: K8sArgs) -> Result<()> {
 }
 
 async fn operator_run() -> Result<()> {
-    sift::operator::run().await
+    sift::operations::run_operator().await
 }
 
 fn write_artifact(
