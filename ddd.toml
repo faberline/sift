@@ -263,20 +263,6 @@ interfaces = "src/query/interfaces"
 
 [[exceptions]]
 rule = "B2"
-paths = [
-  "src/query/domain/filter_evaluator.rs",
-  "src/query/domain/filter_expression.rs",
-  "src/query/domain/promql.rs",
-  "src/query/domain/promql_evaluator.rs",
-  "src/query/domain/query_cursor.rs",
-  "src/query/domain/query_job.rs",
-  "src/query/domain/query_time.rs",
-]
-subject = "anyhow"
-reason = "QueryExpressionV1::validate, validate_field, evaluate_filter, parse_promql, split_matchers, parse_decimal_seconds_nanos and validate_id return anyhow errors whose text is the API's invalid_query and Prometheus bad_data message that tests match by substring, and the cursor, time and PromQL budget helpers spell Result<_, ApiError> through anyhow::Result; converting them is not a move (E6). P2: a query domain error (thiserror) with the same Display text, which the handlers convert, and std Result for the ApiError helpers."
-
-[[exceptions]]
-rule = "B2"
 paths = ["src/query/domain/query_cursor.rs"]
 subject = "base64"
 reason = "encode_query_cursor and decode_query_cursor write the opaque page cursor as base64url (URL_SAFE_NO_PAD) JSON; the cursor text is the API's wire and clients hand it back, so P1 moves the codec as-is. P2: the domain keeps the cursor as a typed value and an interfaces codec writes and reads the base64url text, or base64 is approved in the domain allowlist."

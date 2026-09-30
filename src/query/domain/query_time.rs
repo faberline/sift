@@ -1,6 +1,5 @@
 //! A query's times: whether it reaches the archive, and parsing a query time.
 
-use anyhow::Result;
 use chrono::{DateTime, Utc};
 
 use crate::app::interfaces::http::api_error::ApiError;

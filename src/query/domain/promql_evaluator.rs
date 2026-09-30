@@ -3,8 +3,6 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::Result;
-
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::projection;
 use crate::query::domain::promql::PromFunction;

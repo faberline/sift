@@ -1,7 +1,7 @@
 //! An async query job: its status, its record, and the ids it may have.
 
-use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
 use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
@@ -29,9 +29,13 @@ pub struct QueryJobV1 {
     pub error: Option<String>,
 }
 
-pub(in crate::query) fn validate_id(query_id: &str) -> Result<()> {
+#[derive(Debug, Error)]
+#[error("query id has an invalid format")]
+pub(in crate::query) struct InvalidQueryId;
+
+pub(in crate::query) fn validate_id(query_id: &str) -> Result<(), InvalidQueryId> {
     if query_id.len() != 32 || !query_id.bytes().all(|value| value.is_ascii_hexdigit()) {
-        bail!("query id has an invalid format");
+        return Err(InvalidQueryId);
     }
     Ok(())
 }

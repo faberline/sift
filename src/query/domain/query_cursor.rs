@@ -1,6 +1,5 @@
 //! The opaque cursor a query page hands back, per signal.
 
-use anyhow::Result;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 

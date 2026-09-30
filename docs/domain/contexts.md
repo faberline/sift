@@ -184,7 +184,12 @@ Prometheus-compatible endpoints, the query role, and the read-only MCP tools.
 | interfaces | `http/` (query, correlate, services, trace, phase-one and Prometheus handlers, the query role router), `mcp/` (the MCP server and its transport) |
 
 - **Depends on:** projection, journal, archive, access, operations.
-- **Exceptions:** `anyhow`, `base64` in the query cursor and `Utc::now` in
-  `query_time` (B2); layer breaks between the handlers, DTOs and use cases
-  (B3); and its uses of projection types, the journal's domain and the
-  gateway's store-forwarding router (B4).
+- **Errors:** the domain returns thiserror types: `FilterError` for filter
+  validation and evaluation, `PromQlError` and `InvalidQueryId`. The cursor,
+  time and PromQL evaluation modules return the API's `ApiError`. The
+  application and handlers convert them with `?` or put their text in the
+  `invalid_query` response.
+- **Exceptions:** `base64` in the query cursor and `Utc::now` in `query_time`
+  (B2); layer breaks between the handlers, DTOs and use cases (B3); and its
+  uses of projection types, the journal's domain and the gateway's
+  store-forwarding router (B4).

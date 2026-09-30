@@ -92,7 +92,9 @@ pub(in crate::query) fn execute_query_v1(
                     .map(|filter| {
                         serde_json::to_value(&record)
                             .map_err(anyhow::Error::from)
-                            .and_then(|document| evaluate_filter(filter, &document))
+                            .and_then(|document| {
+                                evaluate_filter(filter, &document).map_err(anyhow::Error::from)
+                            })
                     })
                     .transpose()
                     .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?
@@ -185,7 +187,9 @@ pub(in crate::query) fn execute_query_v1(
                     .map(|filter| {
                         serde_json::to_value(&item)
                             .map_err(anyhow::Error::from)
-                            .and_then(|document| evaluate_filter(filter, &document))
+                            .and_then(|document| {
+                                evaluate_filter(filter, &document).map_err(anyhow::Error::from)
+                            })
                     })
                     .transpose()
                     .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?
@@ -308,7 +312,9 @@ pub(in crate::query) fn execute_query_v1(
                     .map(|filter| {
                         serde_json::to_value(&trace)
                             .map_err(anyhow::Error::from)
-                            .and_then(|document| evaluate_filter(filter, &document))
+                            .and_then(|document| {
+                                evaluate_filter(filter, &document).map_err(anyhow::Error::from)
+                            })
                     })
                     .transpose()
                     .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?

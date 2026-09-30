@@ -11,8 +11,8 @@ pub(crate) mod interfaces;
 pub use crate::query::{
     domain::{
         filter_evaluator::evaluate_filter,
-        filter_expression::QueryExpressionV1,
-        promql::{parse_promql, ParsedPromQuery, PromFunction},
+        filter_expression::{FilterError, QueryExpressionV1},
+        promql::{parse_promql, ParsedPromQuery, PromFunction, PromQlError},
         query_job::{QueryJobStatusV1, QueryJobV1},
     },
     infrastructure::sift_api_client::SiftApiClient,
