@@ -12,6 +12,7 @@ use crate::query::domain::filter_expression::QueryExpressionV1;
 use crate::query::interfaces::http::query_request_v1::{
     TimeRangeV1, MAX_QUERY_LIMIT, QUERY_AST_VERSION,
 };
+use crate::shared_kernel::query_limit::default_query_limit;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -131,8 +132,4 @@ pub struct ServiceListResponseV1 {
 
 fn default_tail_wait_ms() -> u64 {
     2_000
-}
-
-fn default_query_limit() -> usize {
-    100
 }

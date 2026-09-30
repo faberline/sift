@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use crate::shared_kernel::query_limit::default_query_limit;
 use crate::{AttributeValue, InstrumentationScope};
 
 pub const PROJECTION_TRACE_STORE: &str = "trace-store";
@@ -113,7 +114,7 @@ pub struct TraceQuery {
     pub attributes: BTreeMap<String, AttributeValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_trace_id: Option<String>,
-    #[serde(default = "default_trace_query_limit")]
+    #[serde(default = "default_query_limit")]
     pub limit: usize,
 }
 
@@ -131,7 +132,7 @@ impl TraceQuery {
             status: None,
             attributes: BTreeMap::new(),
             after_trace_id: None,
-            limit: default_trace_query_limit(),
+            limit: default_query_limit(),
         }
     }
 
@@ -229,10 +230,6 @@ pub(in crate::projection) fn remove_tracked_cursor(state: &mut TraceState, curso
     if remove_conflicts {
         state.conflicts.remove(&location.trace_key);
     }
-}
-
-fn default_trace_query_limit() -> usize {
-    100
 }
 
 pub(in crate::projection) fn trace_matches(trace: &TraceResultV1, query: &TraceQuery) -> bool {

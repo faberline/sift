@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::query::domain::filter_expression::{
     validate_field, QueryExpressionV1, MAX_FILTER_ARGUMENTS,
 };
+use crate::shared_kernel::query_limit::default_query_limit;
 
 pub const QUERY_AST_VERSION: u32 = 1;
-pub const DEFAULT_QUERY_LIMIT: usize = 100;
 pub const MAX_QUERY_LIMIT: usize = 1_000;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -185,8 +185,4 @@ impl QueryRequestV1 {
         }
         Ok(())
     }
-}
-
-fn default_query_limit() -> usize {
-    DEFAULT_QUERY_LIMIT
 }

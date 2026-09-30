@@ -16,7 +16,8 @@ context.
 - **Modules:** `event` (`OperationalEventV2`, `EventEnvelope`, `IncomingEvent`,
   `decode_event_json`, `SignalKind`), `event_error` (`EventError`),
   `stored_event`, `event_content_digest`, `single_signal_batch`,
-  `archive_watermarks`, `retention_boundary`, `cloud_logging_event_id`.
+  `archive_watermarks`, `retention_boundary`, `cloud_logging_event_id`,
+  `query_limit`.
 - **Errors:** thiserror types: `EventError` for event validation and decode,
   `DigestError` and `SingleSignalError`.
 - **Time:** `OperationalEventV2::for_project_at` takes the time. `for_project`

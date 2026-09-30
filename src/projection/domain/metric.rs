@@ -11,6 +11,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::projection::domain::metric_aggregation::{merge_counts, optional_max, optional_min};
+use crate::shared_kernel::query_limit::default_query_limit;
 use crate::{AttributeValue, MetricExemplar, MetricTemporality};
 
 pub const PROJECTION_METRIC_STORE: &str = "metric-store";
@@ -375,10 +376,6 @@ pub(in crate::projection) fn parse_time(value: &str) -> Result<i64, MetricError>
         .with_timezone(&Utc)
         .timestamp_nanos_opt()
         .ok_or(MetricError::TimestampOutOfRange)
-}
-
-const fn default_query_limit() -> usize {
-    100
 }
 
 fn is_false(value: &bool) -> bool {

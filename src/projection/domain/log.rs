@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use crate::shared_kernel::query_limit::default_query_limit;
 use crate::AttributeValue;
 
 pub const PROJECTION_LOGGING_STORE: &str = "logging-store";
@@ -216,10 +217,6 @@ fn parse_optional_time(
                 .map(|value| value.with_timezone(&Utc))
         })
         .transpose()
-}
-
-fn default_query_limit() -> usize {
-    100
 }
 
 pub(in crate::projection) fn projection_row_key(cursor: u64) -> String {
