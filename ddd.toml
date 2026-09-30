@@ -542,17 +542,6 @@ interfaces = "src/archive/interfaces"
 [[exceptions]]
 rule = "B2"
 paths = [
-  "src/archive/domain/archive_event_time.rs",
-  "src/archive/domain/archive_manifest_validator.rs",
-  "src/archive/domain/blob_hash_set.rs",
-  "src/archive/domain/event_set_digest.rs",
-]
-subject = "anyhow"
-reason = "validate_archive_manifest, validate_dedupe_receipt, parse_optional_archive_time, event_time_unix_nano, acknowledgement_time_unix_nano, acknowledgement_time_bounds, decode_event_id_digest and decode_event_content_digest return anyhow errors whose text is the restore, checkpoint-install and replay failure an invalid manifest, receipt, timestamp or digest raises, and BlobHashSet's insert_hash and contains_hash return anyhow::Result because SpillCatalog's implementation reads spill files; converting them is not a move (E6). P2: an archive domain error (thiserror) with the same Display text, which the application converts, and BlobHashSet takes an associated error type."
-
-[[exceptions]]
-rule = "B2"
-paths = [
   "src/archive/domain/archive_manifest.rs",
   "src/archive/domain/archive_manifest_validator.rs",
 ]

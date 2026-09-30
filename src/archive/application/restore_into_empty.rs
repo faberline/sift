@@ -208,12 +208,16 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
     Ok(manifest)
 }
 
-fn restore_archive_page(
+fn restore_archive_page<H>(
     journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
     events: Vec<StoredEvent>,
     hot_cutoff_nanos: i64,
-    hot_blob_hashes: &mut impl BlobHashSet,
-) -> Result<()> {
+    hot_blob_hashes: &mut H,
+) -> Result<()>
+where
+    H: BlobHashSet,
+    anyhow::Error: From<H::Error>,
+{
     let mut hot = Vec::with_capacity(events.len());
     let mut cold = Vec::new();
     for event in events {

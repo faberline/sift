@@ -177,6 +177,8 @@ impl SpillCatalog {
 }
 
 impl crate::archive::domain::blob_hash_set::BlobHashSet for SpillCatalog {
+    type Error = anyhow::Error;
+
     fn insert_hash(&mut self, hash: &str) -> Result<()> {
         self.upsert(format!("blob/{hash}"), Vec::new())
     }

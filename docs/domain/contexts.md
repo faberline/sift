@@ -113,8 +113,12 @@ archive, and replays archived events to cold queries.
 | interfaces | `archive_worker` |
 
 - **Depends on:** journal, node.
-- **Exceptions:** `anyhow`, `storage_segment::CatalogRoot` and `service_backup`
-  in the manifest (B2, E14); layer breaks in the lifecycle units of work (B3);
+- **Errors:** the domain returns thiserror types: `ArchiveTimeError`,
+  `EventSetDigestError` and `ArchiveManifestError`. `BlobHashSet` leaves its
+  error type to the implementation. The application and infrastructure convert
+  them with `?`.
+- **Exceptions:** `storage_segment::CatalogRoot` and `service_backup` in the
+  manifest (B2, E14); layer breaks in the lifecycle units of work (B3);
   and its uses of the journal's domain and `DurableJournal` (B4).
 
 ## projection
