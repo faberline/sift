@@ -220,7 +220,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
             let query = std::env::var("SIFT_QUERY_ENDPOINT").unwrap_or_else(|_| store.clone());
             sift::proxy::gateway_router(&store, &query, config.body_limit_bytes)?
-                .merge(sift::mcp::http_router(&internal_endpoint)?)
+                .merge(sift::query::mcp_http_router(&internal_endpoint)?)
                 .layer(axum::middleware::from_fn_with_state(
                     verifier,
                     sift::access::auth_middleware,

@@ -24,7 +24,7 @@ use tower::ServiceExt;
 #[test]
 fn mcp_exposes_only_the_phase_one_read_tools() {
     assert_eq!(
-        sift::mcp::tool_names(),
+        sift::query::mcp_tool_names(),
         [
             "sift_correlate",
             "sift_get_trace",
@@ -113,7 +113,7 @@ async fn stdio_server_negotiates_and_lists_the_five_sift_tools() {
         .map(|tool| tool["name"].as_str().expect("tool name"))
         .collect::<Vec<_>>();
     names.sort_unstable();
-    assert_eq!(names, sift::mcp::tool_names());
+    assert_eq!(names, sift::query::mcp_tool_names());
 
     drop(stdin);
     let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
@@ -412,7 +412,7 @@ async fn stdio_query_retries_a_detailed_retryable_response() {
     api.abort();
 }
 
-fn retry_test_query() -> sift::api::QueryRequestV1 {
+fn retry_test_query() -> sift::query::QueryRequestV1 {
     serde_json::from_value(serde_json::json!({
         "version": 1,
         "project": "sift-mvp",
@@ -457,7 +457,7 @@ async fn api_client_stops_after_three_retryable_responses() {
             .expect("serve fake Sift API");
     });
 
-    let client = sift::mcp::SiftApiClient::new(&endpoint, None, Duration::from_secs(2))
+    let client = sift::query::SiftApiClient::new(&endpoint, None, Duration::from_secs(2))
         .expect("build Sift API client");
     let error = client
         .query(&retry_test_query())
@@ -499,10 +499,10 @@ async fn api_client_does_not_replay_queries_that_can_create_jobs() {
             .expect("serve fake Sift API");
     });
 
-    let client = sift::mcp::SiftApiClient::new(&endpoint, None, Duration::from_secs(2))
+    let client = sift::query::SiftApiClient::new(&endpoint, None, Duration::from_secs(2))
         .expect("build Sift API client");
     let mut asynchronous = retry_test_query();
-    asynchronous.mode = sift::api::QueryModeV1::Async;
+    asynchronous.mode = sift::query::QueryModeV1::Async;
     let error = client
         .query(&asynchronous)
         .await
@@ -511,7 +511,7 @@ async fn api_client_does_not_replay_queries_that_can_create_jobs() {
     assert!(error.to_string().contains("502 Bad Gateway"));
 
     let mut automatic = retry_test_query();
-    automatic.mode = sift::api::QueryModeV1::Auto;
+    automatic.mode = sift::query::QueryModeV1::Auto;
     automatic.limit = 501;
     let error = client
         .query(&automatic)
@@ -554,7 +554,7 @@ async fn api_client_refuses_a_retry_delay_above_five_seconds() {
             .expect("serve fake Sift API");
     });
 
-    let client = sift::mcp::SiftApiClient::new(&endpoint, None, Duration::from_secs(20))
+    let client = sift::query::SiftApiClient::new(&endpoint, None, Duration::from_secs(20))
         .expect("build Sift API client");
     let request = retry_test_query();
     let result = tokio::time::timeout(Duration::from_millis(500), client.query(&request))
@@ -596,7 +596,7 @@ async fn api_client_retries_share_one_total_timeout() {
             .expect("serve fake Sift API");
     });
 
-    let client = sift::mcp::SiftApiClient::new(&endpoint, None, Duration::from_millis(250))
+    let client = sift::query::SiftApiClient::new(&endpoint, None, Duration::from_millis(250))
         .expect("build Sift API client");
     let started = Instant::now();
     let error = client
@@ -612,7 +612,7 @@ async fn api_client_retries_share_one_total_timeout() {
 
 #[tokio::test]
 async fn streamable_http_rejects_an_untrusted_browser_origin() {
-    let app = sift::mcp::http_router("http://127.0.0.1:7380").expect("build MCP HTTP router");
+    let app = sift::query::mcp_http_router("http://127.0.0.1:7380").expect("build MCP HTTP router");
     let request = Request::builder()
         .method("POST")
         .uri("/mcp")
@@ -631,7 +631,7 @@ async fn streamable_http_rejects_an_untrusted_browser_origin() {
 
 #[tokio::test]
 async fn streamable_http_accepts_a_configured_local_origin() {
-    let app = sift::mcp::http_router("http://127.0.0.1:7380").expect("build MCP HTTP router");
+    let app = sift::query::mcp_http_router("http://127.0.0.1:7380").expect("build MCP HTTP router");
     let request = Request::builder()
         .method("POST")
         .uri("/mcp")

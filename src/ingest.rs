@@ -15,4 +15,5 @@ pub mod otlp;
 pub use crate::ingest::{
     application::admission_controller::{AdmissionController, AdmissionPermit},
     domain::{admission_error::AdmissionError, ingest_limits::IngestLimits},
+    interfaces::remote_write::remote_write_consumer::{decode_remote_write, DecodedWrite},
 };

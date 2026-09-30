@@ -877,12 +877,6 @@ reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project c
 
 [[exceptions]]
 rule = "B1"
-paths = ["src/api.rs"]
-subject = "src/api"
-reason = "Compat facade: sift::api was a public module, and api.rs now only re-exports the query requests and responses, the filter expression and evaluator, and the query job types from the query context so the public path keeps compiling. P2: drop the facade once callers use the query context's paths."
-
-[[exceptions]]
-rule = "B1"
 paths = ["src/backup.rs"]
 subject = "src/backup"
 reason = "Compat facade: sift::backup was a public module, and backup.rs now only re-exports backup_journal, restore_journal and the live snapshot client functions from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
@@ -913,21 +907,9 @@ reason = "Compat facade: sift::grpc was a public module, and grpc.rs now only re
 
 [[exceptions]]
 rule = "B1"
-paths = ["src/mcp.rs"]
-subject = "src/mcp"
-reason = "Compat facade: sift::mcp was a public module, and mcp.rs now only re-exports SiftApiClient, http_router, serve_stdio and tool_names from the query context so the public path keeps compiling. P2: drop the facade once callers use the query context's paths."
-
-[[exceptions]]
-rule = "B1"
 paths = ["src/operator.rs"]
 subject = "src/operator"
 reason = "Compat facade: sift::operator was a public module, and operator.rs now only re-exports the Sift custom resource types and the operator's run from the operations context so the public path keeps compiling. P2: drop the facade once callers use the operations context's paths."
-
-[[exceptions]]
-rule = "B1"
-paths = ["src/prometheus.rs"]
-subject = "src/prometheus"
-reason = "Compat facade: sift::prometheus was a public module, and prometheus.rs now only re-exports PromQL and the query parameters from the query context, remote-write decoding from ingest, and the metrics_remote_write proto and PROMETHEUS_STALE_NAN_BITS so the public path keeps compiling. P2: drop the facade once callers use the query and ingest paths."
 
 [[exceptions]]
 rule = "B1"

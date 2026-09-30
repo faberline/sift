@@ -3,7 +3,6 @@
 //! second source of truth.
 
 pub mod access;
-pub mod api;
 mod app;
 mod archive;
 pub mod backup;
@@ -14,14 +13,12 @@ pub mod event;
 pub mod grpc;
 pub mod ingest;
 mod journal;
-pub mod mcp;
 mod node;
 mod operations;
 pub mod operator;
 pub mod projection;
-pub mod prometheus;
 pub mod proxy;
-mod query;
+pub mod query;
 mod shared_kernel;
 pub mod storage;
 

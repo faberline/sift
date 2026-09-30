@@ -15,9 +15,10 @@ fn emits_candidate_build_provenance_as_json() {
     assert_eq!(value["next"], "done");
 }
 
+use metrics_remote_write::proto::WriteRequest;
 use prost::Message as _;
 use prost14::Message as _;
-use sift::{ingest::otlp::wire::ExportLogsServiceRequest, prometheus::remote::WriteRequest};
+use sift::ingest::otlp::wire::ExportLogsServiceRequest;
 
 #[test]
 fn emits_valid_otlp_logs_protobuf_with_unique_event_ids() {

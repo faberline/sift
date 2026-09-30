@@ -110,7 +110,7 @@ them:
   `router`, `openapi` and the others listed in `src/lib.rs`.
 - Every old `pub mod` that is not itself a context became a **compatibility
   facade**: a file that holds only `pub use` lines pointing at the item's new
-  home. They are `src/{api,backup,deploy,durability,event,grpc,mcp,operator,prometheus,proxy,storage}.rs`,
+  home. They are `src/{backup,deploy,durability,event,grpc,operator,proxy,storage}.rs`,
   `src/storage/archive.rs`, and `src/ingest/{limits,otlp}.rs`.
 - `collector`, `ingest` and `projection` kept their names as contexts, so their
   module files serve as their own facades.
@@ -119,8 +119,16 @@ them:
 
 The facades do not follow the layer naming, so each has a B1 exception. P2
 deletes a facade once nothing imports it by its old path, and makes the
-context that owns its items public in its place: `sift::auth` is gone, and
-`sift::access::{SiftAuthConfig, SiftVerifier, auth_middleware}` replaces it.
+context that owns its items public in its place:
+
+- `sift::auth` became `sift::access::{SiftAuthConfig, SiftVerifier, auth_middleware}`.
+- `sift::api`, `sift::mcp` and the PromQL half of `sift::prometheus` became
+  `sift::query`. The MCP entry points are renamed there to `mcp_http_router`,
+  `serve_mcp_stdio` and `mcp_tool_names`.
+- `sift::prometheus::{decode_remote_write, DecodedWrite}` became
+  `sift::ingest::{decode_remote_write, DecodedWrite}`. Callers take the
+  remote-write wire types and `PROMETHEUS_STALE_NAN_BITS` from
+  `metrics_remote_write` directly.
 
 ## File size
 
