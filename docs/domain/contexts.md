@@ -76,7 +76,7 @@ to the projections and queries.
 
 | Layer | Holds |
 |-------|-------|
-| domain | `sift_command` (`SiftCommandV1`), `retention_fence`, `journal_head`, `segment_manifest`, `shard_route`, `idempotency_window`, `bloom_filter`, `dedupe_receipt`, `journal_state`, `recent_cursor`, `event_query`, `append_result`, `storage_config`, `raft_batch_limits` and the other limits and stats |
+| domain | `sift_command` (`SiftCommandV1`), `retention_fence`, `journal_head`, `segment_manifest`, `shard_route`, `idempotency_window`, `bloom_filter`, `dedupe_receipt`, `resident_window`, `recent_cursor`, `event_query`, `append_result`, `storage_config`, `raft_batch_limits` and the other limits and stats |
 | application | `recover_journal`, `append_durable_batch`, `commit_append_batch`, `dedupe_window`, `adopt_archive`, `apply_retention_expiration`, `restore_journal`, `query_events`, `checkpoint_identity` |
 | infrastructure | `raft/` (the Sift state machine, command codec, snapshots, checkpoints, membership policy), `storage/` (WAL, segments, dedupe index and shards, blob store, raw storage, journal head, local eviction), `durable_journal` (`DurableJournal`), `journal_projection_read_session`, `canonical_recovery_reader`, `snapshot_codec` |
 | interfaces | `peer_server` (the Raft peer server), `journal_metrics` |

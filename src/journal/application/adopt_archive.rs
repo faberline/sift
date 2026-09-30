@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use crate::journal::application::dedupe_window::append_unique_dedupe_page;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
 use crate::journal::domain::journal_limits::RECOVERY_PAGE_EVENTS;
-use crate::journal::domain::journal_state::JournalState;
+use crate::journal::domain::resident_window::ResidentWindow;
 use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::shared_kernel::event_content_digest::{decode_digest, xor_digest};
@@ -67,10 +67,10 @@ impl DurableJournal {
         } else {
             state.projection_generation
         };
-        let mut rebuilt = JournalState {
+        let mut rebuilt = ResidentWindow {
             projection_generation,
             retention_generation: receipt.manifest.retention_generation,
-            ..JournalState::default()
+            ..ResidentWindow::default()
         };
         let mut recovery =
             CanonicalRecoveryReader::open(&self.storage, &self.wal, watermarks, 0, false)?;

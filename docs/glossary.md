@@ -47,7 +47,7 @@ code.
 | **canonical WAL** | The per-signal framed write-ahead log, fsynced before acknowledgement. It is the only source of truth; every index can be rebuilt from it. |
 | **raw cursor** | The journal's monotonic append position. A checkpoint pairs it with the Raft applied index; both describe the same durable prefix. |
 | **journal head** | The persisted journal identity (last cursor, retained event count, projection generation, retention generation). It survives hot-segment eviction. |
-| **resident window** | The in-memory tail of recent stored events the journal keeps, 100,000 by default. The code calls it `JournalState`; P2 renames it. |
+| **resident window** | The in-memory tail of recent stored events the journal keeps, 100,000 by default. The code calls it `ResidentWindow`. |
 | **epoch map / virtual bucket** | An event id hashes to one of 4,096 virtual buckets (`VIRTUAL_BUCKETS`), and an epoch map assigns buckets to shards from an activation cursor on. |
 | **idempotency window** | Six hours (`IDEMPOTENCY_WINDOW_SECONDS`) of hourly acknowledgement generations, during which a repeated event id is a duplicate. |
 | **dedupe receipt** | What the journal keeps for each acknowledged event (project, event id, cursor, acknowledgement time) to detect duplicates. |

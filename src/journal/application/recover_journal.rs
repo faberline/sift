@@ -12,8 +12,8 @@ use metrics_prometheus::Counter;
 use crate::ingest::domain::governance_policy::GovernancePolicySet;
 use crate::journal::application::dedupe_window::rebuild_dedupe_index;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
-use crate::journal::domain::journal_state::JournalState;
 use crate::journal::domain::recent_cursor::{recent_cursor_at, RecentCursor};
+use crate::journal::domain::resident_window::ResidentWindow;
 use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::node::domain::storage_role::StorageRole;
@@ -58,7 +58,7 @@ impl DurableJournal {
         wal.compact_through(archived)?;
         let remote_retained =
             crate::archive::application::archive_status_queries::remote_retained_state(&data_dir)?;
-        let mut state = JournalState::default();
+        let mut state = ResidentWindow::default();
         let (dedupe, dedupe_stats) =
             crate::journal::infrastructure::storage::dedupe_index::DedupeIndex::open(&data_dir)?;
         let recovery_time = Utc::now();
@@ -180,7 +180,7 @@ impl DurableJournal {
     }
 
     pub(super) fn insert_recovered(
-        state: &mut JournalState,
+        state: &mut ResidentWindow,
         stored: StoredEvent,
         resident_limit: usize,
     ) -> Result<()> {
@@ -213,7 +213,7 @@ impl DurableJournal {
     }
 
     pub(super) fn push_resident(
-        state: &mut JournalState,
+        state: &mut ResidentWindow,
         stored: StoredEvent,
         resident_limit: usize,
     ) -> Result<()> {
