@@ -674,17 +674,12 @@ subject = "infrastructure->application"
 reason = "The commit-state, upload-intent, GC-pending and local-blob-GC stores persist or rebuild an ArchiveReceipt (record_archive_commit, adopt_verified_archive_receipt, the upload intent's recovery, archive_gc_pending_for_receipt, install_archive_gc_plan, local_blob_gc_pending_for_receipt), and §2.1 puts ArchiveReceipt in application with the other receipt DTOs; §2 wins over layer_deps here. P2: ArchiveReceipt moves to the archive domain as the committed-archive value the stores persist, and the application re-exports it with the other receipts."
 
 [[exceptions]]
-rule = "B3"
-paths = ["src/archive/interfaces/lifecycle_worker.rs"]
-subject = "interfaces->domain"
-reason = "start_lifecycle_worker paces the all-voter checkpoint with ALL_VOTER_CHECKPOINT_ATTEMPT and bounds each GC batch with ARCHIVE_GC_BATCH_OBJECTS, which §2 puts in the domain's lifecycle_settings; §2 wins over layer_deps here. P2: the tick moves into the application (run_lifecycle_tick, E9), which reads the settings, and the worker only schedules it."
-
-[[exceptions]]
 rule = "B4"
 paths = [
   "src/archive/application/archive_journal_local.rs",
   "src/archive/application/archive_journal_to_gcs.rs",
   "src/archive/application/archive_raw_storage_to_gcs.rs",
+  "src/archive/application/lifecycle_checkpoint.rs",
   "src/archive/application/prepare_retention_fence.rs",
   "src/archive/application/replay_recent_committed.rs",
   "src/archive/application/retention_due.rs",
@@ -694,7 +689,6 @@ paths = [
   "src/archive/application/upload_archive_snapshot.rs",
   "src/archive/infrastructure/dedupe_receipt_archive.rs",
   "src/archive/infrastructure/local_segment_commit_state.rs",
-  "src/archive/interfaces/lifecycle_worker.rs",
 ]
 subject = "journal.domain"
 reason = "The archive stores the journal's own records: the uploads and the local commit state read the journal's SegmentManifest, the dedupe-receipt archive and replay hold DedupeReceipt, expiration and retention_due keep IDEMPOTENCY_WINDOW_SECONDS of receipts, and the retention fence and the lifecycle build RetentionFenceV1 and propose SiftCommandV1 barriers; P1 moves them as-is. P2: the journal's application publishes the segment manifest, dedupe receipt, idempotency window, retention fence and the commands the archive proposes, or they become shared kernel as the journal-archive published language."
@@ -858,4 +852,11 @@ to = [
   "src/archive/application/retention_expiration.rs",
   "src/archive/application/retention_pass.rs",
   "src/archive/application/rewrite_retained_segment.rs",
+]
+
+[[renames]]
+from = "src/archive/interfaces/lifecycle_worker.rs"
+to = [
+  "src/archive/application/lifecycle_tick.rs",
+  "src/archive/application/lifecycle_checkpoint.rs",
 ]

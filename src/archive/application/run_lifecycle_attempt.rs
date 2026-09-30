@@ -1,10 +1,13 @@
 //! One lifecycle attempt: archive, checkpoint and collect, and what it
-//! committed.
+//! committed; and the context every lifecycle tick runs against.
+
+use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::node::infrastructure::local_capacity::LocalCapacity;
 
 pub(in crate::archive) struct LifecycleCommit {
     pub(in crate::archive) manifest_uri: Option<String>,
@@ -21,6 +24,18 @@ pub(in crate::archive) struct LifecycleOutcome {
     pub(in crate::archive) manifest_uri: Option<String>,
     pub(in crate::archive) manifest_sha256: Option<String>,
     pub(in crate::archive) retention_scan_pending: bool,
+}
+
+/// What every lifecycle tick runs against: the journal and its Raft state
+/// machine, the Raft host of a replicated store, the local capacity guard,
+/// and the remote archive destination, if there is one.
+pub(in crate::archive) struct LifecycleContext {
+    pub(in crate::archive) journal: Arc<DurableJournal>,
+    pub(in crate::archive) raft: Option<Arc<raft_runtime::RaftHost>>,
+    pub(in crate::archive) state_machine:
+        Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
+    pub(in crate::archive) local_capacity: Arc<LocalCapacity>,
+    pub(in crate::archive) destination: Option<String>,
 }
 
 pub(in crate::archive) fn run_lifecycle_attempt(

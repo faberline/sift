@@ -100,16 +100,14 @@ archive, and replays archived events to cold queries.
 | Layer | Holds |
 |-------|-------|
 | domain | `archive_manifest`, `portable_manifest`, `archive_manifest_validator`, `archive_catalog_item`, `event_set_digest`, `blob_hash_set`, `retention_policy`, `lifecycle_settings`, `archive_event_time` |
-| application | one module per use case: `archive_journal_local`, `archive_journal_to_gcs`, `upload_archive_snapshot`, `evict_cold_segments`, `retention_expiration`, `compact_journal`, `finalize_archive_gc`, `restore_into_empty`, `restore_gcs`, `run_lifecycle_attempt` and the rest |
+| application | one module per use case: `archive_journal_local`, `archive_journal_to_gcs`, `upload_archive_snapshot`, `evict_cold_segments`, `retention_expiration`, `compact_journal`, `finalize_archive_gc`, `restore_into_empty`, `restore_gcs`, `run_lifecycle_attempt`, `lifecycle_tick`, `lifecycle_checkpoint` and the rest |
 | infrastructure | `archive_catalog`, `spill_catalog`, `archive_upload_intent`, `gc_plan_builder`, `parquet_event_codec`, `archive_segment_cache`, `verified_manifest_fetcher`, `gcs_uri`, `ephemeral_file_object_store`, the local GC and commit-state stores |
-| interfaces | `archive_worker`, `lifecycle_worker` |
+| interfaces | `archive_worker` |
 
 - **Depends on:** journal, node.
 - **Exceptions:** `anyhow`, `storage_segment::CatalogRoot` and `service_backup`
   in the manifest (B2, E14); layer breaks in the lifecycle units of work (B3);
   and its uses of the journal's domain and `DurableJournal` (B4).
-- **File size:** `lifecycle_worker.rs` (458 lines) holds one function that P2
-  splits (E9); until then it is a C1 warning.
 
 ## projection
 
