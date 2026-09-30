@@ -18,7 +18,7 @@ fn emits_candidate_build_provenance_as_json() {
 use metrics_remote_write::proto::WriteRequest;
 use prost::Message as _;
 use prost14::Message as _;
-use sift::ingest::otlp::wire::ExportLogsServiceRequest;
+use transport_otlp::proto::ExportLogsServiceRequest;
 
 #[test]
 fn emits_valid_otlp_logs_protobuf_with_unique_event_ids() {
@@ -56,9 +56,7 @@ fn emits_valid_otlp_logs_protobuf_with_unique_event_ids() {
                 .and_then(|attribute| attribute.value.as_ref())
                 .and_then(|value| value.value.as_ref())
                 .map(|value| match value {
-                    sift::ingest::otlp::wire::any_value::Value::StringValue(value) => {
-                        value.as_str()
-                    }
+                    transport_otlp::proto::any_value::Value::StringValue(value) => value.as_str(),
                     _ => panic!("event id must be a string"),
                 })
                 .expect("event id attribute")

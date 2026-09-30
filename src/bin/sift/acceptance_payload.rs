@@ -40,7 +40,7 @@ pub(super) fn acceptance_payload(args: AcceptancePayloadArgs) -> Result<()> {
     }
     let bytes = match args.kind {
         AcceptancePayloadKind::OtlpLogsProtobuf => {
-            use sift::ingest::otlp::wire::{
+            use transport_otlp::proto::{
                 any_value, AnyValue, ExportLogsServiceRequest, KeyValue, LogRecord, Resource,
                 ResourceLogs, ScopeLogs,
             };

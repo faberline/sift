@@ -1,7 +1,7 @@
 # ADR 0001: DDD layout for Sift
 
 - **Status:** Accepted. P1 done on `refactor/ddd-p1`; each P2 item is approved
-  on its own.
+  on its own. The first P2 batch is [ADR 0002](0002-ddd-p2.md).
 - **Date:** 2026-09-29
 - **Applies to:** everything under `src/`, and the `docs/` layout.
   `external-contracts/` and `ec.lock` are out of scope.
@@ -22,6 +22,10 @@ Sift's public paths are used by its own integration tests and by other repos,
 and its persisted bytes (WAL, segments, Raft snapshots, archive manifests,
 digests) must not change. A layout change could not move a public path or a
 byte.
+
+> **Correction, 2026-09-30:** no other repo imports Sift by a module path.
+> Only Sift's own binary and tests do, so P2 deleted the compatibility
+> facades and moved those callers. See [ADR 0002](0002-ddd-p2.md).
 
 ## Decision
 

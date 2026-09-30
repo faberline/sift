@@ -52,9 +52,6 @@ fn group_commit_is_owned_by_service_executor() {
 
 #[test]
 fn ingest_admission_mechanics_are_owned_by_service_http() {
-    let limits =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ingest/limits.rs"))
-            .expect("read Sift ingest limits");
     let controller = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/ingest/application/admission_controller.rs"
@@ -80,7 +77,7 @@ fn ingest_admission_mechanics_are_owned_by_service_http() {
         "/src/ingest/domain/admission_error.rs"
     ))
     .expect("read Sift ingest admission error");
-    let source = limits + &controller + &decoder + &limit_values + &limits_env + &error;
+    let source = controller + &decoder + &limit_values + &limits_env + &error;
 
     assert!(
         source.contains("service_http::WeightedAdmission"),
@@ -396,9 +393,11 @@ fn typed_projection_flow_is_owned_by_service_projection() {
 fn otlp_wire_and_direct_grpc_runtime_are_owned_by_transport_otlp() {
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
         .expect("read Sift manifest");
-    let normalizer =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ingest/otlp.rs"))
-            .expect("read Sift OTLP adapter");
+    let decoder = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/interfaces/otlp/proto_logs_decoder.rs"
+    ))
+    .expect("read Sift OTLP protobuf decoder");
     let grpc_proxy = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/operations/interfaces/grpc/otlp_proxy.rs"
@@ -412,7 +411,7 @@ fn otlp_wire_and_direct_grpc_runtime_are_owned_by_transport_otlp() {
     let grpc = grpc_proxy + &grpc_server;
 
     assert!(manifest.contains("transport-otlp ="));
-    assert!(normalizer.contains("pub use transport_otlp::proto as wire"));
+    assert!(decoder.contains("use transport_otlp::{proto as wire"));
     assert!(grpc.contains("transport_otlp::serve_grpc"));
     assert!(grpc.contains("impl transport_otlp::OtlpConsumer for SiftGrpcConsumer"));
     assert!(!std::path::Path::new(concat!(

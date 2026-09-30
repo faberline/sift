@@ -416,18 +416,6 @@ interfaces = "src/ingest/interfaces"
 # reason says.
 
 [[exceptions]]
-rule = "B1"
-paths = ["src/ingest/limits.rs"]
-subject = "src/ingest/limits"
-reason = "Compat facade: sift::ingest::limits was a public module, and limits.rs now only re-exports AdmissionController, AdmissionPermit, AdmissionError and IngestLimits from their layers so the public path keeps compiling. P2: drop the facade; the ingest root already re-exports all four."
-
-[[exceptions]]
-rule = "B1"
-paths = ["src/ingest/otlp.rs"]
-subject = "src/ingest/otlp"
-reason = "Compat facade: sift::ingest::otlp was a public module, and otlp.rs now only re-exports the OTLP codec from interfaces/otlp/otlp_codec.rs and transport_otlp's proto (as wire), OtlpMediaType and OtlpSignal; the bin's acceptance payloads and tests/it/acceptance_payload_cli.rs still name sift::ingest::otlp::wire. P2: those callers use transport_otlp::proto directly and the facade goes."
-
-[[exceptions]]
 rule = "B2"
 paths = [
   "src/ingest/domain/governance_policy.rs",

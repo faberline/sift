@@ -145,10 +145,9 @@ group-commit queue to the journal.
 | interfaces | `http/` (OTLP handlers, remote write, request-body decoding), `grpc/otlp_grpc_server`, `otlp/` (the JSON and protobuf decoders), `remote_write/` |
 
 - **Depends on:** journal, access.
-- **Exceptions:** the compatibility facades `ingest::{limits,otlp}`
-  (B1); `anyhow` and `axum` in `admission_error` (B2); layer breaks in the
-  append path and handlers (B3); and sizing batches by the journal's Raft
-  limits (B4).
+- **Exceptions:** `anyhow` and `axum` in `admission_error` (B2); layer
+  breaks in the append path and handlers (B3); and sizing batches by the
+  journal's Raft limits (B4).
 
 ## operations
 

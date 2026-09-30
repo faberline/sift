@@ -5,12 +5,13 @@ cut into bounded contexts, and each context into layers. This page says what
 the contexts are, what may depend on what, and which rule breaks are allowed
 and why. The machine-checked form of everything here is
 [`ddd.toml`](../ddd.toml); the decisions behind it are in
-[ADR 0001](adr/0001-ddd-layout.md).
+[ADR 0001](adr/0001-ddd-layout.md) and [ADR 0002](adr/0002-ddd-p2.md).
 
 > **Migration status.** The layout below was applied in phase P1 on the
 > `refactor/ddd-p1` branch, which moved and split files without changing
 > behaviour, public paths or persisted bytes. Phase P2 removes the exceptions
-> that have a planned fix. See [Phases](#phases).
+> that have a planned fix; [ADR 0002](adr/0002-ddd-p2.md) records its first
+> batch. See [Phases](#phases).
 
 ## Context map
 
@@ -46,7 +47,6 @@ and context rules do not apply to it.
 | `src/lib.rs` | `mod` and `pub mod` declarations and `pub use` re-exports, nothing else. |
 | `src/app/` | The assembly root, declared under `[assembly] modules`: `ServiceState`, the readiness and metrics hooks `service_http` reads, the HTTP router, `ApiError`, and the OpenAPI document. |
 | `src/bin/sift/` | The binary. `main.rs` holds only `mod`, `use`, `fn main` and its test module; each subcommand lives in its own module beside it, so clap never becomes library API. |
-| compatibility facades | The old public module paths; see [Public API](#public-api-and-compatibility-facades). |
 
 ## Layers and dependency direction
 
@@ -100,44 +100,60 @@ schemas on the published event and the projection records (E1), and
 core-crate types that are part of a domain signature (E14). ADR 0001 lists
 them.
 
-## Public API and compatibility facades
+## Public API
 
-Tests and other repos import Sift by module paths such as
-`sift::storage::archive::…` or `sift::durability::…`. P1 kept every one of
-them:
+Sift's module paths are used by its own binary and integration tests. No
+other repo imports Sift by a module path. P1 kept every path from before the
+split working through compatibility facades. A facade was a file that only
+re-exported items from their new home. P2 deleted the facades and moved
+their callers.
 
-- Every `pub use` at the crate root stays: `ServiceState`, `DurableJournal`,
-  `router`, `openapi` and the others listed in `src/lib.rs`.
-- Every old `pub mod` that is not itself a context became a **compatibility
-  facade**: a file that holds only `pub use` lines pointing at the item's new
-  home. They are `src/ingest/{limits,otlp}.rs`.
-- `collector`, `ingest` and `projection` kept their names as contexts, so their
-  module files serve as their own facades.
-- The binary's name, subcommands, flags, environment variables and output are
-  unchanged.
+The rules now:
 
-The facades do not follow the layer naming, so each has a B1 exception. P2
-deletes a facade once nothing imports it by its old path, and makes the
-context that owns its items public in its place:
+- **The crate root.** It re-exports the assembly and the event model:
+  `ServiceState`, `DurableJournal`, `router`, `openapi`, `OperationalEventV2`
+  and the others listed in `src/lib.rs`.
+- **Contexts.** Every context is a `pub mod`. Its module file,
+  `src/<context>.rs`, re-exports the context's public items, so a caller
+  writes `sift::<context>::Item`.
+  - The layers stay `pub(crate)`, so `sift::<context>::<layer>::…` is not a
+    public path.
+  - `shared_kernel` stays private. The crate root re-exports its public
+    items.
+- **Prefixed names.** A name that would not say what it is at the context
+  root gets a prefix when it is re-exported, such as `run_operator` or
+  `decode_otlp`.
+- **Protobuf types.** The OTLP and remote-write protobuf types are not
+  re-exported. Callers take them from `transport_otlp::proto` and
+  `metrics_remote_write::proto`.
+- **Imports inside the crate.** Code inside the crate imports an item from
+  the module that defines it, not from a context root.
+- **The binary.** Its name, subcommands, flags, environment variables and
+  output did not change.
 
-- `sift::auth` became `sift::access::{SiftAuthConfig, SiftVerifier, auth_middleware}`.
-- `sift::api`, `sift::mcp` and the PromQL half of `sift::prometheus` became
-  `sift::query`. The MCP entry points are renamed there to `mcp_http_router`,
-  `serve_mcp_stdio` and `mcp_tool_names`.
-- `sift::prometheus::{decode_remote_write, DecodedWrite}` became
-  `sift::ingest::{decode_remote_write, DecodedWrite}`. Callers take the
-  remote-write wire types and `PROMETHEUS_STALE_NAN_BITS` from
-  `metrics_remote_write` directly.
-- `sift::{backup,deploy,proxy}` and `sift::operator` became
-  `sift::operations`, with the operator loop renamed to `run_operator`.
-  `sift::grpc::serve_proxy` became `sift::operations::serve_otlp_grpc_proxy`,
-  and `sift::grpc::serve` became `sift::ingest::serve_otlp_grpc`.
-- `sift::durability` and the journal half of `sift::storage` became
-  `sift::journal`. The node half (`StorageRole`, `DEFAULT_DATA_DIR`,
-  `DataLayout`, `LayoutManifest` and the local capacity types) became
-  `sift::node`, and `sift::storage::archive` became `sift::archive`.
-- `sift::event` is gone. The crate root already re-exported every item it
-  held, so `sift::X` replaces `sift::event::X`.
+What replaced each facade path:
+
+| Old path | New path |
+|----------|----------|
+| `sift::auth::*` | `sift::access::*` |
+| `sift::api::*` | `sift::query::*` |
+| `sift::mcp::SiftApiClient` | `sift::query::SiftApiClient` |
+| `sift::mcp::{http_router, serve_stdio, tool_names}` | `sift::query::{mcp_http_router, serve_mcp_stdio, mcp_tool_names}` |
+| `sift::prometheus::{parse_promql, ParsedPromQuery, PromFunction, nanos_rfc3339, parse_prom_duration_nanos, parse_prom_time_nanos, InstantQueryParams, RangeQueryParams}` | `sift::query::*` |
+| `sift::prometheus::{decode_remote_write, DecodedWrite}` | `sift::ingest::*` |
+| `sift::prometheus::{remote, PROMETHEUS_STALE_NAN_BITS}` | `metrics_remote_write::{proto, PROMETHEUS_STALE_NAN_BITS}` |
+| `sift::{backup, deploy, proxy}::*` and `sift::operator::*` | `sift::operations::*` |
+| `sift::operator::run` | `sift::operations::run_operator` |
+| `sift::grpc::serve_proxy` | `sift::operations::serve_otlp_grpc_proxy` |
+| `sift::grpc::serve` | `sift::ingest::serve_otlp_grpc` |
+| `sift::durability::*`, and the journal items of `sift::storage` | `sift::journal::*` |
+| The node items of `sift::storage`: `StorageRole`, `DEFAULT_DATA_DIR`, `DataLayout`, `LayoutManifest` and the capacity types | `sift::node::*` |
+| `sift::storage::archive::*` | `sift::archive::*` |
+| `sift::event::*` | `sift::*` |
+| `sift::ingest::limits::*` | `sift::ingest::*` |
+| `sift::ingest::otlp::{decode, encode_response, normalize_payload}` | `sift::ingest::{decode_otlp, encode_otlp_response, normalize_otlp_payload}` |
+| `sift::ingest::otlp::{DecodedOtlp, EncodedOtlpResponse, OtlpItemError, OtlpMediaType, OtlpSignal}` | `sift::ingest::*` |
+| `sift::ingest::otlp::wire` | `transport_otlp::proto` |
 
 ## File size
 
@@ -162,7 +178,6 @@ Each reason says what P2 does about it; a B3 reason names the types involved.
 
 | Category | Rule | Examples | Fate |
 |----------|------|----------|------|
-| Compatibility facade | B1 | the old top-level modules and `ingest::{limits,otlp}` | P2 deletes the facade. |
 | Domain uses a non-allowlisted crate | B2 | `anyhow` (E6), `utoipa` on the published event, the projection records and `AppendResult` (E1), `clap::ValueEnum` on `SignalKind`, core types such as `storage_segment::CatalogRoot` (E14), `axum` and `service_auth` in access's route roles | P2 converts to thiserror with the same text, or approves the crate as part of the model. |
 | Domain reads the clock | B2 | `Utc::now` in the event constructors, `query_time.rs` and `sift_command.rs` (E7) | P2 adds `*_at(now)` forms and a `Clock` port. |
 | Same-context layer direction | B3 | the collector runtime building its source and client, the operator's renderers reading the CRD types | P2 moves the wiring to the assembly root or splits the type. |
@@ -193,4 +208,5 @@ without `--strict`.
   thiserror errors (E6), the `Clock` port (E7), the two extract-function splits
   (E9), the journal–archive ports, removing the compatibility facades,
   `ServiceState` accessors in place of its `pub(crate)` fields, and the dead
-  and duplicate code list (X1–X10).
+  and duplicate code list (X1–X10). [ADR 0002](adr/0002-ddd-p2.md) records
+  the first batch.

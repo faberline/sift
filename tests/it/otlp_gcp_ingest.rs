@@ -10,17 +10,15 @@ use prost14::Message;
 use service_auth::{Role, TokenClaims};
 use sift::{
     access::{SiftAuthConfig, SiftVerifier},
-    ingest::{
-        otlp::wire::{
-            any_value, AnyValue, ExportLogsServiceRequest, ExportTraceServiceRequest, KeyValue,
-            LogRecord, Resource, ResourceLogs, ResourceSpans, ScopeLogs, ScopeSpans, Span,
-        },
-        IngestLimits,
-    },
+    ingest::IngestLimits,
     projection::PROJECTION_TRACE_STORE,
     protected_router, router, AttributeValue, ServiceState, SignalKind,
 };
 use tower::ServiceExt;
+use transport_otlp::proto::{
+    any_value, AnyValue, ExportLogsServiceRequest, ExportTraceServiceRequest, KeyValue, LogRecord,
+    Resource, ResourceLogs, ResourceSpans, ScopeLogs, ScopeSpans, Span,
+};
 
 fn log_fixture(message: &str) -> serde_json::Value {
     serde_json::json!({

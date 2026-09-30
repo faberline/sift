@@ -15,7 +15,7 @@ code.
 | **published language** | The types and functions a context offers to other contexts: its application layer, or its whole public API when it has none. |
 | **shared kernel** | `src/shared_kernel/`: the event model and the digests and ids every context shares, usable without declaring a dependency. |
 | **assembly** | Code that wires contexts together and belongs to none: `src/lib.rs`, `src/app/` and `src/bin/sift/`. |
-| **compat facade** | A module that only re-exports items from their new home, so a public path from before the DDD split keeps compiling. |
+| **compat facade** | A module that only re-exported items from their new home, so a public path from before the DDD split kept compiling. P1 added them and P2 deleted them; see [architecture](architecture.md#public-api). |
 | **exception** | A recorded rule break in `ddd.toml`, with the exact files and a reason that says what P2 does. |
 | **P1 / P2** | The two phases of the DDD split: P1 moves and splits files without changing behaviour; P2 makes each approved change. See [ADR 0001](adr/0001-ddd-layout.md). |
 
