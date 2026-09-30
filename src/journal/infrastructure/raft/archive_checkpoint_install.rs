@@ -3,8 +3,9 @@
 use anyhow::{bail, Context, Result};
 
 use crate::journal::infrastructure::durable_journal::DurableJournal;
-use crate::journal::infrastructure::raft::archive_checkpoint::ArchiveCheckpointV1;
-use crate::shared_kernel::sha256_hex::sha256_hex;
+use crate::journal::infrastructure::raft::archive_checkpoint::{
+    fetch_checkpoint_manifest, ArchiveCheckpointV1,
+};
 
 pub(super) struct ValidatedArchiveStage {
     pub(super) checkpoint: ArchiveCheckpointV1,
@@ -23,23 +24,11 @@ pub(super) fn validate_archive_checkpoint_install(
     journal: &DurableJournal,
     checkpoint: &ArchiveCheckpointV1,
 ) -> Result<Option<ValidatedArchiveStage>> {
-    let manifest_bytes = service_backup::fetch_backup_object(&checkpoint.manifest_uri)
-        .context("fetch Sift archive checkpoint manifest during validation")?;
-    let actual_hash = sha256_hex(&manifest_bytes);
-    if actual_hash != checkpoint.manifest_sha256 {
-        bail!("Sift archive checkpoint manifest failed its SHA-256 check");
-    }
-    let manifest: crate::archive::domain::archive_manifest::ArchiveManifest =
-        serde_json::from_slice(&manifest_bytes)
-            .context("decode Sift archive checkpoint manifest during validation")?;
-    crate::archive::domain::archive_manifest_validator::validate_archive_manifest(&manifest)?;
-    if manifest.raft_snapshot_index != checkpoint.archive_snapshot_index
-        || manifest.watermarks != checkpoint.watermarks
-        || manifest.raft_snapshot_index != checkpoint.raw_cursor
-        || manifest.retention_generation != checkpoint.retention_generation
-    {
-        bail!("Sift archive checkpoint is not covered by its manifest");
-    }
+    let manifest = fetch_checkpoint_manifest(
+        checkpoint,
+        "fetch Sift archive checkpoint manifest during validation",
+        "decode Sift archive checkpoint manifest during validation",
+    )?;
     if archive_checkpoint_install_mode(journal, checkpoint, &manifest)?
         == ArchiveCheckpointInstallMode::FullRestore
     {
