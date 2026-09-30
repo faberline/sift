@@ -132,16 +132,6 @@ reason = "OperationalEventV2, its parts and StoredEvent derive ToSchema because 
 
 [[exceptions]]
 rule = "B2"
-paths = [
-  "src/shared_kernel/event.rs",
-  "src/shared_kernel/event_content_digest.rs",
-  "src/shared_kernel/single_signal_batch.rs",
-]
-subject = "anyhow"
-reason = "Event validation, digest decode and the single-signal check return anyhow errors whose text reaches HTTP 400 bodies and that tests match by substring, so converting them is not a move (E6). P2: a kernel error type (thiserror) with the same Display text, which the callers convert."
-
-[[exceptions]]
-rule = "B2"
 paths = ["src/shared_kernel/event.rs"]
 subject = "clap"
 reason = "SignalKind derives clap::ValueEnum so the CLI's --signal flags parse straight into it; the mapping keeps the derive (Q9). P2: approve it individually, or give the bin its own ValueEnum that maps onto SignalKind if the kernel must drop clap."

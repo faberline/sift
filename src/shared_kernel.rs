@@ -7,6 +7,7 @@ pub(crate) mod archive_watermarks;
 pub(crate) mod cloud_logging_event_id;
 pub(crate) mod event;
 pub(crate) mod event_content_digest;
+pub(crate) mod event_error;
 pub(crate) mod retention_boundary;
 pub(crate) mod single_signal_batch;
 pub(crate) mod stored_event;

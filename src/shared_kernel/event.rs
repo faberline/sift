@@ -4,12 +4,13 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
-use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
+
+use crate::shared_kernel::event_error::EventError;
 
 pub const EVENT_SCHEMA_VERSION: u16 = 2;
 
@@ -75,10 +76,10 @@ impl AttributeValue {
         }
     }
 
-    fn validate(&self) -> Result<()> {
+    fn validate(&self) -> Result<(), EventError> {
         match self {
             Self::Double(value) if !value.is_finite() => {
-                bail!("attribute double values must be finite")
+                return Err(EventError::NonFiniteAttributeDouble);
             }
             Self::Array(values) => {
                 for value in values {
@@ -88,7 +89,7 @@ impl AttributeValue {
             Self::Map(values) => {
                 for (key, value) in values {
                     if key.trim().is_empty() {
-                        bail!("attribute map keys must not be empty");
+                        return Err(EventError::EmptyAttributeMapKey);
                     }
                     value.validate()?;
                 }
@@ -241,13 +242,9 @@ impl OperationalEventV2 {
         }
     }
 
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<(), EventError> {
         if self.schema_version != EVENT_SCHEMA_VERSION {
-            bail!(
-                "unsupported schema_version {}; expected {}",
-                self.schema_version,
-                EVENT_SCHEMA_VERSION
-            );
+            return Err(EventError::UnsupportedSchemaVersion(self.schema_version));
         }
         for (name, value) in [
             ("schema_url", self.schema_url.as_str()),
@@ -258,20 +255,22 @@ impl OperationalEventV2 {
             ("observed_at", self.observed_at.as_str()),
         ] {
             if value.trim().is_empty() {
-                bail!("{name} must not be empty");
+                return Err(EventError::EmptyField(name));
             }
         }
-        DateTime::parse_from_rfc3339(&self.occurred_at).context("occurred_at must be RFC3339")?;
-        DateTime::parse_from_rfc3339(&self.observed_at).context("observed_at must be RFC3339")?;
+        DateTime::parse_from_rfc3339(&self.occurred_at)
+            .map_err(EventError::OccurredAtNotRfc3339)?;
+        DateTime::parse_from_rfc3339(&self.observed_at)
+            .map_err(EventError::ObservedAtNotRfc3339)?;
         if self.resource.is_empty() {
-            bail!("resource must contain at least one stable identity field");
+            return Err(EventError::EmptyResource);
         }
         if self.payload.is_null() {
-            bail!("payload must not be null");
+            return Err(EventError::NullPayload);
         }
         if let Some(scope) = &self.instrumentation_scope {
             if scope.name.trim().is_empty() {
-                bail!("instrumentation_scope.name must not be empty");
+                return Err(EventError::EmptyScopeName);
             }
             for value in scope.attributes.values() {
                 value.validate()?;
@@ -279,14 +278,14 @@ impl OperationalEventV2 {
         }
         for (key, value) in &self.attributes {
             if key.trim().is_empty() {
-                bail!("attribute keys must not be empty");
+                return Err(EventError::EmptyAttributeKey);
             }
             value.validate()?;
         }
         match (self.signal, &self.metric) {
             (SignalKind::Metric, Some(metric)) => validate_metric(metric)?,
-            (SignalKind::Metric, None) => bail!("metric signals require a direct metric point"),
-            (_, Some(_)) => bail!("only metric signals may contain a metric point"),
+            (SignalKind::Metric, None) => return Err(EventError::MissingMetricPoint),
+            (_, Some(_)) => return Err(EventError::UnexpectedMetricPoint),
             (_, None) => {}
         }
         let mut blob_hashes = HashSet::new();
@@ -294,37 +293,37 @@ impl OperationalEventV2 {
             let digest = blob
                 .hash
                 .strip_prefix("sha256:")
-                .context("blob hash must use the sha256:<hex> form")?;
+                .ok_or(EventError::BlobHashForm)?;
             if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                bail!("blob hash must contain a 64-character SHA-256 digest");
+                return Err(EventError::BlobHashDigest);
             }
             if blob.size == 0 {
-                bail!("blob size must be greater than zero");
+                return Err(EventError::EmptyBlob);
             }
             if blob.encoding.trim().is_empty() {
-                bail!("blob encoding must not be empty");
+                return Err(EventError::EmptyBlobEncoding);
             }
             if !blob_hashes.insert(blob.hash.as_str()) {
-                bail!("blob references must not contain duplicate hashes");
+                return Err(EventError::DuplicateBlobHash);
             }
         }
         Ok(())
     }
 }
 
-fn validate_metric(metric: &MetricPoint) -> Result<()> {
+fn validate_metric(metric: &MetricPoint) -> Result<(), EventError> {
     if metric.name.trim().is_empty() || !metric.value.is_finite() {
-        bail!("metric name must be non-empty and value must be finite");
+        return Err(EventError::InvalidMetricPoint);
     }
     if metric.stale && metric.value != 0.0 {
-        bail!("stale metric points must use a zero storage value");
+        return Err(EventError::NonZeroStaleMetric);
     }
     for exemplar in &metric.exemplars {
         if !exemplar.value.is_finite()
             || exemplar.trace_id.trim().is_empty()
             || exemplar.span_id.trim().is_empty()
         {
-            bail!("metric exemplars require finite value, trace_id, and span_id");
+            return Err(EventError::InvalidMetricExemplar);
         }
     }
     Ok(())
@@ -357,20 +356,20 @@ impl<'de> Deserialize<'de> for IncomingEvent {
     }
 }
 
-pub fn decode_event_json(bytes: &[u8]) -> Result<OperationalEventV2> {
+pub fn decode_event_json(bytes: &[u8]) -> Result<OperationalEventV2, EventError> {
     serde_json::from_slice::<IncomingEvent>(bytes)
         .map(IncomingEvent::into_inner)
-        .map_err(|error| anyhow::anyhow!("decode operational event: {error}"))
+        .map_err(EventError::Decode)
 }
 
-fn decode_event_value(value: Value) -> Result<OperationalEventV2> {
+fn decode_event_value(value: Value) -> Result<OperationalEventV2, EventError> {
     let version = value
         .get("schema_version")
         .and_then(Value::as_u64)
-        .context("operational event requires integer schema_version")?;
-    let version = u16::try_from(version).context("schema_version exceeds u16")?;
+        .ok_or(EventError::MissingSchemaVersion)?;
+    let version = u16::try_from(version).map_err(EventError::SchemaVersionTooLarge)?;
     if version != EVENT_SCHEMA_VERSION {
-        bail!("unsupported schema_version {version}");
+        return Err(EventError::UnsupportedDecodedSchemaVersion(version));
     }
     let event = serde_json::from_value::<OperationalEventV2>(value)?;
     event.validate()?;

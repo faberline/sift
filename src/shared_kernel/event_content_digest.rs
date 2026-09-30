@@ -1,7 +1,7 @@
 //! The event-content digest: the XOR of each event's SHA-256, so a prefix's
 //! digest and its suffix's combine without rereading either.
 
-use anyhow::{Context, Result};
+use thiserror::Error;
 
 pub(crate) fn xor_digest(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     let mut combined = left;
@@ -11,9 +11,17 @@ pub(crate) fn xor_digest(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     combined
 }
 
-pub(crate) fn decode_digest(value: &str) -> Result<[u8; 32]> {
+#[derive(Debug, Error)]
+pub(crate) enum DigestError {
+    #[error("decode Sift SHA-256 digest")]
+    Hex(#[source] hex::FromHexError),
+    #[error("Sift SHA-256 digest must be 32 bytes")]
+    Length,
+}
+
+pub(crate) fn decode_digest(value: &str) -> Result<[u8; 32], DigestError> {
     hex::decode(value)
-        .context("decode Sift SHA-256 digest")?
+        .map_err(DigestError::Hex)?
         .try_into()
-        .map_err(|_| anyhow::anyhow!("Sift SHA-256 digest must be 32 bytes"))
+        .map_err(|_| DigestError::Length)
 }

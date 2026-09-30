@@ -36,4 +36,5 @@ pub use crate::shared_kernel::event::{
     InstrumentationScope, MetricExemplar, MetricPoint, MetricTemporality, OperationalEventV2,
     SignalKind, EVENT_SCHEMA_URL, EVENT_SCHEMA_VERSION,
 };
+pub use crate::shared_kernel::event_error::EventError;
 pub use crate::shared_kernel::stored_event::StoredEvent;

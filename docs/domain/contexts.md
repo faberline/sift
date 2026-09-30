@@ -14,10 +14,12 @@ the journal, the archive and the queries agree on. It has no layers and uses no
 context.
 
 - **Modules:** `event` (`OperationalEventV2`, `EventEnvelope`, `IncomingEvent`,
-  `decode_event_json`, `SignalKind`), `stored_event`, `event_content_digest`,
-  `single_signal_batch`, `archive_watermarks`, `retention_boundary`,
-  `cloud_logging_event_id`.
-- **Exceptions:** `utoipa` on the event and `StoredEvent` (E1), `anyhow` (E6),
+  `decode_event_json`, `SignalKind`), `event_error` (`EventError`),
+  `stored_event`, `event_content_digest`, `single_signal_batch`,
+  `archive_watermarks`, `retention_boundary`, `cloud_logging_event_id`.
+- **Errors:** thiserror types: `EventError` for event validation and decode,
+  `DigestError` and `SingleSignalError`.
+- **Exceptions:** `utoipa` on the event and `StoredEvent` (E1),
   `clap::ValueEnum` on `SignalKind`, and `Utc::now` in the event constructors
   (E7).
 
