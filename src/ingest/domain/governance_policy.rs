@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::event::{AttributeValue, OperationalEventV2};
+use crate::shared_kernel::event::{AttributeValue, OperationalEventV2};
 
 const DEFAULT_MAX_STRING_BYTES: usize = 4_096;
 

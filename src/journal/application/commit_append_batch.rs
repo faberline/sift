@@ -6,11 +6,11 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
-use crate::event::EventEnvelope;
 use crate::ingest::domain::storage_reservation::storage_reservation;
 use crate::journal::domain::append_result::AppendResult;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::node::infrastructure::local_capacity::LocalCapacity;
+use crate::shared_kernel::event::EventEnvelope;
 
 #[derive(Clone)]
 pub(crate) struct CommitContext {

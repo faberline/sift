@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-use crate::event::SignalKind;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::shared_kernel::event::SignalKind;
 
 impl DurableJournal {
     /// Seal one globally consistent archive prefix.

@@ -110,7 +110,7 @@ them:
   `router`, `openapi` and the others listed in `src/lib.rs`.
 - Every old `pub mod` that is not itself a context became a **compatibility
   facade**: a file that holds only `pub use` lines pointing at the item's new
-  home. They are `src/event.rs` and `src/ingest/{limits,otlp}.rs`.
+  home. They are `src/ingest/{limits,otlp}.rs`.
 - `collector`, `ingest` and `projection` kept their names as contexts, so their
   module files serve as their own facades.
 - The binary's name, subcommands, flags, environment variables and output are
@@ -136,6 +136,8 @@ context that owns its items public in its place:
   `sift::journal`. The node half (`StorageRole`, `DEFAULT_DATA_DIR`,
   `DataLayout`, `LayoutManifest` and the local capacity types) became
   `sift::node`, and `sift::storage::archive` became `sift::archive`.
+- `sift::event` is gone. The crate root already re-exported every item it
+  held, so `sift::X` replaces `sift::event::X`.
 
 ## File size
 

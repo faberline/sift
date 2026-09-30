@@ -8,12 +8,12 @@ use std::sync::{Mutex, RwLock};
 use anyhow::{bail, Result};
 use metrics_prometheus::Counter;
 
-use crate::event::EventEnvelope;
 use crate::ingest::domain::governance_policy::GovernancePolicySet;
 use crate::journal::domain::journal_limits::DEFAULT_RESIDENT_JOURNAL_EVENTS;
 use crate::journal::domain::journal_state::JournalState;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::data_layout::DataLayout;
+use crate::shared_kernel::event::EventEnvelope;
 
 /// Append-only JSONL journal. State is updated only after `sync_data` succeeds,
 /// making a successful [`append`](Self::append) acknowledgement durable.

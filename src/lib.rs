@@ -6,7 +6,6 @@ pub mod access;
 mod app;
 pub mod archive;
 pub mod collector;
-pub mod event;
 pub mod ingest;
 pub mod journal;
 pub mod node;
@@ -32,9 +31,9 @@ pub use crate::operations::interfaces::http::integrity_report_v1::{
 };
 pub use crate::projection::interfaces::projection_worker::ProjectionWorker;
 pub use crate::query::interfaces::http::query_role_router::query_role_router;
-pub use crate::shared_kernel::stored_event::StoredEvent;
-pub use event::{
+pub use crate::shared_kernel::event::{
     decode_event_json, AttributeValue, ContentBlobRef, EventEnvelope, IncomingEvent,
     InstrumentationScope, MetricExemplar, MetricPoint, MetricTemporality, OperationalEventV2,
     SignalKind, EVENT_SCHEMA_URL, EVENT_SCHEMA_VERSION,
 };
+pub use crate::shared_kernel::stored_event::StoredEvent;

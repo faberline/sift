@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::event::EventEnvelope;
+use crate::shared_kernel::event::EventEnvelope;
 
 pub(in crate::journal) fn xor_event_content_digest(
     accumulator: &mut [u8; 32],

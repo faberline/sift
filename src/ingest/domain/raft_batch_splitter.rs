@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::event::EventEnvelope;
+use crate::shared_kernel::event::EventEnvelope;
 
 pub(in crate::ingest) fn split_governed_batches(
     events: Vec<EventEnvelope>,

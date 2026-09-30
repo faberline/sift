@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::event::SignalKind;
+use crate::shared_kernel::event::SignalKind;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct EventQuery {

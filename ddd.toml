@@ -875,9 +875,3 @@ reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project c
 # layer, so B1 reports each one; P2 drops a facade once its callers use the
 # crate-root re-exports or the context paths.
 
-[[exceptions]]
-rule = "B1"
-paths = ["src/event.rs"]
-subject = "src/event"
-reason = "Compat facade: sift::event was a public module, and event.rs now only re-exports the event model from the shared kernel and GovernancePolicy and GovernancePolicySet from ingest so the public path keeps compiling. The crate root's own event re-exports also go through it. P2: point the crate-root re-exports at the shared kernel, and drop the facade once callers use them."
-

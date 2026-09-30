@@ -200,6 +200,9 @@ pub struct OperationalEventV2 {
     pub payload: Value,
 }
 
+/// Short name used by the internal ingest and storage layers.
+pub use self::OperationalEventV2 as EventEnvelope;
+
 impl OperationalEventV2 {
     /// Compatibility constructor for bootstrap callers. Ingest producers
     /// should use [`for_project`](Self::for_project) with explicit tenancy.

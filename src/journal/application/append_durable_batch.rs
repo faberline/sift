@@ -6,11 +6,11 @@ use std::sync::atomic::Ordering;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::event::EventEnvelope;
 use crate::journal::application::dedupe_window::rebuild_dedupe_index;
 use crate::journal::domain::append_result::AppendResult;
 use crate::journal::domain::recent_cursor::recent_receipt_at;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::shared_kernel::event::EventEnvelope;
 use crate::shared_kernel::retention_boundary::retention_rejection_at;
 use crate::shared_kernel::stored_event::StoredEvent;
 

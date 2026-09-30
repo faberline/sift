@@ -3,8 +3,8 @@
 
 use anyhow::Result;
 
-use crate::event::{EventEnvelope, SignalKind};
 use crate::journal::domain::append_result::AppendResult;
+use crate::shared_kernel::event::{EventEnvelope, SignalKind};
 
 pub(in crate::ingest) struct IngestBatchRequest {
     events: Vec<EventEnvelope>,

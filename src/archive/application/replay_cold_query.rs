@@ -5,10 +5,10 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::app::service_state::ServiceState;
-use crate::event::SignalKind;
 use crate::journal::domain::event_query::EventQuery;
 use crate::query::application::archive_query_status::ArchiveQueryStatus;
 use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
+use crate::shared_kernel::event::SignalKind;
 
 pub(crate) fn replay_cold_query(
     state: &ServiceState,

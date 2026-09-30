@@ -8,7 +8,6 @@ use anyhow::{Context, Result};
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::archive::application::replay_cold_query::replay_cold_query;
-use crate::event::SignalKind;
 use crate::projection;
 use crate::query::application::archive_query_status::{
     apply_archive_query_status, ArchiveQueryStatus,
@@ -20,6 +19,7 @@ use crate::query::interfaces::http::query_request_v1::{
     MetricFunctionV1, QueryRequestV1, QuerySignalV1,
 };
 use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::event::SignalKind;
 
 pub(in crate::query) fn execute_query_v1(
     state: &ServiceState,
