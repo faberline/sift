@@ -2,9 +2,9 @@
 //! them to shards from an activation cursor on, and the route an event id
 //! takes.
 
-use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 
 pub const VIRTUAL_BUCKETS: usize = 4_096;
 
@@ -27,26 +27,37 @@ pub(crate) fn bucket_for(event_id: &str) -> u16 {
     u16::from_be_bytes([digest[0], digest[1]]) & 0x0fff
 }
 
-pub(in crate::journal) fn validate_epochs(epochs: &[EpochMap]) -> Result<()> {
+#[derive(Debug, Error)]
+pub(in crate::journal) enum EpochMapError {
+    #[error("epoch map history must not be empty")]
+    Empty,
+    #[error("epoch ids must be strictly increasing")]
+    EpochOrder,
+    #[error("epoch {epoch} has {buckets} buckets; expected {expected}", expected = VIRTUAL_BUCKETS)]
+    BucketCount { epoch: u64, buckets: usize },
+    #[error("epoch activation cursors must be strictly increasing")]
+    CursorOrder,
+}
+
+pub(in crate::journal) fn validate_epochs(epochs: &[EpochMap]) -> Result<(), EpochMapError> {
     if epochs.is_empty() {
-        bail!("epoch map history must not be empty");
+        return Err(EpochMapError::Empty);
     }
     let mut previous_epoch = 0;
     let mut previous_cursor = None;
     for epoch in epochs {
         if epoch.epoch <= previous_epoch {
-            bail!("epoch ids must be strictly increasing");
+            return Err(EpochMapError::EpochOrder);
         }
         if epoch.bucket_to_shard.len() != VIRTUAL_BUCKETS {
-            bail!(
-                "epoch {} has {} buckets; expected {VIRTUAL_BUCKETS}",
-                epoch.epoch,
-                epoch.bucket_to_shard.len()
-            );
+            return Err(EpochMapError::BucketCount {
+                epoch: epoch.epoch,
+                buckets: epoch.bucket_to_shard.len(),
+            });
         }
         if let Some(previous) = previous_cursor {
             if epoch.activated_at_cursor <= previous {
-                bail!("epoch activation cursors must be strictly increasing");
+                return Err(EpochMapError::CursorOrder);
             }
         }
         previous_epoch = epoch.epoch;

@@ -1,8 +1,8 @@
 //! The idempotency window: six hours of hourly acknowledgement generations, and
 //! whether an event is still inside it.
 
-use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use thiserror::Error;
 
 use crate::shared_kernel::stored_event::StoredEvent;
 
@@ -20,26 +20,40 @@ pub(in crate::journal) fn oldest_generation(now: DateTime<Utc>) -> i64 {
         .div_euclid(GENERATION_SECONDS)
 }
 
-pub(in crate::journal) fn acknowledged_generation(event: &StoredEvent) -> Result<i64> {
+#[derive(Debug, Error)]
+pub(in crate::journal) enum IdempotencyWindowError {
+    #[error("acknowledged_at must be RFC3339")]
+    AcknowledgedAtNotRfc3339(#[source] chrono::ParseError),
+    #[error("acknowledged_at is outside the nanosecond range")]
+    AcknowledgedAtOutOfRange,
+    #[error("dedupe activity cutoff is outside the nanosecond range")]
+    CutoffOutOfRange,
+}
+
+pub(in crate::journal) fn acknowledged_generation(
+    event: &StoredEvent,
+) -> Result<i64, IdempotencyWindowError> {
     Ok(DateTime::parse_from_rfc3339(&event.acknowledged_at)
-        .context("acknowledged_at must be RFC3339")?
+        .map_err(IdempotencyWindowError::AcknowledgedAtNotRfc3339)?
         .timestamp()
         .div_euclid(GENERATION_SECONDS))
 }
 
-pub(in crate::journal) fn acknowledged_nanos(event: &StoredEvent) -> Result<i64> {
+pub(in crate::journal) fn acknowledged_nanos(
+    event: &StoredEvent,
+) -> Result<i64, IdempotencyWindowError> {
     DateTime::parse_from_rfc3339(&event.acknowledged_at)
-        .context("acknowledged_at must be RFC3339")?
+        .map_err(IdempotencyWindowError::AcknowledgedAtNotRfc3339)?
         .timestamp_nanos_opt()
-        .context("acknowledged_at is outside the nanosecond range")
+        .ok_or(IdempotencyWindowError::AcknowledgedAtOutOfRange)
 }
 
 pub(in crate::journal) fn event_is_active_at(
     event: &StoredEvent,
     now: DateTime<Utc>,
-) -> Result<bool> {
+) -> Result<bool, IdempotencyWindowError> {
     let cutoff = (now - chrono::Duration::seconds(IDEMPOTENCY_WINDOW_SECONDS))
         .timestamp_nanos_opt()
-        .context("dedupe activity cutoff is outside the nanosecond range")?;
+        .ok_or(IdempotencyWindowError::CutoffOutOfRange)?;
     Ok(acknowledged_nanos(event)? >= cutoff)
 }

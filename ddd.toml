@@ -439,18 +439,6 @@ interfaces = "src/journal/interfaces"
 
 [[exceptions]]
 rule = "B2"
-paths = [
-  "src/journal/domain/append_policy.rs",
-  "src/journal/domain/event_content_digest.rs",
-  "src/journal/domain/idempotency_window.rs",
-  "src/journal/domain/recent_cursor.rs",
-  "src/journal/domain/shard_route.rs",
-]
-subject = "anyhow"
-reason = "validate_events, append_decision_time, validate_retention_fence, merge_pending_retention, xor_event_content_digest, acknowledged_generation, acknowledged_nanos, event_is_active_at, RecentCursor::from_stored, recent_cursor_map and validate_epochs return anyhow errors whose text is the append failure the API reports and the startup, apply and recovery errors a bad batch, fence, receipt or epoch history raises, so converting them is not a move (E6). P2: a journal domain error (thiserror) with the same Display text, which the application and the state machine convert."
-
-[[exceptions]]
-rule = "B2"
 paths = ["src/journal/domain/append_result.rs"]
 subject = "utoipa"
 reason = "AppendResult derives ToSchema and is re-exported as sift::AppendResult; no OpenAPI path registers it today, but dropping a derive from a public type is not a move (E1). P2: drop the derive if nothing registers the schema, or approve AppendResult as published language in the domain allowlist."

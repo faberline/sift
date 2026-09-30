@@ -147,7 +147,7 @@ impl DedupeIndex {
     }
 
     pub(crate) fn covers(&self, event: &StoredEvent, now: DateTime<Utc>) -> Result<bool> {
-        event_is_active_at(event, now)
+        Ok(event_is_active_at(event, now)?)
     }
 
     pub(crate) fn stats(&self) -> Result<DedupeStats> {

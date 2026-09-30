@@ -87,7 +87,10 @@ to the projections and queries.
 | interfaces | `peer_server` (the Raft peer server), `journal_metrics` |
 
 - **Depends on:** node.
-- **Exceptions:** `anyhow`, `utoipa` on `AppendResult`, and `Utc::now` in
+- **Errors:** the domain returns thiserror types: `AppendPolicyError`,
+  `ContentDigestError`, `IdempotencyWindowError`, `InvalidAcknowledgedAt` and
+  `EpochMapError`. The application and infrastructure convert them with `?`.
+- **Exceptions:** `utoipa` on `AppendResult` and `Utc::now` in
   `SiftCommandV1` (B2); use cases that are `impl DurableJournal` blocks over
   the storage, and the command committer and metrics that sit in other layers
   (B3); and its uses of the archive's committed state, control records and
