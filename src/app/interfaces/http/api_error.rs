@@ -86,7 +86,8 @@ impl ApiError {
 
     pub(crate) fn from_admission(error: AdmissionError) -> Self {
         Self {
-            status: error.status,
+            status: StatusCode::from_u16(error.status.code())
+                .expect("Sift admission status is valid"),
             error: error.code,
             message: error.message,
             retryable: error.retryable,

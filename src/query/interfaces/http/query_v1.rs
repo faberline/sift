@@ -16,7 +16,7 @@ use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::query::application::execute_query::execute_query_v1;
 use crate::query::application::get_query_job::query_job_for_project;
-use crate::query::domain::query_cursor::encode_query_cursor;
+use crate::query::application::query_cursor::encode_query_cursor;
 use crate::query::domain::query_job::QueryJobV1;
 use crate::query::interfaces::http::phase_one::LogTailRequestV1;
 use crate::query::interfaces::http::query_request_v1::{

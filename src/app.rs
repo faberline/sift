@@ -4,6 +4,7 @@
 //! the system clock. The app wires the contexts together and owns no domain
 //! rules of its own.
 
+mod archive_wiring;
 pub(crate) mod interfaces;
 pub(crate) mod service_state;
 pub(crate) mod system_clock;

@@ -6,7 +6,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::shared_kernel::query_limit::default_query_limit;
 use crate::{AttributeValue, InstrumentationScope};
@@ -16,25 +15,23 @@ pub const TRACE_SCHEMA_VERSION: u32 = 3;
 pub const MAX_TRACE_QUERY_LIMIT: usize = 1_000;
 pub const DEFAULT_RETAINED_TRACE_SPANS: usize = 100_000;
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SpanLinkV1 {
     pub trace_id: String,
     pub span_id: String,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SpanEventV1 {
     pub name: String,
     pub time_unix_nano: u64,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SpanRecordV1 {
     pub cursor: u64,
     pub event_id: String,
@@ -58,7 +55,6 @@ pub struct SpanRecordV1 {
     #[serde(default)]
     pub events: Vec<SpanEventV1>,
     pub resource: BTreeMap<String, String>,
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instrumentation_scope: Option<InstrumentationScope>,
@@ -75,7 +71,7 @@ impl SpanRecordV1 {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TraceResultV1 {
     pub project: String,
     pub trace_id: String,
@@ -90,7 +86,7 @@ pub struct TraceResultV1 {
     pub projection_cursor: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TraceQuery {
     pub project: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -110,7 +106,6 @@ pub struct TraceQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_trace_id: Option<String>,
@@ -173,7 +168,7 @@ pub(in crate::projection) enum TraceQueryError {
     DurationOrder,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TracePage {
     pub traces: Vec<TraceResultV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

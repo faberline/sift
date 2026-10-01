@@ -8,7 +8,6 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::projection::domain::metric_aggregation::{merge_counts, optional_max, optional_min};
 use crate::shared_kernel::query_limit::default_query_limit;
@@ -26,14 +25,14 @@ pub const MAX_METRIC_QUERY_SOURCE_BYTES: usize = 64 * 1024 * 1024;
 pub const ROLLUP_WINDOWS_SECONDS: [u64; 2] = [60, 3_600];
 pub(in crate::projection) const MAX_ROLLUP_LOOKBACK_NANOS: i64 = 3_600 * 1_000_000_000;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HistogramKind {
     Explicit,
     Exponential,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricHistogramV1 {
     pub kind: HistogramKind,
     pub count: u64,
@@ -186,7 +185,7 @@ impl MetricHistogramV1 {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricPointV1 {
     pub cursor: u64,
     pub event_id: String,
@@ -201,7 +200,7 @@ pub struct MetricPointV1 {
     pub exemplars: Vec<MetricExemplar>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricChunkV1 {
     pub start_time_unix_nano: i64,
     pub end_time_unix_nano: i64,
@@ -229,7 +228,7 @@ impl DerefMut for ResidentMetricChunk {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricRollupV1 {
     pub window_seconds: u64,
     pub start_time_unix_nano: i64,
@@ -245,7 +244,7 @@ pub struct MetricRollupV1 {
     pub exemplars: Vec<MetricExemplar>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetricAggregation {
     #[default]
@@ -258,7 +257,7 @@ pub enum MetricAggregation {
     Rate,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MetricQuery {
     pub project: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -270,10 +269,8 @@ pub struct MetricQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_time: Option<String>,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub resource_equals: BTreeMap<String, String>,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attribute_equals: BTreeMap<String, AttributeValue>,
     #[serde(default)]
     pub aggregation: MetricAggregation,
@@ -320,7 +317,7 @@ impl MetricQuery {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricSeriesResultV1 {
     pub series_id: String,
     pub project: String,
@@ -330,7 +327,6 @@ pub struct MetricSeriesResultV1 {
     pub unit: Option<String>,
     pub temporality: MetricTemporality,
     pub resource: BTreeMap<String, String>,
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
     pub overflow: bool,
     pub points: Vec<MetricPointV1>,
@@ -342,7 +338,7 @@ pub struct MetricSeriesResultV1 {
     pub rollups: Vec<MetricRollupV1>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricPage {
     pub series: Vec<MetricSeriesResultV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

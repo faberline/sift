@@ -37,7 +37,7 @@ impl CommittedEventReader {
             let prefix = format!("segment/{signal}/");
             Ok(ArchiveSignalStream::new_after(
                 root,
-                catalog.reader_after(&manifest.catalog_root, &prefix)?,
+                catalog.reader_after(&(&manifest.catalog_root).into(), &prefix)?,
                 signal,
                 after,
             ))

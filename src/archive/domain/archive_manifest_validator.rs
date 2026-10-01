@@ -8,6 +8,9 @@ use thiserror::Error;
 use crate::archive::domain::archive_manifest::{
     ArchiveDedupeReceipt, ArchiveManifest, ARCHIVE_FORMAT_VERSION,
 };
+use crate::archive::domain::manifest_validation_policy::{
+    ManifestValidationPolicy, UriValidationError,
+};
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 #[derive(Debug, Error)]
@@ -67,9 +70,13 @@ pub(in crate::archive) fn validate_dedupe_receipt(
     Ok(())
 }
 
-pub(crate) fn validate_archive_manifest(
+pub(crate) fn validate_archive_manifest<P: ManifestValidationPolicy + ?Sized>(
     manifest: &ArchiveManifest,
-) -> Result<(), ArchiveManifestError> {
+    policy: &P,
+) -> Result<(), ArchiveManifestError>
+where
+    P::Error: Into<UriValidationError>,
+{
     if manifest.format_version != ARCHIVE_FORMAT_VERSION
         || manifest.source_cluster_id.trim().is_empty()
         || manifest.source_node_id.trim().is_empty()
@@ -92,8 +99,7 @@ pub(crate) fn validate_archive_manifest(
                 .saturating_add(manifest.blob_count)
                 .saturating_add(manifest.dedupe_receipt_count)
         || (manifest.segment_count == 0) != manifest.oldest_event_time_unix_nano.is_none()
-        || manifest.catalog_root.page_bytes_limit as usize
-            != storage_segment::DEFAULT_CATALOG_PAGE_BYTES
+        || manifest.catalog_root.page_bytes_limit as usize != policy.catalog_page_bytes()
         || manifest.gc_plan_uri.is_some() != manifest.gc_plan_root.is_some()
         || manifest
             .gc_plan_uri
@@ -226,12 +232,12 @@ pub(crate) fn validate_archive_manifest(
         if !uri.starts_with("gs://") || prior_gc_uri.is_some_and(|prior| prior >= uri.as_str()) {
             return Err(ArchiveManifestError::InvalidGcObjectUri);
         }
-        service_backup::GcsSink::from_exact_uri(uri).map_err(|source| {
-            ArchiveManifestError::GcObjectUri {
+        policy
+            .validate_gc_uri(uri)
+            .map_err(|source| ArchiveManifestError::GcObjectUri {
                 uri: uri.clone(),
                 source: source.into(),
-            }
-        })?;
+            })?;
         prior_gc_uri = Some(uri);
     }
     if (!manifest.gc_object_uris.is_empty() || manifest.gc_object_count == 0)

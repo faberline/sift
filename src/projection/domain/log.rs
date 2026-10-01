@@ -6,7 +6,6 @@ use std::collections::{BTreeMap, HashSet};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::shared_kernel::query_limit::default_query_limit;
 use crate::AttributeValue;
@@ -19,7 +18,7 @@ pub const MAX_LOG_QUERY_LIMIT: usize = 1_000;
 pub(in crate::projection) const RESOURCE_TYPE: &str = "gcp.resource.type";
 pub(in crate::projection) const SERVICE_NAME: &str = "service.name";
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct LogRecordV1 {
     pub cursor: u64,
     pub event_id: String,
@@ -30,10 +29,8 @@ pub struct LogRecordV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
     pub body_text: String,
-    #[schema(value_type = Object)]
     pub json_payload: serde_json::Value,
     pub resource: BTreeMap<String, String>,
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
@@ -46,7 +43,7 @@ pub struct LogRecordV1 {
     pub coexistence_key: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LogQuery {
     pub project: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,7 +69,6 @@ pub struct LogQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attribute_equals: BTreeMap<String, AttributeValue>,
     #[serde(default)]
     pub after_cursor: u64,
@@ -120,7 +116,7 @@ impl LogQuery {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct LogPage {
     pub records: Vec<LogRecordV1>,
     pub next_cursor: u64,

@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::domain::archive_manifest::{ArchiveManifest, ARCHIVE_FORMAT_VERSION};
-use crate::archive::domain::archive_manifest_validator::validate_archive_manifest;
 use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
 use crate::archive::infrastructure::archive_control_paths::{
     ARCHIVE_COMMIT_FORMAT_VERSION, ARCHIVE_COMMIT_PATH,
 };
+use crate::archive::infrastructure::manifest_validation::validate_archive_manifest;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 #[cfg(any(not(unix), unix))]
@@ -93,7 +93,7 @@ pub(crate) fn adopt_verified_archive_receipt(
 ) -> Result<ArchiveWatermarks> {
     validate_archive_manifest(&receipt.manifest)?;
     let catalog = catalog_for_uri(&receipt.manifest.catalog_uri)?;
-    let mut reader = catalog.reader(&receipt.manifest.catalog_root)?;
+    let mut reader = catalog.reader(&(&receipt.manifest.catalog_root).into())?;
     let _ = reader.next().transpose()?;
     record_archive_commit(root, receipt)
 }

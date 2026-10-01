@@ -5,10 +5,8 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
-use clap::ValueEnum;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use utoipa::ToSchema;
 
 use crate::shared_kernel::event_error::EventError;
 
@@ -18,20 +16,7 @@ pub const EVENT_SCHEMA_URL: &str = "https://cclab.dev/sift/schemas/operational-e
 
 /// Phase-one signal kinds. Other SRE data is added only through a later
 /// versioned public contract.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    ToSchema,
-    ValueEnum,
-)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalKind {
     Log,
@@ -56,7 +41,7 @@ impl std::fmt::Display for SignalKind {
 /// JSON representation of OpenTelemetry AnyValue semantics. Bytes are a
 /// base64 string so JSON/protobuf transports preserve the distinction from a
 /// normal string and from an array of integers.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AttributeValue {
     String(String),
@@ -112,19 +97,18 @@ impl From<&str> for AttributeValue {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct InstrumentationScope {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_url: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetricTemporality {
     Delta,
@@ -132,14 +116,14 @@ pub enum MetricTemporality {
     Gauge,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricExemplar {
     pub value: f64,
     pub trace_id: String,
     pub span_id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MetricPoint {
     pub name: String,
     pub value: f64,
@@ -157,7 +141,7 @@ pub struct MetricPoint {
 
 /// Durable content-addressed reference for a payload externalized before the
 /// canonical raw event is acknowledged.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ContentBlobRef {
     pub hash: String,
     pub size: u64,
@@ -165,7 +149,7 @@ pub struct ContentBlobRef {
 }
 
 /// The only event shape serialized by new journal writers.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct OperationalEventV2 {
     pub schema_version: u16,
     pub schema_url: String,
@@ -176,12 +160,10 @@ pub struct OperationalEventV2 {
     pub observed_at: String,
     pub signal: SignalKind,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub resource: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instrumentation_scope: Option<InstrumentationScope>,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
@@ -197,7 +179,6 @@ pub struct OperationalEventV2 {
     pub metric: Option<MetricPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blob_refs: Vec<ContentBlobRef>,
-    #[schema(value_type = Object)]
     pub payload: Value,
 }
 

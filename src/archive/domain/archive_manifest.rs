@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::journal::domain::{segment_manifest::SegmentManifest, shard_route::EpochMap};
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
+use crate::shared_kernel::catalog_manifest::CatalogRoot;
 use crate::{ContentBlobRef, SignalKind};
 
 pub(in crate::archive) const ARCHIVE_FORMAT_VERSION: u16 = 10;
@@ -69,12 +70,12 @@ pub struct ArchiveManifest {
     pub oldest_event_time_unix_nano: Option<i64>,
     pub epochs: Vec<EpochMap>,
     pub catalog_uri: String,
-    pub catalog_root: storage_segment::CatalogRoot,
+    pub catalog_root: CatalogRoot,
     pub segment_count: u64,
     pub blob_count: u64,
     pub dedupe_receipt_count: u64,
     pub gc_plan_uri: Option<String>,
-    pub gc_plan_root: Option<storage_segment::CatalogRoot>,
+    pub gc_plan_root: Option<CatalogRoot>,
     pub gc_object_count: u64,
     /// One bounded retention generation can be applied by a caught-up voter
     /// without downloading the cumulative archive.

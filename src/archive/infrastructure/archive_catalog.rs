@@ -46,7 +46,7 @@ pub(in crate::archive) fn load_archive_catalog(
     let mut segments = Vec::new();
     let mut blobs = Vec::new();
     let mut receipt_count = 0_u64;
-    for entry in catalog.reader(&manifest.catalog_root)? {
+    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
         match decode_archive_catalog_entry(entry?)? {
             ArchiveCatalogItem::Segment(segment) => segments.push(segment),
             ArchiveCatalogItem::Blob(blob) => blobs.push(blob),
@@ -75,7 +75,7 @@ pub(in crate::archive) fn load_gc_catalog(manifest: &ArchiveManifest) -> Result<
     };
     let catalog = catalog_for_uri(uri)?;
     let mut uris = Vec::new();
-    for entry in catalog.reader(root)? {
+    for entry in catalog.reader(&root.into())? {
         let entry = entry?;
         if !entry.key.starts_with("gc/") {
             bail!("archive GC catalog contains an unknown key {}", entry.key);

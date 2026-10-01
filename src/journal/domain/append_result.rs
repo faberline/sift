@@ -2,9 +2,8 @@
 //! bit.
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct AppendResult {
     pub event_id: String,
     /// Leader-selected Raft decision time. The exact six-hour window starts

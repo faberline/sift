@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::archive::application::archive_raw_storage_to_gcs::verify_local_archive_prefix;
 use crate::archive::application::archive_receipts::ArchiveReceipt;
+use crate::archive::application::manifest_validation::validate_archive_manifest;
 use crate::archive::domain::archive_catalog_item::{
     blob_catalog_key, segment_catalog_key, ArchiveCatalogItem,
 };
@@ -14,7 +15,6 @@ use crate::archive::domain::archive_event_time::acknowledgement_time_bounds;
 use crate::archive::domain::archive_manifest::{
     empty_dedupe_receipt, ArchiveBlob, ArchiveManifest, ArchiveSegment, ARCHIVE_FORMAT_VERSION,
 };
-use crate::archive::domain::archive_manifest_validator::validate_archive_manifest;
 use crate::archive::domain::event_set_digest::{
     decode_event_content_digest, decode_event_id_digest, include_event_content, include_event_id,
 };
@@ -116,7 +116,7 @@ pub(super) fn archive_gcs_captured_streaming(
         if let (Some(gc_uri), Some(gc_root)) = (&previous.gc_plan_uri, &previous.gc_plan_root) {
             let (gc_bucket, _) = split_gcs_uri(gc_uri)?;
             let gc_catalog = catalog_for_uri(gc_uri)?;
-            for key in gc_catalog.page_keys(gc_root)? {
+            for key in gc_catalog.page_keys(&gc_root.into())? {
                 gc_candidates.insert_uri(&gcs_uri(&gc_bucket, &key?))?;
             }
         }
@@ -161,9 +161,10 @@ pub(super) fn archive_gcs_captured_streaming(
                     max_acknowledged_at_unix_nano: 0,
                     dedupe_receipt: empty_dedupe_receipt(),
                 };
-                if let Some(entry) =
-                    catalog.lookup(&previous.catalog_root, &segment_catalog_key(&probe))?
-                {
+                if let Some(entry) = catalog.lookup(
+                    &(&previous.catalog_root).into(),
+                    &segment_catalog_key(&probe),
+                )? {
                     let ArchiveCatalogItem::Segment(committed) =
                         decode_archive_catalog_entry(entry)?
                     else {
@@ -248,7 +249,7 @@ pub(super) fn archive_gcs_captured_streaming(
         let catalog_key = format!("blob/{}", counted.reference.hash);
         let existing = match (previous, &previous_catalog) {
             (Some(previous), Some(catalog)) => catalog
-                .lookup(&previous.catalog_root, &catalog_key)?
+                .lookup(&(&previous.catalog_root).into(), &catalog_key)?
                 .map(decode_archive_catalog_entry)
                 .transpose()?,
             _ => None,
@@ -298,7 +299,7 @@ pub(super) fn archive_gcs_captured_streaming(
         if previous_bucket != bucket {
             bail!("committed archive catalog moved to a different bucket");
         }
-        let mut root = previous.catalog_root.clone();
+        let mut root: storage_segment::CatalogRoot = (&previous.catalog_root).into();
         for entry in catalog_updates.reader()? {
             let mutation = catalog_runtime.upsert(&root, entry?)?;
             for key in &mutation.obsolete_page_keys {
@@ -370,12 +371,12 @@ pub(super) fn archive_gcs_captured_streaming(
         oldest_event_time_unix_nano,
         epochs: storage.epoch_maps(),
         catalog_uri: gcs_uri(&bucket, &catalog_prefix),
-        catalog_root,
+        catalog_root: catalog_root.into(),
         segment_count,
         blob_count,
         dedupe_receipt_count,
         gc_plan_uri: gc_plan.as_ref().map(|_| gcs_uri(&bucket, &gc_prefix)),
-        gc_plan_root: gc_plan.map(|plan| plan.root),
+        gc_plan_root: gc_plan.map(|plan| plan.root.into()),
         gc_object_count,
         retention_delta: None,
         retention_scan: previous.and_then(|manifest| manifest.retention_scan.clone()),

@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::archive::application::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
+use crate::archive::application::manifest_validation::validate_archive_manifest;
 use crate::archive::application::reconcile_committed_retention::reconcile_live_committed_retention;
 use crate::archive::application::retention_catalog_ops::{
     apply_catalog_remove, apply_catalog_upsert,
@@ -21,7 +22,6 @@ use crate::archive::domain::archive_catalog_item::{
     dedupe_receipt_catalog_key, segment_catalog_key, ArchiveCatalogItem,
 };
 use crate::archive::domain::archive_manifest::{ArchiveManifest, ArchiveRetentionScan};
-use crate::archive::domain::archive_manifest_validator::validate_archive_manifest;
 use crate::archive::domain::retention_policy::{
     include_retention_oldest, RETENTION_SCAN_BATCH_SEGMENTS,
 };
@@ -105,8 +105,10 @@ fn expire_committed_events_bounded_at(
     }
 
     let current_catalog = catalog_for_uri(&current.catalog_uri)?;
-    let mut reader =
-        current_catalog.reader_after(&current.catalog_root, &scan.after_catalog_key)?;
+    let mut reader = current_catalog.reader_after(
+        &(&current.catalog_root).into(),
+        &scan.after_catalog_key,
+    )?;
     let spill_parent = root.join("tmp");
     let mut pass = RetentionPass::new(root, &current_state, &current, &spill_parent)?;
 

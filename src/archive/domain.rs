@@ -9,5 +9,6 @@ pub(crate) mod archive_manifest_validator;
 pub(crate) mod blob_hash_set;
 pub(crate) mod event_set_digest;
 pub(crate) mod lifecycle_settings;
+pub(crate) mod manifest_validation_policy;
 pub(crate) mod portable_manifest;
 pub(crate) mod retention_policy;

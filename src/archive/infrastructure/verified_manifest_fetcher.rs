@@ -5,9 +5,9 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 
 use crate::archive::domain::archive_manifest::ArchiveManifest;
-use crate::archive::domain::archive_manifest_validator::validate_archive_manifest;
 use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
 use crate::archive::infrastructure::archive_commit_state::read_commit_state;
+use crate::archive::infrastructure::manifest_validation::validate_archive_manifest;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(in crate::archive) fn fetch_verified_committed_root(
@@ -28,7 +28,7 @@ pub(in crate::archive) fn fetch_verified_committed_root(
     }
     validate_archive_manifest(&manifest)?;
     let catalog = catalog_for_uri(&manifest.catalog_uri)?;
-    let mut reader = catalog.reader(&manifest.catalog_root)?;
+    let mut reader = catalog.reader(&(&manifest.catalog_root).into())?;
     let _ = reader.next().transpose()?;
     Ok(Some(manifest))
 }

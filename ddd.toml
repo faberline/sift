@@ -124,17 +124,7 @@ path = "src/shared_kernel"
 # Kernel dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/shared_kernel/event.rs", "src/shared_kernel/stored_event.rs"]
-subject = "utoipa"
-reason = "OperationalEventV2, its parts and StoredEvent derive ToSchema because they are the published language: one serde shape is the WAL, segment, Raft and snapshot bytes, the digest input and the OpenAPI wire (E1). A mirror DTO would triple about 40 types and clone on every append and replay, and any drift in field order or skip rules changes the digest. P2: approve them as the published language individually and pin the bytes with golden tests."
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/shared_kernel/event.rs"]
-subject = "clap"
-reason = "SignalKind derives clap::ValueEnum so the CLI's --signal flags parse straight into it; the mapping keeps the derive (Q9). P2: approve it individually, or give the bin its own ValueEnum that maps onto SignalKind if the kernel must drop clap."
 
 # The assembly root: the service state every context's handlers share, the
 # readiness and metrics hooks, and the HTTP router, API error and OpenAPI
@@ -158,11 +148,6 @@ infrastructure = "src/collector/infrastructure"
 # Collector dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/collector/domain/service_log.rs"]
-subject = "service_observability"
-reason = "validate checks a StructuredServiceLogV1 against its schema id and the core crate's bounds (MAX_EVENT_BYTES, MAX_ATTRIBUTES and the rest): the log shape is the core library's published contract, not Sift's (E14). P2: approve service_observability in the domain allowlist, or wrap the log in a collector newtype if review wants the domain free of it."
 
 [[exceptions]]
 rule = "B3"
@@ -186,15 +171,6 @@ interfaces = "src/projection/interfaces"
 # Projection dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = [
-  "src/projection/domain/log.rs",
-  "src/projection/domain/metric.rs",
-  "src/projection/domain/trace.rs",
-]
-subject = "utoipa"
-reason = "The *V1 records, the queries and the pages derive ToSchema because they are the API's OpenAPI wire as well as the snapshot bytes and the semantic digest's input; a mirror DTO would triple them and risk the digest drifting (E1). P2: approve utoipa for the *V1 projection records in the domain allowlist, with golden-bytes tests."
 
 [[exceptions]]
 rule = "B3"
@@ -242,11 +218,6 @@ interfaces = "src/query/interfaces"
 # Query dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/query/domain/query_cursor.rs"]
-subject = "base64"
-reason = "encode_query_cursor and decode_query_cursor write the opaque page cursor as base64url (URL_SAFE_NO_PAD) JSON; the cursor text is the API's wire and clients hand it back, so P1 moves the codec as-is. P2: the domain keeps the cursor as a typed value and an interfaces codec writes and reads the base64url text, or base64 is approved in the domain allowlist."
 
 [[exceptions]]
 rule = "B3"
@@ -359,11 +330,6 @@ interfaces = "src/ingest/interfaces"
 # Ingest dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/ingest/domain/admission_error.rs"]
-subject = "axum"
-reason = "AdmissionError carries the axum StatusCode each refusal answers with (400, 413, 429, 503), which the admission controller and the body decoder set and ApiError::from_admission copies into the response; P1 moves it as-is. P2: AdmissionError holds a domain refusal kind and the interfaces map the kind to an HTTP status and a gRPC code."
 
 [[exceptions]]
 rule = "B3"
@@ -415,11 +381,6 @@ interfaces = "src/journal/interfaces"
 # Journal dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/journal/domain/append_result.rs"]
-subject = "utoipa"
-reason = "AppendResult derives ToSchema and is re-exported as sift::AppendResult; no OpenAPI path registers it today, but dropping a derive from a public type is not a move (E1). P2: drop the derive if nothing registers the schema, or approve AppendResult as published language in the domain allowlist."
 
 [[exceptions]]
 rule = "B3"
@@ -521,20 +482,7 @@ interfaces = "src/archive/interfaces"
 # Archive dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = [
-  "src/archive/domain/archive_manifest.rs",
-  "src/archive/domain/archive_manifest_validator.rs",
-]
-subject = "storage_segment"
-reason = "ArchiveManifest stores catalog_root and gc_plan_root as storage_segment::CatalogRoot, the serialized manifest's own field type, and validate_archive_manifest checks page_bytes_limit against storage_segment::DEFAULT_CATALOG_PAGE_BYTES; the manifest JSON is the archive's format in GCS and on disk, so P1 moves it as-is. P2: approve CatalogRoot as published language in the domain allowlist, or the domain holds its own catalog-root value that the infrastructure maps to and from CatalogRoot, with the page limit passed in."
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/archive/domain/archive_manifest_validator.rs"]
-subject = "service_backup"
-reason = "validate_archive_manifest parses each gc_object_uris entry with service_backup::GcsSink::from_exact_uri, the parser the upload uses; P1 moves it as-is. P2: the domain checks the gs:// URI shape itself, and the application runs the GcsSink parse after the domain validation."
 
 [[exceptions]]
 rule = "B3"
@@ -653,17 +601,7 @@ interfaces = "src/access/interfaces"
 # Access dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/access/domain/route_role.rs"]
-subject = "axum"
-reason = "http_role reads the request's axum::http::Method to decide whether a route needs Read or Write; P1 moves it from auth.rs as-is. P2: the domain takes a route kind (method and path as plain values) and the interfaces map the axum request onto it, or http's Method is approved in the domain allowlist."
 
-[[exceptions]]
-rule = "B2"
-paths = ["src/access/domain/route_role.rs"]
-subject = "service_auth"
-reason = "http_role returns and role_verb takes service_auth::Role, the Read, Write and Admin roles the shared bearer middleware and RoleMapPrincipal enforce; the role is the shared auth crate's published contract, and P1 moves both as-is. P2: approve service_auth::Role in the domain allowlist, or give access a domain role that the interfaces map onto service_auth::Role."
 
 [[exceptions]]
 rule = "B3"

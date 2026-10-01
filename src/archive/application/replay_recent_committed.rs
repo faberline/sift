@@ -39,7 +39,7 @@ where
     let catalog = catalog_for_uri(&manifest.catalog_uri)?;
     let mut scanned = 0_u64;
     let mut replayed = 0_u64;
-    for entry in catalog.reader(&manifest.catalog_root)? {
+    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
         let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
@@ -84,7 +84,7 @@ where
         .context("dedupe receipt rebuild cutoff is outside the nanosecond range")?;
     let catalog = catalog_for_uri(&manifest.catalog_uri)?;
     let mut replayed = 0_u64;
-    for entry in catalog.reader_after(&manifest.catalog_root, "receipt/")? {
+    for entry in catalog.reader_after(&(&manifest.catalog_root).into(), "receipt/")? {
         let entry = entry?;
         if !entry.key.starts_with("receipt/") {
             break;

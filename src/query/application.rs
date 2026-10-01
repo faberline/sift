@@ -6,4 +6,5 @@ pub(crate) mod archive_query_status;
 pub(crate) mod execute_query;
 pub(crate) mod get_query_job;
 pub(crate) mod prom_query;
+pub(crate) mod query_cursor;
 pub(crate) mod replay_cold_query;

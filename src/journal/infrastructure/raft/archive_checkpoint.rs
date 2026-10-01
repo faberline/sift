@@ -135,7 +135,7 @@ pub(super) fn fetch_checkpoint_manifest(
     }
     let manifest: crate::archive::domain::archive_manifest::ArchiveManifest =
         serde_json::from_slice(&manifest_bytes).context(decode_context)?;
-    crate::archive::domain::archive_manifest_validator::validate_archive_manifest(&manifest)?;
+    crate::archive::application::manifest_validation::validate_archive_manifest(&manifest)?;
     if manifest.raft_snapshot_index != checkpoint.archive_snapshot_index
         || manifest.watermarks != checkpoint.watermarks
         || manifest.raft_snapshot_index != checkpoint.raw_cursor

@@ -34,8 +34,10 @@ impl service_auth::ScopedAuthorization for SiftVerifier {
                 "x-sift-project is required for Kubernetes project authorization".into(),
             ));
         }
-        let role = http_role(method, uri.path());
-        let principal = self.authenticate_project(headers, project, role).await?;
+        let role = http_role(method.as_str(), uri.path());
+        let principal = self
+            .authenticate_project(headers, project, role.into())
+            .await?;
         Ok(service_auth::ScopedAuthorizationOutcome::Authorized(
             principal,
         ))

@@ -49,7 +49,7 @@ where
     let mut scanned = 0_u64;
     let mut replayed = 0_u64;
     let catalog = catalog_for_uri(&manifest.catalog_uri)?;
-    for entry in catalog.reader(&manifest.catalog_root)? {
+    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
         let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };

@@ -38,3 +38,4 @@ pub use crate::archive::{
     },
 };
 pub use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
+pub use crate::shared_kernel::catalog_manifest::{CatalogPageRef, CatalogRoot};

@@ -22,7 +22,7 @@ pub(super) fn committed_has_expired_dedupe_receipt(
     }
     let catalog = catalog_for_uri(&manifest.catalog_uri)?;
     let Some(entry) = catalog
-        .reader_after(&manifest.catalog_root, "receipt/")?
+        .reader_after(&(&manifest.catalog_root).into(), "receipt/")?
         .next()
         .transpose()?
     else {

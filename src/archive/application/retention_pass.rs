@@ -70,7 +70,7 @@ impl RetentionPass {
         current: &ArchiveManifest,
         spill_parent: &Path,
     ) -> Result<Self> {
-        let catalog_root = current.catalog_root.clone();
+        let catalog_root = (&current.catalog_root).into();
         let mut gc_candidates = SpillCatalog::new(spill_parent, "retention-obsolete-")?;
         let live_objects = SpillCatalog::new(spill_parent, "retention-live-")?;
         seed_gc_candidates(root, current_state, current, &mut gc_candidates)?;
@@ -311,12 +311,12 @@ impl RetentionPass {
             oldest_event_time_unix_nano: finalized.oldest_event_time_unix_nano,
             epochs: current.epochs.clone(),
             catalog_uri: current.catalog_uri.clone(),
-            catalog_root: self.catalog_root.clone(),
+            catalog_root: self.catalog_root.clone().into(),
             segment_count: self.segment_count,
             blob_count: self.blob_count,
             dedupe_receipt_count: self.dedupe_receipt_count,
             gc_plan_uri,
-            gc_plan_root: gc_plan.map(|plan| plan.root),
+            gc_plan_root: gc_plan.map(|plan| plan.root.into()),
             gc_object_count,
             retention_delta: Some(ArchiveRetentionDelta {
                 source_manifest_uri: current_state.manifest_uri.clone(),
@@ -347,7 +347,7 @@ fn seed_gc_candidates(
     if let (Some(gc_uri), Some(gc_root)) = (&current.gc_plan_uri, &current.gc_plan_root) {
         let (gc_bucket, _) = split_gcs_uri(gc_uri)?;
         let current_gc = catalog_for_uri(gc_uri)?;
-        for key in current_gc.page_keys(gc_root)? {
+        for key in current_gc.page_keys(&gc_root.into())? {
             gc_candidates.insert_uri(&gcs_uri(&gc_bucket, &key?))?;
         }
     }

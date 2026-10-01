@@ -50,7 +50,7 @@ fn local_blob_gc_pending_for_receipt(receipt: &ArchiveReceipt) -> Option<LocalBl
         replacement_manifest_uri: receipt.manifest_uri.clone(),
         replacement_manifest_sha256: receipt.manifest_sha256.clone(),
         gc_plan_uri,
-        gc_plan_root,
+        gc_plan_root: (&gc_plan_root).into(),
         plan_cursor: None,
         plan_exhausted: false,
         candidates: Vec::new(),

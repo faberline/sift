@@ -63,7 +63,7 @@ pub fn evict_committed_cold_segments_at(
             dedupe_receipt: empty_dedupe_receipt(),
         };
         let exact_remote = catalog
-            .lookup(&manifest.catalog_root, &segment_catalog_key(&probe))?
+            .lookup(&(&manifest.catalog_root).into(), &segment_catalog_key(&probe))?
             .map(decode_archive_catalog_entry)
             .transpose()?
             .is_some_and(|item| {

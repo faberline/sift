@@ -11,7 +11,7 @@ pub(crate) mod interfaces;
 pub use crate::ingest::{
     application::admission_controller::{AdmissionController, AdmissionPermit},
     domain::{
-        admission_error::AdmissionError,
+        admission_error::{AdmissionError, AdmissionStatus},
         ingest_limits::{IngestLimits, IngestLimitsError},
     },
     interfaces::{

@@ -5,6 +5,7 @@
 //! truncation.
 
 pub(crate) mod archive_watermarks;
+pub(crate) mod catalog_manifest;
 pub(crate) mod cloud_logging_event_id;
 pub(crate) mod event;
 pub(crate) mod event_content_digest;

@@ -12,9 +12,9 @@ use crate::projection;
 use crate::query::application::archive_query_status::{
     apply_archive_query_status, ArchiveQueryStatus,
 };
+use crate::query::application::query_cursor::{decode_query_cursor, encode_query_cursor};
 use crate::query::application::replay_cold_query::{replay_cold_query, ColdQueryScope};
 use crate::query::domain::filter_evaluator::evaluate_filter;
-use crate::query::domain::query_cursor::{decode_query_cursor, encode_query_cursor};
 use crate::query::domain::query_time::{cold_query_requested_at, parse_query_time_nanos};
 use crate::query::interfaces::http::query_request_v1::{
     MetricFunctionV1, QueryRequestV1, QuerySignalV1,

@@ -15,6 +15,7 @@ pub(crate) mod finalize_archive_gc;
 pub(crate) mod inspect_archive_catalog;
 pub(crate) mod lifecycle_checkpoint;
 pub(crate) mod lifecycle_tick;
+pub(crate) mod manifest_validation;
 pub(crate) mod prepare_retention_fence;
 pub(crate) mod reconcile_committed_retention;
 pub(crate) mod replay_committed_events;

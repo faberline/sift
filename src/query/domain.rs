@@ -6,6 +6,5 @@ pub(crate) mod filter_evaluator;
 pub(crate) mod filter_expression;
 pub(crate) mod promql;
 pub(crate) mod promql_evaluator;
-pub(crate) mod query_cursor;
 pub(crate) mod query_job;
 pub(crate) mod query_time;

@@ -6,10 +6,10 @@ use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
 use crate::archive::application::archive_receipts::ArchiveReceipt;
+use crate::archive::application::manifest_validation::validate_archive_manifest;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::event_time_unix_nano;
 use crate::archive::domain::archive_manifest::ArchiveManifest;
-use crate::archive::domain::archive_manifest_validator::validate_archive_manifest;
 use crate::archive::domain::blob_hash_set::BlobHashSet;
 use crate::archive::domain::event_set_digest::{include_event_content, include_event_id};
 use crate::archive::infrastructure::archive_catalog::{
@@ -52,7 +52,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
         let prefix = format!("segment/{signal}/");
         Ok(ArchiveSignalStream::new(
             target,
-            catalog.reader_after(&manifest.catalog_root, &prefix)?,
+            catalog.reader_after(&(&manifest.catalog_root).into(), &prefix)?,
             signal,
         ))
     };
@@ -142,7 +142,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
 
     let blob_store = BlobStore::open(target, 65_536)?;
     let mut restored_blobs = 0_u64;
-    for entry in catalog.reader(&manifest.catalog_root)? {
+    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
         let ArchiveCatalogItem::Blob(blob) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
@@ -180,7 +180,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
     }
 
     let mut restored_receipt_segments = 0_u64;
-    for entry in catalog.reader(&manifest.catalog_root)? {
+    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
         let ArchiveCatalogItem::Receipt(receipt) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
