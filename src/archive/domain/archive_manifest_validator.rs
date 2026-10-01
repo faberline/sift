@@ -5,11 +5,11 @@ use std::collections::BTreeSet;
 
 use thiserror::Error;
 
-use crate::archive::domain::archive_manifest::{
-    ArchiveDedupeReceipt, ArchiveManifest, ARCHIVE_FORMAT_VERSION,
-};
 use crate::archive::domain::manifest_validation_policy::{
     ManifestValidationPolicy, UriValidationError,
+};
+use crate::shared_kernel::archive_manifest::{
+    ArchiveDedupeReceipt, ArchiveManifest, ARCHIVE_FORMAT_VERSION,
 };
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 

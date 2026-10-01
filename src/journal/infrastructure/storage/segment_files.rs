@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use chrono::DateTime;
 
-use crate::journal::domain::segment_manifest::SegmentManifest;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 

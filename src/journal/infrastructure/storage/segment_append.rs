@@ -5,12 +5,12 @@ use std::os::unix::fs::PermissionsExt;
 
 use anyhow::{bail, Context, Result};
 
-use crate::journal::domain::segment_manifest::{AppendLocation, SegmentManifest, SegmentState};
-use crate::journal::domain::shard_route::Route;
 use crate::journal::infrastructure::storage::segment_files::{event_time_unix_nano, sha256_file};
 use crate::journal::infrastructure::storage::segment_store::{
     ActiveSegment, SegmentStateData, SegmentStore, FRAMED_LOG_HEADER_BYTES,
 };
+use crate::shared_kernel::segment_manifest::{AppendLocation, SegmentManifest, SegmentState};
+use crate::shared_kernel::shard_route::Route;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 impl SegmentStore {

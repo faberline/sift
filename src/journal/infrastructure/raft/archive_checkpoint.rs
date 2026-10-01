@@ -7,12 +7,12 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::domain::append_policy::validate_retention_fence;
-use crate::journal::domain::retention_fence::RetentionFenceV1;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::archive_checkpoint_install::{
     archive_checkpoint_install_mode, ArchiveCheckpointInstallMode, ValidatedArchiveStage,
 };
 use crate::journal::infrastructure::raft::snapshot_format::{read_one_or_eof, SnapshotMetadata};
+use crate::shared_kernel::retention_fence::RetentionFenceV1;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(super) const ARCHIVE_CHECKPOINT_MAGIC: &[u8; 8] = b"SIFTRCP1";
@@ -126,14 +126,14 @@ pub(super) fn fetch_checkpoint_manifest(
     checkpoint: &ArchiveCheckpointV1,
     fetch_context: &'static str,
     decode_context: &'static str,
-) -> Result<crate::archive::domain::archive_manifest::ArchiveManifest> {
+) -> Result<crate::shared_kernel::archive_manifest::ArchiveManifest> {
     let manifest_bytes =
         service_backup::fetch_backup_object(&checkpoint.manifest_uri).context(fetch_context)?;
     let actual_hash = sha256_hex(&manifest_bytes);
     if actual_hash != checkpoint.manifest_sha256 {
         bail!("Sift archive checkpoint manifest failed its SHA-256 check");
     }
-    let manifest: crate::archive::domain::archive_manifest::ArchiveManifest =
+    let manifest: crate::shared_kernel::archive_manifest::ArchiveManifest =
         serde_json::from_slice(&manifest_bytes).context(decode_context)?;
     crate::archive::application::manifest_validation::validate_archive_manifest(&manifest)?;
     if manifest.raft_snapshot_index != checkpoint.archive_snapshot_index
@@ -158,7 +158,7 @@ pub(super) fn restore_archive_checkpoint(
     )?;
 
     let install_mode = archive_checkpoint_install_mode(journal, checkpoint, &expected_manifest)?;
-    let receipt = crate::archive::application::archive_receipts::ArchiveReceipt {
+    let receipt = crate::shared_kernel::archive_receipts::ArchiveReceipt {
         manifest_uri: checkpoint.manifest_uri.clone(),
         manifest_sha256: checkpoint.manifest_sha256.clone(),
         manifest: expected_manifest.clone(),

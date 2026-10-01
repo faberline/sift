@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::archive::infrastructure::archive_control_paths::{
     LOCAL_COMMIT_FORMAT_VERSION, LOCAL_COMMIT_PATH,
 };
-use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 #[cfg(any(not(unix), unix))]
@@ -54,8 +54,7 @@ pub(in crate::archive) fn read_local_commit_state(
     }
     let mut watermarks = ArchiveWatermarks::default();
     for segment in &state.segments {
-        if segment.manifest.state != crate::journal::domain::segment_manifest::SegmentState::Sealed
-        {
+        if segment.manifest.state != crate::shared_kernel::segment_manifest::SegmentState::Sealed {
             bail!("local segment commit contains a non-sealed segment");
         }
         watermarks.include(segment.signal, segment.manifest.last_cursor);

@@ -1,7 +1,7 @@
 //! What archiving, eviction, expiration and replay report back, and the archive
 //! status.
 
-use crate::archive::domain::archive_manifest::ArchiveManifest;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 #[derive(Clone, Debug)]

@@ -6,7 +6,7 @@ use std::sync::RwLock;
 
 use anyhow::{bail, Context, Result};
 
-use crate::journal::domain::shard_route::{
+use crate::shared_kernel::shard_route::{
     bucket_for, validate_epochs, EpochMap, Route, VIRTUAL_BUCKETS,
 };
 

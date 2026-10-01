@@ -8,10 +8,10 @@ use anyhow::Result;
 use crate::archive::domain::archive_event_time::{
     acknowledgement_time_bounds, event_time_unix_nano,
 };
-use crate::archive::domain::archive_manifest::ArchiveSegment;
 use crate::archive::infrastructure::dedupe_receipt_archive::archive_dedupe_receipts;
 use crate::archive::infrastructure::gcs_uri::gcs_uri;
 use crate::archive::infrastructure::parquet_event_codec::encode_parquet;
+use crate::shared_kernel::archive_manifest::ArchiveSegment;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 

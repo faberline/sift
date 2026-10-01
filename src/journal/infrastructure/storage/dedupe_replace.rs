@@ -8,8 +8,6 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::journal::domain::dedupe_stats::DedupeStats;
-use crate::journal::domain::idempotency_window::{generation_for, oldest_generation};
 use crate::journal::infrastructure::storage::dedupe_generation_store::{
     load_state, stats_from_state,
 };
@@ -20,6 +18,8 @@ use crate::journal::infrastructure::storage::dedupe_shard_file::{
 use crate::journal::infrastructure::storage::dedupe_tree_copy::{
     copy_dedupe_tree, remove_file_if_exists, remove_real_dir_if_exists,
 };
+use crate::shared_kernel::dedupe_stats::DedupeStats;
+use crate::shared_kernel::idempotency_window::{generation_for, oldest_generation};
 
 const REPLACE_FORMAT_VERSION: u32 = 1;
 

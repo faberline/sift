@@ -4,7 +4,7 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::journal::domain::retention_fence::RetentionFenceV1;
+use crate::shared_kernel::retention_fence::RetentionFenceV1;
 use crate::EventEnvelope;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

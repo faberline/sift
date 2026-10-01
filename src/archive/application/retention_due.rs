@@ -6,12 +6,12 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
 
 pub(super) fn committed_has_expired_dedupe_receipt(
     manifest: &ArchiveManifest,
@@ -57,7 +57,7 @@ pub fn retention_due_at(root: &Path, now: DateTime<Utc>) -> Result<bool> {
     }
     let receipt_cutoff_nanos = (now
         - chrono::Duration::seconds(
-            crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+            crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
         ))
     .timestamp_nanos_opt()
     .context("dedupe receipt cleanup cutoff is outside the nanosecond range")?;

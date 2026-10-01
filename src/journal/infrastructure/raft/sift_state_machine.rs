@@ -9,11 +9,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Context, Result};
 use raft_runtime::{OutcomeWindow, RaftStateMachine};
 
-use crate::journal::domain::append_result::AppendResult;
 use crate::journal::domain::checkpoint_position::CheckpointPosition;
 use crate::journal::domain::control_state::{ControlState, CONTROL_STATE_FORMAT_VERSION};
-use crate::journal::domain::retention_fence::RetentionFenceV1;
-use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::archive_checkpoint::ArchiveCheckpointV1;
 use crate::journal::infrastructure::raft::archive_checkpoint_install::ValidatedArchiveStage;
@@ -22,6 +19,9 @@ use crate::journal::infrastructure::raft::control_state_store::{
 };
 use crate::journal::infrastructure::raft::local_checkpoint::LocalCheckpointV1;
 use crate::journal::infrastructure::raft::resident_checkpoint::ResidentCheckpointV1;
+use crate::shared_kernel::append_result::AppendResult;
+use crate::shared_kernel::retention_fence::RetentionFenceV1;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 #[cfg(any(not(unix), unix))]
@@ -202,7 +202,7 @@ impl SiftStateMachine {
     pub(crate) fn expire_current_archive_at(
         &self,
         now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Option<crate::archive::application::archive_receipts::ExpirationReceipt>> {
+    ) -> Result<Option<crate::shared_kernel::archive_receipts::ExpirationReceipt>> {
         let Some(remote) =
             crate::archive::application::archive_status_queries::remote_retained_state(
                 self.journal.data_dir(),

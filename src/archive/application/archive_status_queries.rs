@@ -4,13 +4,13 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::archive::application::archive_receipts::{
-    ArchiveCommitStatus, LocalArchiveStatus, RemoteRetainedState,
-};
 use crate::archive::domain::event_set_digest::decode_event_content_digest;
 use crate::archive::infrastructure::archive_commit_state::read_commit_state;
 use crate::archive::infrastructure::local_segment_commit_state::read_local_commit_state;
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::archive_receipts::{
+    ArchiveCommitStatus, LocalArchiveStatus, RemoteRetainedState,
+};
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 pub(crate) fn committed_watermarks(root: &Path) -> Result<ArchiveWatermarks> {

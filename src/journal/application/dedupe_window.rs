@@ -24,7 +24,7 @@ pub(super) fn rebuild_dedupe_index(
     let now = Utc::now();
 
     let cutoff = now
-        - Duration::seconds(crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS);
+        - Duration::seconds(crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS);
     let remote =
         crate::archive::application::replay_recent_committed::replay_recent_committed_events(
             root,
@@ -44,7 +44,7 @@ pub(super) fn rebuild_dedupe_index(
     }
 
     let mut receipt_page =
-        Vec::<crate::journal::domain::dedupe_receipt::DedupeReceipt>::with_capacity(
+        Vec::<crate::shared_kernel::dedupe_receipt::DedupeReceipt>::with_capacity(
             RECOVERY_PAGE_EVENTS,
         );
     crate::archive::application::replay_recent_committed::replay_recent_committed_receipts(

@@ -1,7 +1,7 @@
 //! A row of the archive catalog, and the keys segments, receipts and blobs sort
 //! under.
 
-use crate::archive::domain::archive_manifest::{ArchiveBlob, ArchiveDedupeReceipt, ArchiveSegment};
+use crate::shared_kernel::archive_manifest::{ArchiveBlob, ArchiveDedupeReceipt, ArchiveSegment};
 
 // Catalog rows are decoded and consumed one at a time. Keeping the concrete
 // values here avoids an allocation on every segment in the query hot path.

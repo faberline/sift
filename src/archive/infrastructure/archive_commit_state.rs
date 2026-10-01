@@ -6,13 +6,13 @@ use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
-use crate::archive::domain::archive_manifest::{ArchiveManifest, ARCHIVE_FORMAT_VERSION};
 use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
 use crate::archive::infrastructure::archive_control_paths::{
     ARCHIVE_COMMIT_FORMAT_VERSION, ARCHIVE_COMMIT_PATH,
 };
 use crate::archive::infrastructure::manifest_validation::validate_archive_manifest;
+use crate::shared_kernel::archive_manifest::{ArchiveManifest, ARCHIVE_FORMAT_VERSION};
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 #[cfg(any(not(unix), unix))]

@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-use crate::archive::domain::archive_manifest::{ArchiveBlob, ArchiveManifest, ArchiveSegment};
 use crate::archive::infrastructure::archive_catalog::{load_archive_catalog, load_gc_catalog};
+use crate::shared_kernel::archive_manifest::{ArchiveBlob, ArchiveManifest, ArchiveSegment};
 
 #[doc(hidden)]
 pub fn inspect_archive_catalog(

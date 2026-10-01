@@ -5,12 +5,12 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::infrastructure::archive_commit_state::read_commit_state;
 use crate::archive::infrastructure::archive_control_paths::{
     LOCAL_BLOB_GC_COMPLETE_PATH, LOCAL_BLOB_GC_FORMAT_VERSION, LOCAL_BLOB_GC_PATH,
 };
 use crate::archive::infrastructure::local_blob_live_index::remove_local_blob_live_index;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;

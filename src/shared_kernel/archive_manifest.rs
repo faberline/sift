@@ -3,12 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::journal::domain::{segment_manifest::SegmentManifest, shard_route::EpochMap};
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 use crate::shared_kernel::catalog_manifest::CatalogRoot;
+use crate::shared_kernel::{segment_manifest::SegmentManifest, shard_route::EpochMap};
 use crate::{ContentBlobRef, SignalKind};
 
-pub(in crate::archive) const ARCHIVE_FORMAT_VERSION: u16 = 10;
+pub(crate) const ARCHIVE_FORMAT_VERSION: u16 = 10;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArchiveBlob {
@@ -118,7 +118,7 @@ pub struct ArchiveRetentionScan {
     pub oldest_retained_event_time_unix_nano: Option<i64>,
 }
 
-pub(in crate::archive) fn empty_dedupe_receipt() -> ArchiveDedupeReceipt {
+pub(crate) fn empty_dedupe_receipt() -> ArchiveDedupeReceipt {
     ArchiveDedupeReceipt {
         object_uri: String::new(),
         bytes: 0,

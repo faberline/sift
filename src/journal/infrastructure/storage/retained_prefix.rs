@@ -3,9 +3,9 @@
 
 use anyhow::Result;
 
-use crate::journal::domain::retained_prefix_reconcile_stats::RetainedPrefixReconcileStats;
 use crate::journal::infrastructure::storage::raw_storage::RawStorage;
 use crate::journal::infrastructure::storage::segment_read::SegmentEventReader;
+use crate::shared_kernel::retained_prefix_reconcile_stats::RetainedPrefixReconcileStats;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 

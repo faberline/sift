@@ -4,10 +4,10 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
 use crate::archive::infrastructure::archive_commit_state::read_commit_state;
 use crate::archive::infrastructure::manifest_validation::validate_archive_manifest;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(in crate::archive) fn fetch_verified_committed_root(

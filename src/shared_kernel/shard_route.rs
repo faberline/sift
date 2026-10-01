@@ -28,7 +28,7 @@ pub(crate) fn bucket_for(event_id: &str) -> u16 {
 }
 
 #[derive(Debug, Error)]
-pub(in crate::journal) enum EpochMapError {
+pub(crate) enum EpochMapError {
     #[error("epoch map history must not be empty")]
     Empty,
     #[error("epoch ids must be strictly increasing")]
@@ -39,7 +39,7 @@ pub(in crate::journal) enum EpochMapError {
     CursorOrder,
 }
 
-pub(in crate::journal) fn validate_epochs(epochs: &[EpochMap]) -> Result<(), EpochMapError> {
+pub(crate) fn validate_epochs(epochs: &[EpochMap]) -> Result<(), EpochMapError> {
     if epochs.is_empty() {
         return Err(EpochMapError::Empty);
     }

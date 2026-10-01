@@ -13,7 +13,6 @@ use crate::journal::domain::append_policy::{
 use crate::journal::domain::checkpoint_position::CheckpointPosition;
 use crate::journal::domain::control_state::{ControlState, CONTROL_STATE_FORMAT_VERSION};
 use crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_BYTES;
-use crate::journal::domain::sift_command::SiftCommandV1;
 use crate::journal::infrastructure::raft::archive_checkpoint::write_archive_checkpoint;
 use crate::journal::infrastructure::raft::command_codec::{
     decode_command, COMMAND_MAGIC, MAX_ENCODED_COMMAND_BYTES,
@@ -26,6 +25,7 @@ use crate::journal::infrastructure::raft::snapshot_restore::{
     restore_streamed_snapshot, validate_streamed_snapshot,
 };
 use crate::journal::infrastructure::raft::snapshot_writer::write_snapshot;
+use crate::shared_kernel::sift_command::SiftCommandV1;
 
 impl RaftStateMachine for SiftStateMachine {
     fn snapshot_capability(&self) -> Option<&'static str> {

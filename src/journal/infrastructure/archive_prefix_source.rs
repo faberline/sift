@@ -18,7 +18,7 @@ impl DurableJournal {
         u64,
         Vec<(
             SignalKind,
-            crate::journal::domain::segment_manifest::SegmentManifest,
+            crate::shared_kernel::segment_manifest::SegmentManifest,
         )>,
     )> {
         let state = self.state.write().expect("journal state lock poisoned");

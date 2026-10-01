@@ -14,9 +14,6 @@ use crate::archive::application::retention_catalog_ops::{
 };
 use crate::archive::domain::archive_catalog_item::{blob_catalog_key, ArchiveCatalogItem};
 use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
-use crate::archive::domain::archive_manifest::{
-    ArchiveManifest, ArchiveRetentionDelta, ArchiveRetentionScan, ARCHIVE_FORMAT_VERSION,
-};
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
 use crate::archive::domain::event_set_digest::{
     decode_event_content_digest, decode_event_id_digest, include_event_content, include_event_id,
@@ -29,6 +26,9 @@ use crate::archive::infrastructure::archive_commit_state::ArchiveCommitState;
 use crate::archive::infrastructure::gc_plan_builder::spill_pending_archive_gc;
 use crate::archive::infrastructure::gcs_uri::{gcs_uri, split_gcs_uri};
 use crate::archive::infrastructure::spill_catalog::SpillCatalog;
+use crate::shared_kernel::archive_manifest::{
+    ArchiveManifest, ArchiveRetentionDelta, ArchiveRetentionScan, ARCHIVE_FORMAT_VERSION,
+};
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 use crate::shared_kernel::stored_event::StoredEvent;
 
@@ -106,7 +106,7 @@ impl RetentionPass {
         let mut segment_expired = 0_u64;
         let receipt_cutoff_nanos = (now
             - chrono::Duration::seconds(
-                crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+                crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
             ))
         .timestamp_nanos_opt()
         .context("dedupe receipt retention cutoff is outside the nanosecond range")?;

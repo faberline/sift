@@ -6,7 +6,6 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::archive::application::archive_receipts::ArchiveReplay;
 use crate::archive::application::committed_event_reader::CommittedEventReader;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::parse_optional_archive_time;
@@ -17,6 +16,7 @@ use crate::archive::infrastructure::archive_integrity::verify_archive_segment;
 use crate::archive::infrastructure::archive_segment_cache::cached_segment_bytes;
 use crate::archive::infrastructure::parquet_event_codec::decode_parquet;
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::archive_receipts::ArchiveReplay;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 

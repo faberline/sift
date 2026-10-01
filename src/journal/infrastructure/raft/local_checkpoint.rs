@@ -6,12 +6,12 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::domain::append_policy::validate_retention_fence;
-use crate::journal::domain::retention_fence::RetentionFenceV1;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::archive_checkpoint::{
     ARCHIVE_CHECKPOINT_HEADER_BYTES, MAX_ARCHIVE_CHECKPOINT_BYTES,
 };
 use crate::journal::infrastructure::raft::snapshot_format::{read_one_or_eof, SnapshotMetadata};
+use crate::shared_kernel::retention_fence::RetentionFenceV1;
 
 pub(super) const LOCAL_CHECKPOINT_MAGIC: &[u8; 8] = b"SIFTLCP1";
 

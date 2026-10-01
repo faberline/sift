@@ -34,7 +34,7 @@ impl RecentCursor {
         self.acknowledged_at
             >= now
                 - Duration::seconds(
-                    crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+                    crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
                 )
     }
 }

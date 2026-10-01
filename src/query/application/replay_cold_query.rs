@@ -5,9 +5,9 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::app::service_state::ServiceState;
-use crate::journal::domain::event_query::EventQuery;
 use crate::query::application::archive_query_status::ArchiveQueryStatus;
 use crate::shared_kernel::event::SignalKind;
+use crate::shared_kernel::event_query::EventQuery;
 
 /// The part of a query a cold-query replay reads: the project, the optional
 /// environment, and the RFC 3339 time range.

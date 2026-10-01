@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 
-use crate::journal::domain::event_query::EventQuery;
 use crate::journal::domain::journal_limits::PROJECTION_LOCAL_BUFFER_EVENTS;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::shared_kernel::event_query::EventQuery;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 #[doc(hidden)]

@@ -42,7 +42,7 @@ pub(in crate::archive) fn run_lifecycle_attempt(
     journal: &DurableJournal,
     state_machine: &crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine,
     destination: Option<&str>,
-    retention_fence: Option<crate::journal::domain::retention_fence::RetentionFenceV1>,
+    retention_fence: Option<crate::shared_kernel::retention_fence::RetentionFenceV1>,
 ) -> Result<LifecycleOutcome> {
     crate::archive::application::reconcile_committed_retention::reconcile_live_committed_retention(
         journal,

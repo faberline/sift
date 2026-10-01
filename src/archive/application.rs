@@ -6,7 +6,6 @@
 pub(crate) mod archive_journal_local;
 pub(crate) mod archive_journal_to_gcs;
 pub(crate) mod archive_raw_storage_to_gcs;
-pub(crate) mod archive_receipts;
 pub(crate) mod archive_status_queries;
 pub(crate) mod committed_event_reader;
 pub(crate) mod compact_journal;

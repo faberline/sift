@@ -7,13 +7,8 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::journal::domain::bloom_filter::bloom_insert_scalable;
-use crate::journal::domain::dedupe_receipt::DedupeReceipt;
 use crate::journal::domain::event_digest::{
     dedupe_record_digest, event_digest, shard_for, xor_digest_in_place,
-};
-use crate::journal::domain::idempotency_window::{
-    acknowledged_generation, acknowledged_nanos, event_is_active_at, generation_for,
-    GENERATION_SECONDS, IDEMPOTENCY_WINDOW_SECONDS,
 };
 use crate::journal::infrastructure::storage::dedupe_generation_store::{
     generation_path, pending_entry_count, persist_meta_with_policy, GenerationState,
@@ -23,6 +18,11 @@ use crate::journal::infrastructure::storage::dedupe_index::{
 };
 use crate::journal::infrastructure::storage::dedupe_shard_file::{
     encode_receipt_records, set_private_dir, set_private_file, RECEIPT_LOG_FILE,
+};
+use crate::shared_kernel::dedupe_receipt::DedupeReceipt;
+use crate::shared_kernel::idempotency_window::{
+    acknowledged_generation, acknowledged_nanos, event_is_active_at, generation_for,
+    GENERATION_SECONDS, IDEMPOTENCY_WINDOW_SECONDS,
 };
 use crate::shared_kernel::stored_event::StoredEvent;
 

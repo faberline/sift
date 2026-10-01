@@ -4,7 +4,6 @@
 use anyhow::Result;
 
 use crate::archive::application::archive_raw_storage_to_gcs::archive_gcs_captured;
-use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::application::archive_status_queries::committed_watermarks;
 use crate::archive::infrastructure::archive_commit_state::record_archive_commit;
 use crate::archive::infrastructure::archive_gc_pending_store::{
@@ -12,7 +11,8 @@ use crate::archive::infrastructure::archive_gc_pending_store::{
 };
 use crate::archive::infrastructure::archive_upload_intent::clear_archive_upload_intent;
 use crate::archive::infrastructure::local_segment_commit_state::retire_local_commit;
-use crate::journal::domain::segment_manifest::SegmentManifest;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 /// Commit a remote archive locally before any canonical WAL bytes are removed.

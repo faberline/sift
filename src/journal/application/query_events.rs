@@ -5,10 +5,10 @@ use std::collections::BTreeMap;
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 
-use crate::journal::domain::append_result::AppendResult;
-use crate::journal::domain::event_query::EventQuery;
 use crate::journal::domain::recent_cursor::recent_receipt_at;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::shared_kernel::append_result::AppendResult;
+use crate::shared_kernel::event_query::EventQuery;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 impl DurableJournal {

@@ -4,7 +4,6 @@
 
 pub(crate) mod archive_catalog_item;
 pub(crate) mod archive_event_time;
-pub(crate) mod archive_manifest;
 pub(crate) mod archive_manifest_validator;
 pub(crate) mod blob_hash_set;
 pub(crate) mod event_set_digest;

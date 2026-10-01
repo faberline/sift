@@ -5,7 +5,6 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::archive::application::archive_receipts::ArchiveReplay;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
 use crate::archive::infrastructure::archive_catalog::{
@@ -16,7 +15,8 @@ use crate::archive::infrastructure::archive_segment_cache::cached_segment_bytes;
 use crate::archive::infrastructure::dedupe_receipt_archive::fetch_dedupe_receipts;
 use crate::archive::infrastructure::parquet_event_codec::decode_parquet;
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
-use crate::journal::domain::dedupe_receipt::DedupeReceipt;
+use crate::shared_kernel::archive_receipts::ArchiveReplay;
+use crate::shared_kernel::dedupe_receipt::DedupeReceipt;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 /// Replay only archive rows that can still be inside the idempotency window.

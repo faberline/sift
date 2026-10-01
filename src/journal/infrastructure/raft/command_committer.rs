@@ -7,7 +7,7 @@ use crate::journal::application::commit_append_batch::CommitContext;
 impl CommitContext {
     pub(in crate::journal) async fn commit_command(
         &self,
-        command: crate::journal::domain::sift_command::SiftCommandV1,
+        command: crate::shared_kernel::sift_command::SiftCommandV1,
     ) -> Result<u64> {
         let bytes = command.encoded()?;
         if let Some(raft) = &self.raft {

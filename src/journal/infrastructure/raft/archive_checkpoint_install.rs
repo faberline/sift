@@ -9,7 +9,7 @@ use crate::journal::infrastructure::raft::archive_checkpoint::{
 
 pub(super) struct ValidatedArchiveStage {
     pub(super) checkpoint: ArchiveCheckpointV1,
-    pub(super) manifest: crate::archive::domain::archive_manifest::ArchiveManifest,
+    pub(super) manifest: crate::shared_kernel::archive_manifest::ArchiveManifest,
     pub(super) root: tempfile::TempDir,
 }
 
@@ -41,7 +41,7 @@ pub(super) fn validate_archive_checkpoint_install(
         if restored != manifest {
             bail!("Sift archive checkpoint manifest changed during validation");
         }
-        let receipt = crate::archive::application::archive_receipts::ArchiveReceipt {
+        let receipt = crate::shared_kernel::archive_receipts::ArchiveReceipt {
             manifest_uri: checkpoint.manifest_uri.clone(),
             manifest_sha256: checkpoint.manifest_sha256.clone(),
             manifest: manifest.clone(),
@@ -68,7 +68,7 @@ pub(super) fn validate_archive_checkpoint_install(
 pub(super) fn archive_checkpoint_install_mode(
     journal: &DurableJournal,
     checkpoint: &ArchiveCheckpointV1,
-    manifest: &crate::archive::domain::archive_manifest::ArchiveManifest,
+    manifest: &crate::shared_kernel::archive_manifest::ArchiveManifest,
 ) -> Result<ArchiveCheckpointInstallMode> {
     let empty = journal.last_cursor() == 0 && journal.total_event_count() == 0;
     if empty || journal.last_cursor() < checkpoint.raw_cursor {

@@ -8,10 +8,10 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 
 use crate::archive::domain::archive_event_time::acknowledgement_time_bounds;
-use crate::archive::domain::archive_manifest::ArchiveSegment;
 use crate::archive::infrastructure::parquet_event_codec::{
     decode_parquet_batch, open_parquet_reader,
 };
+use crate::shared_kernel::archive_manifest::ArchiveSegment;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 

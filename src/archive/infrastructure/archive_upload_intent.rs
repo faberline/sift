@@ -7,14 +7,14 @@ use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::infrastructure::archive_commit_state::{read_commit_state, ArchiveCommitState};
 use crate::archive::infrastructure::archive_control_paths::{
     ARCHIVE_UPLOAD_INTENT_FORMAT_VERSION, ARCHIVE_UPLOAD_INTENT_PATH,
 };
 use crate::archive::infrastructure::gcs_uri::split_gcs_uri;
 use crate::archive::infrastructure::manifest_validation::validate_archive_manifest;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
 #[cfg(any(not(unix), unix))]

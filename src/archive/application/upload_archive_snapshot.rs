@@ -6,15 +6,11 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 
 use crate::archive::application::archive_raw_storage_to_gcs::verify_local_archive_prefix;
-use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::application::manifest_validation::validate_archive_manifest;
 use crate::archive::domain::archive_catalog_item::{
     blob_catalog_key, segment_catalog_key, ArchiveCatalogItem,
 };
 use crate::archive::domain::archive_event_time::acknowledgement_time_bounds;
-use crate::archive::domain::archive_manifest::{
-    empty_dedupe_receipt, ArchiveBlob, ArchiveManifest, ArchiveSegment, ARCHIVE_FORMAT_VERSION,
-};
 use crate::archive::domain::event_set_digest::{
     decode_event_content_digest, decode_event_id_digest, include_event_content, include_event_id,
 };
@@ -37,8 +33,12 @@ use crate::archive::infrastructure::parquet_event_codec::{encode_parquet, SiftSi
 use crate::archive::infrastructure::spill_catalog::{
     add_spill_blob_reference, SpillBlobReference, SpillCatalog,
 };
-use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::storage::raw_storage::RawStorage;
+use crate::shared_kernel::archive_manifest::{
+    empty_dedupe_receipt, ArchiveBlob, ArchiveManifest, ArchiveSegment, ARCHIVE_FORMAT_VERSION,
+};
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::SignalKind;
 

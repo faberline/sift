@@ -6,11 +6,11 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
-use crate::ingest::domain::storage_reservation::storage_reservation;
-use crate::journal::domain::append_result::AppendResult;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::node::infrastructure::local_capacity::LocalCapacity;
+use crate::shared_kernel::append_result::AppendResult;
 use crate::shared_kernel::event::EventEnvelope;
+use crate::shared_kernel::storage_reservation::storage_reservation;
 
 #[derive(Clone)]
 pub(crate) struct CommitContext {
@@ -64,7 +64,7 @@ impl CommitContext {
             .collect::<Vec<_>>();
         let commit_index = self
             .commit_command(
-                crate::journal::domain::sift_command::SiftCommandV1::append_events_at(
+                crate::shared_kernel::sift_command::SiftCommandV1::append_events_at(
                     governed,
                     acknowledged_at,
                 ),

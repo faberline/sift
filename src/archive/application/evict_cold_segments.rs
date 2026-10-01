@@ -3,14 +3,14 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::archive::application::archive_receipts::HotEvictionReceipt;
 use crate::archive::domain::archive_catalog_item::{segment_catalog_key, ArchiveCatalogItem};
-use crate::archive::domain::archive_manifest::{empty_dedupe_receipt, ArchiveSegment};
 use crate::archive::domain::portable_manifest::portable_manifest;
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::archive_manifest::{empty_dedupe_receipt, ArchiveSegment};
+use crate::shared_kernel::archive_receipts::HotEvictionReceipt;
 
 /// Evict local copies whose complete event set is older than the 30-day hot
 /// window and is present in the verified remote manifest.

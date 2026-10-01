@@ -5,8 +5,8 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
-use crate::archive::domain::archive_manifest::{ArchiveBlob, ArchiveManifest, ArchiveSegment};
 use crate::archive::infrastructure::gcs_uri::split_gcs_uri;
+use crate::shared_kernel::archive_manifest::{ArchiveBlob, ArchiveManifest, ArchiveSegment};
 
 pub(in crate::archive) fn catalog_for_uri(uri: &str) -> Result<storage_segment::PagedCatalog> {
     let (bucket, prefix) = split_gcs_uri(uri)?;

@@ -1,10 +1,10 @@
 //! The storage-library limits and URI validation. Error sources stay intact.
 
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::domain::archive_manifest_validator::{self, ArchiveManifestError};
 use crate::archive::domain::manifest_validation_policy::{
     ManifestValidationPolicy, UriValidationError,
 };
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
 
 pub(crate) struct GcsManifestValidation;
 

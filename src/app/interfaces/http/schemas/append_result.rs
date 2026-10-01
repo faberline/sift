@@ -16,6 +16,6 @@ pub struct AppendResult {
 }
 
 schema_adapter!(
-    crate::journal::domain::append_result::AppendResult,
+    crate::shared_kernel::append_result::AppendResult,
     AppendResult
 );

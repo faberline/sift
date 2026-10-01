@@ -6,7 +6,6 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::archive::application::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
 use crate::archive::application::manifest_validation::validate_archive_manifest;
 use crate::archive::application::reconcile_committed_retention::reconcile_live_committed_retention;
 use crate::archive::application::retention_catalog_ops::{
@@ -21,7 +20,6 @@ use crate::archive::application::rewrite_retained_segment::rewrite_retained_segm
 use crate::archive::domain::archive_catalog_item::{
     dedupe_receipt_catalog_key, segment_catalog_key, ArchiveCatalogItem,
 };
-use crate::archive::domain::archive_manifest::{ArchiveManifest, ArchiveRetentionScan};
 use crate::archive::domain::retention_policy::{
     include_retention_oldest, RETENTION_SCAN_BATCH_SEGMENTS,
 };
@@ -36,6 +34,8 @@ use crate::archive::infrastructure::gc_plan_builder::build_gc_catalog_from_spill
 use crate::archive::infrastructure::gcs_uri::{gcs_uri, split_gcs_uri};
 use crate::archive::infrastructure::parquet_event_codec::decode_parquet;
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::archive_manifest::{ArchiveManifest, ArchiveRetentionScan};
+use crate::shared_kernel::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
 /// Remove events older than the fixed 180-day boundary from the committed
@@ -105,10 +105,8 @@ fn expire_committed_events_bounded_at(
     }
 
     let current_catalog = catalog_for_uri(&current.catalog_uri)?;
-    let mut reader = current_catalog.reader_after(
-        &(&current.catalog_root).into(),
-        &scan.after_catalog_key,
-    )?;
+    let mut reader =
+        current_catalog.reader_after(&(&current.catalog_root).into(), &scan.after_catalog_key)?;
     let spill_parent = root.join("tmp");
     let mut pass = RetentionPass::new(root, &current_state, &current, &spill_parent)?;
 
@@ -317,7 +315,7 @@ fn retention_cutoffs(now: DateTime<Utc>) -> Result<(i64, i64)> {
         .context("180-day retention cutoff is outside the nanosecond range")?;
     let receipt_cutoff_nanos = (now
         - chrono::Duration::seconds(
-            crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+            crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
         ))
     .timestamp_nanos_opt()
     .context("dedupe receipt cleanup cutoff is outside the nanosecond range")?;

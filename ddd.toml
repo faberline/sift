@@ -175,22 +175,13 @@ reason = "ProjectionRuntime::open builds LoggingProjection, MetricProjection and
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/projection/infrastructure/logging_projection.rs",
-  "src/projection/infrastructure/metric_projection_apply.rs",
-  "src/projection/infrastructure/service_projection_adapter.rs",
-  "src/projection/infrastructure/trace_projection.rs",
-]
+paths = ["src/projection/infrastructure/logging_projection.rs", "src/projection/infrastructure/metric_projection_apply.rs", "src/projection/infrastructure/service_projection_adapter.rs", "src/projection/infrastructure/trace_projection.rs"]
 subject = "infrastructure->application"
 reason = "The three projections implement the Projection trait, service_projection_adapter binds that trait to service_projection's, and LoggingProjection maps each event with normalize; §2.7 puts the trait and the normalizer in application, and P1 follows it. P2: move the Projection trait into the domain as a port and log_record_normalizer with it, so infrastructure depends only on the domain."
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/projection/application/projection_runtime.rs",
-  "src/projection/infrastructure/service_projection_adapter.rs",
-  "src/projection/interfaces/projection_worker.rs",
-]
+paths = ["src/projection/application/projection_runtime.rs", "src/projection/infrastructure/service_projection_adapter.rs", "src/projection/interfaces/projection_worker.rs"]
 subject = "journal.infrastructure"
 reason = "ProjectionRuntime::open, ProjectionWorker and JournalProjectionSource hold an Arc<DurableJournal>, and JournalProjectionSource reads it through JournalProjectionReadSession; §2 keeps DurableJournal as the journal's infrastructure facade under its old name, and P1 moves the projections' side as-is. P2: journal's application exposes a projection-source read use case (read_projection_source) that the projections call, and the composition root passes it in instead of the DurableJournal."
 
@@ -216,53 +207,31 @@ interfaces = "src/query/interfaces"
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/query/domain/query_job.rs",
-  "src/query/domain/query_time.rs",
-]
+paths = ["src/query/domain/query_job.rs", "src/query/domain/query_time.rs"]
 subject = "domain->interfaces"
 reason = "QueryJobV1 stores the job's QueryRequestV1 and its Option<QueryResponseV1>, and cold_query_requested reads a QueryRequestV1's time range; §2 puts QueryRequestV1 and QueryResponseV1 in interfaces/http as the API's wire schemas and wins over layer_deps here. P2: a domain query and result model the V1 wire types map to and from at the HTTP edge, or QueryRequestV1 and QueryResponseV1 approved as the query's published language in the domain."
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/query/application/archive_query_status.rs",
-  "src/query/application/execute_query.rs",
-]
+paths = ["src/query/application/archive_query_status.rs", "src/query/application/execute_query.rs"]
 subject = "application->interfaces"
 reason = "execute_query_v1 takes a QueryRequestV1 and matches its QuerySignalV1 and MetricFunctionV1, and it and apply_archive_query_status build a QueryResponseV1; §2 puts those wire schemas in interfaces/http and wins over layer_deps here. P2: the use case takes and returns the domain query and result model, and the handler maps the V1 wire types onto it."
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/query/infrastructure/file_query_job_store.rs",
-  "src/query/infrastructure/sift_api_client.rs",
-  "src/query/infrastructure/store_query_client.rs",
-]
+paths = ["src/query/infrastructure/file_query_job_store.rs", "src/query/infrastructure/sift_api_client.rs", "src/query/infrastructure/store_query_client.rs"]
 subject = "infrastructure->interfaces"
 reason = "QueryJobStore::create takes a QueryRequestV1 and succeed (and its JobState impl) a QueryResponseV1, forward_query_to_store and decode_store_query_response send a QueryRequestV1 and decode a QueryResponseV1, and SiftApiClient sends QueryRequestV1 (checking its QueryModeV1), CorrelationRequestV1 and LogTailRequestV1 and decodes QueryResponseV1; §2 puts those wire schemas in interfaces/http and wins over layer_deps here. P2: the store and the store client hold the domain query and result model, and the API client's wire types become its own or the published language."
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/query/interfaces/http/correlate_v1.rs",
-  "src/query/interfaces/http/phase_one.rs",
-  "src/query/interfaces/http/prom_query_params.rs",
-  "src/query/interfaces/http/prometheus_query.rs",
-  "src/query/interfaces/http/query_request_v1.rs",
-  "src/query/interfaces/http/query_role_router.rs",
-  "src/query/interfaces/http/query_v1.rs",
-]
+paths = ["src/query/interfaces/http/correlate_v1.rs", "src/query/interfaces/http/phase_one.rs", "src/query/interfaces/http/prom_query_params.rs", "src/query/interfaces/http/prometheus_query.rs", "src/query/interfaces/http/query_request_v1.rs", "src/query/interfaces/http/query_role_router.rs", "src/query/interfaces/http/query_v1.rs"]
 subject = "interfaces->domain"
 reason = "The handlers and wire types P1 moves whole read the domain directly: QueryRequestV1 and the phase-one requests embed QueryExpressionV1 and validate with validate_field and MAX_FILTER_ARGUMENTS, correlate_v1 parses times with parse_query_time_nanos, query_v1 encodes cursors with encode_query_cursor and reads QueryJobV1 as query_role_router does, prom_query_params parses with parse_decimal_seconds_nanos, and the Prometheus handlers run parse_promql, PromFunction and the promql_evaluator helpers (PROM_LOOKBACK_NANOS, PROM_MAX_RANGE_EVALUATIONS, prom_latest_values, prom_rate_values and the rest) inline. P2: the instant and range evaluation, correlation, tail and job lookup move behind application use cases the handlers call, and the V1 wire types map QueryExpressionV1 at the edge or it is approved as published language."
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/query/interfaces/http/query_role_router.rs",
-  "src/query/interfaces/mcp/mcp_transport.rs",
-  "src/query/interfaces/mcp/sift_mcp_server.rs",
-]
+paths = ["src/query/interfaces/http/query_role_router.rs", "src/query/interfaces/mcp/mcp_transport.rs", "src/query/interfaces/mcp/sift_mcp_server.rs"]
 subject = "interfaces->infrastructure"
 reason = "query_role_query_v1 calls forward_query_to_store and decode_store_query_response, and serve_stdio and http_router build the SiftApiClient that SiftMcpServer holds and calls; P1 moves the handlers and the MCP server whole. P2: application ports for forwarding a query to the store and for reaching the Sift API, with the composition root injecting store_query_client and SiftApiClient behind them."
 
@@ -274,14 +243,7 @@ reason = "ensure_complete_prom_metric_page, prom_series_labels, prom_latest_valu
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/query/application/execute_query.rs",
-  "src/query/application/prom_query.rs",
-  "src/query/interfaces/http/correlate_v1.rs",
-  "src/query/interfaces/http/get_trace.rs",
-  "src/query/interfaces/http/phase_one.rs",
-  "src/query/interfaces/http/prometheus_query.rs",
-]
+paths = ["src/query/application/execute_query.rs", "src/query/application/prom_query.rs", "src/query/interfaces/http/correlate_v1.rs", "src/query/interfaces/http/get_trace.rs", "src/query/interfaces/http/phase_one.rs", "src/query/interfaces/http/prometheus_query.rs"]
 subject = "projection.domain"
 reason = "Queries are answered by the projections: execute_query_v1, prom_metric_query and correlate_v1 build LogQuery, MetricQuery and TraceQuery with the MAX_*_QUERY_LIMIT bounds, catch up on PROJECTION_LOGGING_STORE, PROJECTION_METRIC_STORE and PROJECTION_TRACE_STORE, and the responses carry LogRecordV1, MetricSeriesResultV1 and TraceResultV1; P1 moves them as-is. P2: projection's application exposes the read use cases with the queries, pages and *V1 records as its published language, and query calls through them."
 
@@ -291,14 +253,6 @@ paths = ["src/query/application/execute_query.rs"]
 subject = "projection.infrastructure"
 reason = "execute_query_v1 replays the archive into fresh LoggingProjection, MetricProjection and TraceProjection instances to answer a cold query; P1 moves it whole. P2: projection's application offers an archive-replay read use case, and the cold path calls it instead of building the projections."
 
-[[exceptions]]
-rule = "B4"
-paths = [
-  "src/query/application/replay_cold_query.rs",
-  "src/query/interfaces/http/list_services_v1.rs",
-]
-subject = "journal.domain"
-reason = "list_services_v1 scans recent events through ServiceState's journal with an EventQuery, and replay_cold_query, which P2 moved here from the archive, pages through the hot events after the archive the same way; P1 moves the handler whole. P2: journal's application publishes query_events with EventQuery as its input; the handler calls it through a query use case, or the listing reads a projection instead, and replay_cold_query calls it directly."
 
 [[exceptions]]
 rule = "B4"
@@ -334,26 +288,13 @@ reason = "ServiceState::append_events wraps each governed chunk in an IngestBatc
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/ingest/interfaces/http/prometheus_remote_write.rs",
-  "src/ingest/interfaces/http/request_body_decoder.rs",
-  "src/ingest/interfaces/otlp/json_logs_decoder.rs",
-  "src/ingest/interfaces/otlp/json_metrics_decoder.rs",
-  "src/ingest/interfaces/otlp/json_traces_decoder.rs",
-  "src/ingest/interfaces/otlp/proto_logs_decoder.rs",
-  "src/ingest/interfaces/otlp/proto_metrics_decoder.rs",
-  "src/ingest/interfaces/otlp/proto_traces_decoder.rs",
-]
+paths = ["src/ingest/interfaces/http/prometheus_remote_write.rs", "src/ingest/interfaces/http/request_body_decoder.rs", "src/ingest/interfaces/otlp/json_logs_decoder.rs", "src/ingest/interfaces/otlp/json_metrics_decoder.rs", "src/ingest/interfaces/otlp/json_traces_decoder.rs", "src/ingest/interfaces/otlp/proto_logs_decoder.rs", "src/ingest/interfaces/otlp/proto_metrics_decoder.rs", "src/ingest/interfaces/otlp/proto_traces_decoder.rs"]
 subject = "interfaces->domain"
 reason = "The remote-write handler and AdmissionController::decode_body build AdmissionError refusals, and the OTLP decoders derive each event's id with stable_id; P1 moves the handler and the decoders whole. P2: the application re-exports AdmissionError and an event-id service the decoders call, or decoding moves behind an application use case, so the interfaces reach the domain only through the application."
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/ingest/application/append_events.rs",
-  "src/ingest/application/raft_batch_splitter.rs",
-  "src/ingest/infrastructure/ingest_batch_coordinator.rs",
-]
+paths = ["src/ingest/application/append_events.rs", "src/ingest/application/raft_batch_splitter.rs"]
 subject = "journal.domain"
 reason = "Ingest sizes and commits its batches in the journal's terms: split_governed_batches and the batch coordinator bound a batch by SiftCommandV1::append_events_size_bound, RAFT_BATCH_MAX_ITEMS and RAFT_BATCH_MAX_BYTES, ingest_batch_queue tunes the group-commit queue with RAFT_BATCH_MAX_DELAY and the rest, and the queue and the append use cases return AppendResult; P1 moves them as-is. P2: journal's application publishes the batch limits, the command size bound and AppendResult, ingest reads them there, and ingest's splitter takes the limits and the bound as arguments."
 
@@ -379,17 +320,7 @@ interfaces = "src/journal/interfaces"
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/journal/application/adopt_archive.rs",
-  "src/journal/application/append_durable_batch.rs",
-  "src/journal/application/apply_retention_expiration.rs",
-  "src/journal/application/checkpoint_identity.rs",
-  "src/journal/application/commit_append_batch.rs",
-  "src/journal/application/dedupe_window.rs",
-  "src/journal/application/query_events.rs",
-  "src/journal/application/recover_journal.rs",
-  "src/journal/application/restore_journal.rs",
-]
+paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/append_durable_batch.rs", "src/journal/application/apply_retention_expiration.rs", "src/journal/application/checkpoint_identity.rs", "src/journal/application/commit_append_batch.rs", "src/journal/application/dedupe_window.rs", "src/journal/application/query_events.rs", "src/journal/application/recover_journal.rs", "src/journal/application/restore_journal.rs"]
 subject = "application->infrastructure"
 reason = "§2 splits durability.rs and lib.rs's DurableJournal so the use cases (recover, append_durable_batch, the dedupe window upkeep and rebuild, adopt_archive_*, retention expiration, checkpoint_identity, restore and query_events) stay impl DurableJournal blocks over the infrastructure facade, reading its RawStorage, SignalWal, DedupeIndex, JournalHead file and CanonicalRecoveryReader, and CommitContext holds the DurableJournal and the SiftStateMachine; §2 wins over layer_deps here. P2: the use cases become application services over domain ports (event store, dedupe index, recovery reader, command committer) that durable_journal, the storage and the Raft state machine implement."
 
@@ -407,55 +338,22 @@ reason = "metrics_text is an impl DurableJournal block that renders the accepted
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/journal/application/commit_append_batch.rs",
-  "src/journal/application/recover_journal.rs",
-  "src/journal/infrastructure/durable_journal.rs",
-]
+paths = ["src/journal/application/recover_journal.rs", "src/journal/infrastructure/durable_journal.rs"]
 subject = "ingest.domain"
 reason = "DurableJournal holds the GovernancePolicySet it governs every appended event with (open reads it from the environment and recover validates it), and append_governed_batch reserves local capacity with ingest's storage_reservation; declaring ingest in depends_on would close a journal-ingest cycle, since ingest appends to the journal. P2: ingest governs events before the append, or governance reaches the journal through a domain port, and storage_reservation moves to the journal or node, which breaks the cycle."
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/journal/application/adopt_archive.rs",
-  "src/journal/application/append_durable_batch.rs",
-  "src/journal/application/apply_retention_expiration.rs",
-  "src/journal/application/dedupe_window.rs",
-  "src/journal/application/query_events.rs",
-  "src/journal/application/recover_journal.rs",
-  "src/journal/infrastructure/blob_reference_scan.rs",
-  "src/journal/infrastructure/journal_projection_read_session.rs",
-  "src/journal/infrastructure/raft/archive_checkpoint.rs",
-  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
-  "src/journal/infrastructure/raft/local_checkpoint.rs",
-  "src/journal/infrastructure/raft/raft_state_machine_impl.rs",
-  "src/journal/infrastructure/raft/sift_state_machine.rs",
-  "src/journal/infrastructure/raft/sift_state_machine_checkpoints.rs",
-]
+paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/append_durable_batch.rs", "src/journal/application/apply_retention_expiration.rs", "src/journal/application/dedupe_window.rs", "src/journal/application/query_events.rs", "src/journal/application/recover_journal.rs", "src/journal/infrastructure/blob_reference_scan.rs", "src/journal/infrastructure/journal_projection_read_session.rs", "src/journal/infrastructure/raft/archive_checkpoint.rs", "src/journal/infrastructure/raft/archive_checkpoint_install.rs", "src/journal/infrastructure/raft/local_checkpoint.rs", "src/journal/infrastructure/raft/raft_state_machine_impl.rs", "src/journal/infrastructure/raft/sift_state_machine.rs", "src/journal/infrastructure/raft/sift_state_machine_checkpoints.rs"]
 subject = "archive.application"
 reason = "The journal reads the archive's committed state throughout: recovery, append, the dedupe window, retention expiration, query_events, the blob reference scan and the state machine read committed_watermarks, committed_status, local_committed_status and remote_retained_state; recovery reconciles retention (reconcile_committed_retention) and resumes local blob GC (resume_local_blob_gc_batch, finish_local_blob_gc); the dedupe window replays archived receipts (replay_recent_committed_events, replay_recent_committed_receipts); query_events and the projection read session read archived events (read_committed_events_after, CommittedEventReader); and the Raft state machine archives locally, evicts, expires, restores and adopts archive checkpoints (archive_journal_local, evict_committed_cold_segments_at, expire_committed_events_at, restore_gcs, ArchiveReceipt, ExpirationReceipt). declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: an archive port in the journal's domain (committed watermarks and status, archived-event reader, checkpoint adoption) that the archive implements, which breaks the cycle."
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/journal/application/adopt_archive.rs",
-  "src/journal/application/recover_journal.rs",
-  "src/journal/infrastructure/raft/archive_checkpoint.rs",
-  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
-]
+paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/recover_journal.rs", "src/journal/infrastructure/raft/archive_checkpoint.rs", "src/journal/infrastructure/raft/archive_checkpoint_install.rs"]
 subject = "archive.infrastructure"
 reason = "Recovery and the archive-checkpoint adoption and install run the archive's control-record steps directly: adopt_verified_archive_receipt, cleanup_orphan_spills, reconcile_staged_archive_gc, install_archive_gc_plan and withhold_archive_gc_plan; declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: the same archive port exposes these steps from the archive's application, and the journal stops reaching its infrastructure."
 
-[[exceptions]]
-rule = "B4"
-paths = [
-  "src/journal/application/restore_journal.rs",
-  "src/journal/infrastructure/raft/archive_checkpoint.rs",
-  "src/journal/infrastructure/raft/archive_checkpoint_install.rs",
-]
-subject = "archive.domain"
-reason = "Restore and the Raft archive-checkpoint install hold the ArchiveManifest they adopt and check it with validate_archive_manifest; declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: the archive port validates and adopts the manifest, or ArchiveManifest becomes shared kernel as the journal-archive published language."
 
 # The archive: Sift's cold tier. It uploads the journal's sealed segments,
 # blobs and dedupe receipts to GCS or a local archive under a verified
@@ -481,89 +379,16 @@ interfaces = "src/archive/interfaces"
 
 [[exceptions]]
 rule = "B3"
-paths = [
-  "src/archive/application/archive_journal_local.rs",
-  "src/archive/application/archive_journal_to_gcs.rs",
-  "src/archive/application/archive_status_queries.rs",
-  "src/archive/application/committed_event_reader.rs",
-  "src/archive/application/evict_cold_segments.rs",
-  "src/archive/application/finalize_archive_gc.rs",
-  "src/archive/application/inspect_archive_catalog.rs",
-  "src/archive/application/reconcile_committed_retention.rs",
-  "src/archive/application/replay_committed_events.rs",
-  "src/archive/application/replay_recent_committed.rs",
-  "src/archive/application/restore_gcs.rs",
-  "src/archive/application/restore_into_empty.rs",
-  "src/archive/application/resume_local_blob_gc.rs",
-  "src/archive/application/retention_catalog_ops.rs",
-  "src/archive/application/retention_due.rs",
-  "src/archive/application/retention_expiration.rs",
-  "src/archive/application/retention_manifest_commit.rs",
-  "src/archive/application/retention_pass.rs",
-  "src/archive/application/rewrite_retained_segment.rs",
-  "src/archive/application/run_lifecycle_attempt.rs",
-  "src/archive/application/upload_archive_snapshot.rs",
-]
+paths = ["src/archive/application/archive_journal_local.rs", "src/archive/application/archive_journal_to_gcs.rs", "src/archive/application/archive_status_queries.rs", "src/archive/application/committed_event_reader.rs", "src/archive/application/evict_cold_segments.rs", "src/archive/application/finalize_archive_gc.rs", "src/archive/application/inspect_archive_catalog.rs", "src/archive/application/reconcile_committed_retention.rs", "src/archive/application/replay_committed_events.rs", "src/archive/application/replay_recent_committed.rs", "src/archive/application/restore_gcs.rs", "src/archive/application/restore_into_empty.rs", "src/archive/application/resume_local_blob_gc.rs", "src/archive/application/retention_catalog_ops.rs", "src/archive/application/retention_due.rs", "src/archive/application/retention_expiration.rs", "src/archive/application/retention_manifest_commit.rs", "src/archive/application/retention_pass.rs", "src/archive/application/rewrite_retained_segment.rs", "src/archive/application/run_lifecycle_attempt.rs", "src/archive/application/upload_archive_snapshot.rs"]
 subject = "application->infrastructure"
 reason = "§2 splits storage/archive.rs into use cases over the archive's control records and codecs: the upload, eviction, expiration, GC, restore, replay, retention and status use cases read and write ArchiveCommitState (read_commit_state, record_archive_commit), ArchiveUploadIntent, ArchiveGcPending, LocalBlobGcPending, LocalSegmentCommitState, RestoreState and the local blob live index; walk the catalog through SpillCatalog, load_archive_catalog and the GC plan builder; fetch the verified manifest and cache segments; and encode, decode and verify segments through SiftParquetCodec, ArchiveSignalStream and the integrity checks, with the control paths and private_fs_mode for the files they create. §2 wins over layer_deps here. P2: domain ports (commit store, upload-intent store, GC-plan store, catalog, manifest fetcher, segment codec) that these infrastructure modules implement, and the use cases take them."
 
-[[exceptions]]
-rule = "B3"
-paths = [
-  "src/archive/infrastructure/archive_commit_state.rs",
-  "src/archive/infrastructure/archive_gc_pending_store.rs",
-  "src/archive/infrastructure/archive_upload_intent.rs",
-  "src/archive/infrastructure/local_blob_gc_store.rs",
-]
-subject = "infrastructure->application"
-reason = "The commit-state, upload-intent, GC-pending and local-blob-GC stores persist or rebuild an ArchiveReceipt (record_archive_commit, adopt_verified_archive_receipt, the upload intent's recovery, archive_gc_pending_for_receipt, install_archive_gc_plan, local_blob_gc_pending_for_receipt), and §2.1 puts ArchiveReceipt in application with the other receipt DTOs; §2 wins over layer_deps here. P2: ArchiveReceipt moves to the archive domain as the committed-archive value the stores persist, and the application re-exports it with the other receipts."
+
+
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/archive/application/archive_journal_local.rs",
-  "src/archive/application/archive_journal_to_gcs.rs",
-  "src/archive/application/archive_raw_storage_to_gcs.rs",
-  "src/archive/application/lifecycle_checkpoint.rs",
-  "src/archive/application/prepare_retention_fence.rs",
-  "src/archive/application/replay_recent_committed.rs",
-  "src/archive/application/retention_due.rs",
-  "src/archive/application/retention_expiration.rs",
-  "src/archive/application/retention_pass.rs",
-  "src/archive/application/run_lifecycle_attempt.rs",
-  "src/archive/application/upload_archive_snapshot.rs",
-  "src/archive/infrastructure/dedupe_receipt_archive.rs",
-  "src/archive/infrastructure/local_segment_commit_state.rs",
-]
-subject = "journal.domain"
-reason = "The archive stores the journal's own records: the uploads and the local commit state read the journal's SegmentManifest, the dedupe-receipt archive and replay hold DedupeReceipt, expiration and retention_due keep IDEMPOTENCY_WINDOW_SECONDS of receipts, and the retention fence and the lifecycle build RetentionFenceV1 and propose SiftCommandV1 barriers; P1 moves them as-is. P2: the journal's application publishes the segment manifest, dedupe receipt, idempotency window, retention fence and the commands the archive proposes, or they become shared kernel as the journal-archive published language."
-
-[[exceptions]]
-rule = "B4"
-paths = [
-  "src/archive/domain/archive_manifest.rs",
-  "src/archive/domain/portable_manifest.rs",
-]
-subject = "journal.domain"
-reason = "ArchiveManifest carries the journal's SegmentManifest list and EpochMap history as serialized fields, and portable_manifest rewrites a SegmentManifest's paths for the archive; the manifest JSON is the archive's format, so P1 moves it as-is. P2: SegmentManifest and EpochMap move to the shared kernel as the journal-archive published language."
-
-[[exceptions]]
-rule = "B4"
-paths = [
-  "src/archive/application/archive_journal_local.rs",
-  "src/archive/application/archive_journal_to_gcs.rs",
-  "src/archive/application/archive_raw_storage_to_gcs.rs",
-  "src/archive/application/compact_journal.rs",
-  "src/archive/application/evict_cold_segments.rs",
-  "src/archive/application/prepare_retention_fence.rs",
-  "src/archive/application/reconcile_committed_retention.rs",
-  "src/archive/application/restore_into_empty.rs",
-  "src/archive/application/resume_local_blob_gc.rs",
-  "src/archive/application/retention_expiration.rs",
-  "src/archive/application/retention_manifest_commit.rs",
-  "src/archive/application/run_lifecycle_attempt.rs",
-  "src/archive/application/upload_archive_snapshot.rs",
-]
+paths = ["src/archive/application/archive_journal_local.rs", "src/archive/application/archive_journal_to_gcs.rs", "src/archive/application/archive_raw_storage_to_gcs.rs", "src/archive/application/compact_journal.rs", "src/archive/application/evict_cold_segments.rs", "src/archive/application/prepare_retention_fence.rs", "src/archive/application/reconcile_committed_retention.rs", "src/archive/application/restore_into_empty.rs", "src/archive/application/resume_local_blob_gc.rs", "src/archive/application/retention_expiration.rs", "src/archive/application/retention_manifest_commit.rs", "src/archive/application/run_lifecycle_attempt.rs", "src/archive/application/upload_archive_snapshot.rs"]
 subject = "journal.infrastructure"
 reason = "The archive use cases act on the journal's live stores: they take DurableJournal to capture, evict, expire, compact, reconcile and restore sealed segments, read segments and blobs through RawStorage and BlobStore, restore writes the epoch maps with write_epoch_maps, and the lifecycle, retention fence and compaction propose and apply through SiftStateMachine; P1 moves them as-is. P2: the journal's application exposes the snapshot, eviction, expiration, compaction and restore operations the archive needs, and the archive holds that port instead of DurableJournal, RawStorage and SiftStateMachine."
 
@@ -624,10 +449,7 @@ interfaces = "src/operations/interfaces"
 
 [[exceptions]]
 rule = "B4"
-paths = [
-  "src/operations/application/journal_backup.rs",
-  "src/operations/interfaces/http/admin_backup.rs",
-]
+paths = ["src/operations/application/journal_backup.rs", "src/operations/interfaces/http/admin_backup.rs"]
 subject = "journal.infrastructure"
 reason = "backup_journal and restore_journal take the DurableJournal, and admin_backup labels the snapshot with the journal's SNAPSHOT_CONTENT_TYPE; P1 moves backup.rs and lib.rs's admin endpoint as-is. P2: journal's application publishes snapshot_journal and restore_journal_from_bytes use cases that return and take the snapshot bytes with their content type, and operations calls them."
 

@@ -7,11 +7,11 @@ use flate2::Compression as GzipCompression;
 use std::io::{Read, Write};
 
 use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
-use crate::archive::domain::archive_manifest::ArchiveDedupeReceipt;
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
 use crate::archive::infrastructure::archive_integrity::verify_bytes;
 use crate::archive::infrastructure::gcs_uri::gcs_uri;
-use crate::journal::domain::dedupe_receipt::DedupeReceipt;
+use crate::shared_kernel::archive_manifest::ArchiveDedupeReceipt;
+use crate::shared_kernel::dedupe_receipt::DedupeReceipt;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 

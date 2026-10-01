@@ -111,7 +111,7 @@ impl DurableJournal {
 
     pub(crate) fn restore_archive_receipts(
         &self,
-        receipts: &[crate::journal::domain::dedupe_receipt::DedupeReceipt],
+        receipts: &[crate::shared_kernel::dedupe_receipt::DedupeReceipt],
         indexed_through_cursor: u64,
     ) -> Result<()> {
         self.dedupe
@@ -123,14 +123,14 @@ impl DurableJournal {
 
     pub(crate) fn set_restored_archive_head(
         &self,
-        manifest: &crate::archive::domain::archive_manifest::ArchiveManifest,
+        manifest: &crate::shared_kernel::archive_manifest::ArchiveManifest,
     ) -> Result<()> {
         self.dedupe
             .mark_rebuilt_through(manifest.raft_snapshot_index)?;
         let dedupe = self.dedupe.stats()?;
         if dedupe.newest_cursor > manifest.raft_snapshot_index
             || dedupe.window_seconds
-                != crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS as u64
+                != crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS as u64
         {
             bail!("restored archive dedupe index disagrees with its manifest");
         }

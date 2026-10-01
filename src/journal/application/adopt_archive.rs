@@ -23,7 +23,7 @@ impl DurableJournal {
     pub(crate) fn adopt_archive_checkpoint(
         &self,
         restored: &DurableJournal,
-        receipt: &crate::archive::application::archive_receipts::ArchiveReceipt,
+        receipt: &crate::shared_kernel::archive_receipts::ArchiveReceipt,
         expected_raw_cursor: u64,
     ) -> Result<()> {
         if receipt.manifest.raft_snapshot_index != expected_raw_cursor
@@ -128,7 +128,7 @@ impl DurableJournal {
     /// It does not download every cumulative Parquet segment.
     pub(crate) fn adopt_archive_retention_delta(
         &self,
-        receipt: &crate::archive::application::archive_receipts::ArchiveReceipt,
+        receipt: &crate::shared_kernel::archive_receipts::ArchiveReceipt,
         expected_raw_cursor: u64,
     ) -> Result<()> {
         let delta = receipt
@@ -190,7 +190,7 @@ impl DurableJournal {
     /// restore on every lifecycle tick.
     pub(crate) fn adopt_archive_coverage(
         &self,
-        receipt: &crate::archive::application::archive_receipts::ArchiveReceipt,
+        receipt: &crate::shared_kernel::archive_receipts::ArchiveReceipt,
         expected_raw_cursor: u64,
     ) -> Result<()> {
         if receipt.manifest.raft_snapshot_index != expected_raw_cursor {

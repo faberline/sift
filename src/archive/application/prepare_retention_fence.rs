@@ -14,7 +14,7 @@ pub(in crate::archive) async fn prepare_retention_fence(
     raft: Option<&Arc<raft_runtime::RaftHost>>,
     remote_archive: bool,
     retention_capable: bool,
-) -> Result<Option<crate::journal::domain::retention_fence::RetentionFenceV1>> {
+) -> Result<Option<crate::shared_kernel::retention_fence::RetentionFenceV1>> {
     if let Some((fence, applied_index)) = state_machine.pending_retention_fence() {
         if let Some(raft) = raft {
             raft.require_applied_index_on_all_voters(applied_index)
@@ -27,7 +27,7 @@ pub(in crate::archive) async fn prepare_retention_fence(
             if status.retention_scan_pending
                 && status.retention_generation >= fence.target_generation
             {
-                let next = crate::journal::domain::retention_fence::RetentionFenceV1 {
+                let next = crate::shared_kernel::retention_fence::RetentionFenceV1 {
                     source_manifest_uri: status.manifest_uri,
                     source_manifest_sha256: status.manifest_sha256,
                     target_generation: status.retention_generation.saturating_add(1),
@@ -35,7 +35,7 @@ pub(in crate::archive) async fn prepare_retention_fence(
                 };
                 if let Some(raft) = raft {
                     let command =
-                        crate::journal::domain::sift_command::SiftCommandV1::RetentionFence {
+                        crate::shared_kernel::sift_command::SiftCommandV1::RetentionFence {
                             fence: next.clone(),
                         }
                         .encoded()?;
@@ -72,14 +72,14 @@ pub(in crate::archive) async fn prepare_retention_fence(
         journal.storage().root(),
     )?
     .context("Sift retention requires a committed archive")?;
-    let fence = crate::journal::domain::retention_fence::RetentionFenceV1 {
+    let fence = crate::shared_kernel::retention_fence::RetentionFenceV1 {
         source_manifest_uri: status.manifest_uri,
         source_manifest_sha256: status.manifest_sha256,
         target_generation: status.retention_generation.saturating_add(1),
         evaluate_at: evaluate_at.to_rfc3339(),
     };
     if let Some(raft) = raft {
-        let command = crate::journal::domain::sift_command::SiftCommandV1::RetentionFence {
+        let command = crate::shared_kernel::sift_command::SiftCommandV1::RetentionFence {
             fence: fence.clone(),
         }
         .encoded()?;
@@ -110,7 +110,7 @@ pub(in crate::archive) async fn clear_completed_retention_fence(
         return Ok(());
     }
     raft.propose(
-        crate::journal::domain::sift_command::SiftCommandV1::clear_retention_fence(
+        crate::shared_kernel::sift_command::SiftCommandV1::clear_retention_fence(
             retention_generation,
         )
         .encoded()?,

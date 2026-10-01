@@ -5,15 +5,15 @@ use std::collections::BTreeSet;
 use anyhow::{bail, Result};
 use chrono::Utc;
 
-use crate::archive::application::archive_receipts::LocalArchiveReceipt;
 use crate::archive::infrastructure::archive_control_paths::{
     LOCAL_COMMIT_FORMAT_VERSION, LOCAL_COMMIT_PATH,
 };
 use crate::archive::infrastructure::local_segment_commit_state::{
     LocalCommittedSegment, LocalSegmentCommitState,
 };
-use crate::journal::domain::segment_manifest::SegmentManifest;
+use crate::shared_kernel::archive_receipts::LocalArchiveReceipt;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 #[cfg(any(not(unix), unix))]

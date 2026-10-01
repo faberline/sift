@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
-use crate::journal::domain::retention_fence::RetentionFenceV1;
+use crate::shared_kernel::retention_fence::RetentionFenceV1;
 use crate::shared_kernel::single_signal_batch::{ensure_single_signal, SingleSignalError};
 use crate::{EventEnvelope, EventError};
 

@@ -4,11 +4,11 @@ use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 
-use crate::journal::domain::event_query::EventQuery;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::snapshot_format::{
     write_snapshot_event, write_snapshot_header, SnapshotMetadata, SNAPSHOT_PAGE_EVENTS,
 };
+use crate::shared_kernel::event_query::EventQuery;
 
 /// Write one stable journal prefix as framed binary data.
 ///

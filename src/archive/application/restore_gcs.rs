@@ -6,7 +6,6 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 
 use crate::archive::application::restore_into_empty::restore_gcs_into_empty;
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::infrastructure::archive_control_paths::{
     RESTORE_STAGE_DIR, RESTORE_STATE_FORMAT_VERSION, RESTORE_STATE_PATH,
 };
@@ -15,6 +14,7 @@ use crate::archive::infrastructure::restore_state::{
     require_empty_restore_target, validate_building_restore_target, RestorePhase, RestoreState,
 };
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_dir;

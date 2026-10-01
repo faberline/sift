@@ -6,22 +6,22 @@ use thiserror::Error;
 
 use crate::shared_kernel::stored_event::StoredEvent;
 
-pub(in crate::journal) const GENERATION_SECONDS: i64 = 60 * 60;
+pub(crate) const GENERATION_SECONDS: i64 = 60 * 60;
 
 pub const IDEMPOTENCY_WINDOW_SECONDS: i64 = 6 * 60 * 60;
 
-pub(in crate::journal) fn generation_for(now: DateTime<Utc>) -> i64 {
+pub(crate) fn generation_for(now: DateTime<Utc>) -> i64 {
     now.timestamp().div_euclid(GENERATION_SECONDS)
 }
 
-pub(in crate::journal) fn oldest_generation(now: DateTime<Utc>) -> i64 {
+pub(crate) fn oldest_generation(now: DateTime<Utc>) -> i64 {
     now.timestamp()
         .saturating_sub(IDEMPOTENCY_WINDOW_SECONDS)
         .div_euclid(GENERATION_SECONDS)
 }
 
 #[derive(Debug, Error)]
-pub(in crate::journal) enum IdempotencyWindowError {
+pub(crate) enum IdempotencyWindowError {
     #[error("acknowledged_at must be RFC3339")]
     AcknowledgedAtNotRfc3339(#[source] chrono::ParseError),
     #[error("acknowledged_at is outside the nanosecond range")]
@@ -30,25 +30,21 @@ pub(in crate::journal) enum IdempotencyWindowError {
     CutoffOutOfRange,
 }
 
-pub(in crate::journal) fn acknowledged_generation(
-    event: &StoredEvent,
-) -> Result<i64, IdempotencyWindowError> {
+pub(crate) fn acknowledged_generation(event: &StoredEvent) -> Result<i64, IdempotencyWindowError> {
     Ok(DateTime::parse_from_rfc3339(&event.acknowledged_at)
         .map_err(IdempotencyWindowError::AcknowledgedAtNotRfc3339)?
         .timestamp()
         .div_euclid(GENERATION_SECONDS))
 }
 
-pub(in crate::journal) fn acknowledged_nanos(
-    event: &StoredEvent,
-) -> Result<i64, IdempotencyWindowError> {
+pub(crate) fn acknowledged_nanos(event: &StoredEvent) -> Result<i64, IdempotencyWindowError> {
     DateTime::parse_from_rfc3339(&event.acknowledged_at)
         .map_err(IdempotencyWindowError::AcknowledgedAtNotRfc3339)?
         .timestamp_nanos_opt()
         .ok_or(IdempotencyWindowError::AcknowledgedAtOutOfRange)
 }
 
-pub(in crate::journal) fn event_is_active_at(
+pub(crate) fn event_is_active_at(
     event: &StoredEvent,
     now: DateTime<Utc>,
 ) -> Result<bool, IdempotencyWindowError> {

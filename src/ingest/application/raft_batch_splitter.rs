@@ -8,7 +8,7 @@ pub(in crate::ingest) fn split_governed_batches(
     events: Vec<EventEnvelope>,
 ) -> Result<Vec<Vec<EventEnvelope>>> {
     let empty_size =
-        crate::journal::domain::sift_command::SiftCommandV1::append_events_size_bound(Vec::new())
+        crate::shared_kernel::sift_command::SiftCommandV1::append_events_size_bound(Vec::new())
             .uncompressed_len()?;
     let mut chunks = Vec::new();
     let mut batch = Vec::new();

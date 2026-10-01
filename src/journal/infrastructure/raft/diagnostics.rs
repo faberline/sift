@@ -3,8 +3,8 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::journal::domain::sift_command::SiftCommandV1;
 use crate::journal::infrastructure::raft::command_codec::decode_command;
+use crate::shared_kernel::sift_command::SiftCommandV1;
 use crate::EventEnvelope;
 
 #[doc(hidden)]

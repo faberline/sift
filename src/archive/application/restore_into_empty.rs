@@ -5,11 +5,9 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::application::manifest_validation::validate_archive_manifest;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::event_time_unix_nano;
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::domain::blob_hash_set::BlobHashSet;
 use crate::archive::domain::event_set_digest::{include_event_content, include_event_id};
 use crate::archive::infrastructure::archive_catalog::{
@@ -24,6 +22,8 @@ use crate::journal::infrastructure::storage::blob_store::BlobStore;
 use crate::journal::infrastructure::storage::shard_router::write_epoch_maps;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::data_layout::DataLayout;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;

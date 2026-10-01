@@ -29,7 +29,7 @@ pub(super) async fn propose_no_gc_quorum_barrier(
         outcome.manifest_uri.clone(),
         outcome.manifest_sha256.clone(),
     ) {
-        match (crate::journal::domain::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
+        match (crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
             retention_generation,
             manifest_uri,
             manifest_sha256,
@@ -69,7 +69,7 @@ pub(super) async fn propose_retention_barrier(
         outcome.manifest_uri.clone(),
         outcome.manifest_sha256.clone(),
     ) {
-        match (crate::journal::domain::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
+        match (crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
             retention_generation,
             manifest_uri,
             manifest_sha256,

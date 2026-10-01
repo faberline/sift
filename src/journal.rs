@@ -11,12 +11,8 @@ pub(crate) mod interfaces;
 
 pub use crate::journal::{
     domain::{
-        idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
         journal_head::JournalHead,
         raft_batch_limits::{RAFT_BATCH_MAX_BYTES, RAFT_BATCH_MAX_DELAY, RAFT_BATCH_MAX_ITEMS},
-        retained_prefix_reconcile_stats::RetainedPrefixReconcileStats,
-        segment_manifest::{AppendLocation, SegmentManifest, SegmentState},
-        shard_route::{EpochMap, Route, VIRTUAL_BUCKETS},
         storage_config::StorageConfig,
     },
     infrastructure::{
@@ -38,4 +34,11 @@ pub use crate::journal::{
             wal::{SignalWal, SignalWalReader},
         },
     },
+};
+
+pub use crate::shared_kernel::{
+    idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+    retained_prefix_reconcile_stats::RetainedPrefixReconcileStats,
+    segment_manifest::{AppendLocation, SegmentManifest, SegmentState},
+    shard_route::{EpochMap, Route, VIRTUAL_BUCKETS},
 };

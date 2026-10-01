@@ -3,10 +3,8 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::archive::application::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
 use crate::archive::application::evict_cold_segments::evict_committed_cold_segments_at;
 use crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch;
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::domain::event_set_digest::decode_event_content_digest;
 use crate::archive::infrastructure::archive_commit_state::{
     record_archive_commit, ArchiveCommitState,
@@ -14,6 +12,8 @@ use crate::archive::infrastructure::archive_commit_state::{
 use crate::archive::infrastructure::archive_gc_pending_store::{
     promote_archive_gc_pending, stage_archive_gc_pending,
 };
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
+use crate::shared_kernel::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
 
 pub(super) fn validate_retention_receipt_source(
     receipt: &ArchiveReceipt,

@@ -18,7 +18,7 @@ pub struct AppendResult {
 }
 
 impl AppendResult {
-    pub(in crate::journal) fn with_commit_index(mut self, commit_index: u64) -> Self {
+    pub(crate) fn with_commit_index(mut self, commit_index: u64) -> Self {
         self.commit_index = commit_index;
         self
     }

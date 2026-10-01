@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 
 use anyhow::{bail, Context, Result};
 
-use crate::journal::domain::retention_fence::RetentionFenceV1;
+use crate::shared_kernel::retention_fence::RetentionFenceV1;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub const SNAPSHOT_CONTENT_TYPE: &str = "application/vnd.axiom.sift-snapshot";

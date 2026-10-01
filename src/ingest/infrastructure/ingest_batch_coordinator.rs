@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use crate::journal::domain::append_result::AppendResult;
+use crate::shared_kernel::append_result::AppendResult;
 use crate::shared_kernel::event::{EventEnvelope, SignalKind};
 
 pub(in crate::ingest) struct IngestBatchRequest {
@@ -14,7 +14,7 @@ pub(in crate::ingest) struct IngestBatchRequest {
 impl IngestBatchRequest {
     pub(in crate::ingest) fn new(events: Vec<EventEnvelope>) -> Result<Self> {
         let encoded_bytes =
-            crate::journal::domain::sift_command::SiftCommandV1::append_events_size_bound(
+            crate::shared_kernel::sift_command::SiftCommandV1::append_events_size_bound(
                 events.clone(),
             )
             .uncompressed_len()?;

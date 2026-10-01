@@ -13,17 +13,17 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::journal::domain::bloom_filter::bloom_contains;
-use crate::journal::domain::dedupe_stats::DedupeStats;
 use crate::journal::domain::event_digest::event_digest;
-use crate::journal::domain::idempotency_window::{
-    event_is_active_at, generation_for, oldest_generation, IDEMPOTENCY_WINDOW_SECONDS,
-};
 use crate::journal::infrastructure::storage::dedupe_generation_store::{
     clear_root, generation_path, load_state, pending_entry_count, persist_meta, shard_path,
     stats_from_state, GenerationState, META_FILE,
 };
 use crate::journal::infrastructure::storage::dedupe_replace::reconcile_replace;
 use crate::journal::infrastructure::storage::dedupe_shard_file::{lookup_file, set_private_dir};
+use crate::shared_kernel::dedupe_stats::DedupeStats;
+use crate::shared_kernel::idempotency_window::{
+    event_is_active_at, generation_for, oldest_generation, IDEMPOTENCY_WINDOW_SECONDS,
+};
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(super) const BACKGROUND_FLUSH_ENTRIES: usize = 100_000;

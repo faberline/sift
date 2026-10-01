@@ -6,12 +6,12 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::infrastructure::archive_commit_state::read_commit_state;
 use crate::archive::infrastructure::archive_control_paths::{
     ARCHIVE_GC_FORMAT_VERSION, ARCHIVE_GC_PATH, ARCHIVE_GC_STAGED_PATH,
 };
 use crate::archive::infrastructure::archive_upload_intent::reconcile_completed_archive_upload_intent;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
