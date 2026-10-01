@@ -385,7 +385,17 @@ fn typed_projection_flow_is_owned_by_service_projection() {
         "/src/projection/infrastructure/service_projection_adapter.rs"
     ))
     .expect("read Sift projection adapter");
-    let source = runtime + &adapter;
+    let backend = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/projection/infrastructure/shared_runtime_backend.rs"
+    ))
+    .expect("read shared projection runtime adapter");
+    let wiring = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/app/projection_wiring.rs"
+    ))
+    .expect("read shared projection runtime assembly");
+    let source = runtime + &adapter + &backend + &wiring;
 
     assert!(source.contains("service_projection::ProjectionRegistry"));
     assert!(source.contains("ProjectionHandle<StoredEvent, LoggingProjection>"));

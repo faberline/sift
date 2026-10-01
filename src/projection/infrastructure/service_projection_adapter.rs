@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::journal::application::journal_service::DurableJournal;
-use crate::projection::application::projection_runtime::Projection;
+use crate::projection::domain::projection::Projection;
 use crate::projection::infrastructure::logging_projection::LoggingProjection;
 use crate::projection::infrastructure::metric_projection::MetricProjection;
 use crate::projection::infrastructure::trace_projection::TraceProjection;
@@ -15,7 +15,12 @@ macro_rules! impl_shared_projection {
     ($projection:ty) => {
         impl service_projection::Projection<StoredEvent> for $projection {
             fn descriptor(&self) -> service_projection::ProjectionDescriptor {
-                Projection::descriptor(self)
+                let descriptor = Projection::descriptor(self);
+                service_projection::ProjectionDescriptor {
+                    name: descriptor.name,
+                    schema_version: descriptor.schema_version,
+                    retention: descriptor.retention,
+                }
             }
 
             fn apply_idempotent(&self, event: &StoredEvent) -> Result<()> {
@@ -57,8 +62,8 @@ impl service_projection::ProjectionRecord for StoredEvent {
     }
 }
 
-pub(in crate::projection) struct JournalProjectionSource {
-    pub(in crate::projection) journal: Arc<DurableJournal>,
+pub(crate) struct JournalProjectionSource {
+    pub(crate) journal: Arc<DurableJournal>,
 }
 
 struct JournalProjectionSession {

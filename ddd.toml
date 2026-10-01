@@ -167,17 +167,7 @@ interfaces = "src/projection/interfaces"
 # reason says.
 
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/projection/application/projection_runtime.rs"]
-subject = "application->infrastructure"
-reason = "ProjectionRuntime::open builds LoggingProjection, MetricProjection and TraceProjection, registers them with service_projection and reads the journal through JournalProjectionSource, and its fields hold handles to the three; P1 moves runtime.rs's runtime whole. P2: the composition root builds the projections and the journal source and passes them in, and the runtime holds them through a domain port."
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/projection/infrastructure/logging_projection.rs", "src/projection/infrastructure/metric_projection_apply.rs", "src/projection/infrastructure/service_projection_adapter.rs", "src/projection/infrastructure/trace_projection.rs"]
-subject = "infrastructure->application"
-reason = "The three projections implement the Projection trait, service_projection_adapter binds that trait to service_projection's, and LoggingProjection maps each event with normalize; §2.7 puts the trait and the normalizer in application, and P1 follows it. P2: move the Projection trait into the domain as a port and log_record_normalizer with it, so infrastructure depends only on the domain."
 
 
 # Queries: the versioned query API over logs, metrics and traces, its async
@@ -242,11 +232,6 @@ paths = ["src/query/application/execute_query.rs", "src/query/application/prom_q
 subject = "projection.domain"
 reason = "Queries are answered by the projections: execute_query_v1, prom_metric_query and correlate_v1 build LogQuery, MetricQuery and TraceQuery with the MAX_*_QUERY_LIMIT bounds, catch up on PROJECTION_LOGGING_STORE, PROJECTION_METRIC_STORE and PROJECTION_TRACE_STORE, and the responses carry LogRecordV1, MetricSeriesResultV1 and TraceResultV1; P1 moves them as-is. P2: projection's application exposes the read use cases with the queries, pages and *V1 records as its published language, and query calls through them."
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/query/application/execute_query.rs"]
-subject = "projection.infrastructure"
-reason = "execute_query_v1 replays the archive into fresh LoggingProjection, MetricProjection and TraceProjection instances to answer a cold query; P1 moves it whole. P2: projection's application offers an archive-replay read use case, and the cold path calls it instead of building the projections."
 
 
 [[exceptions]]

@@ -5,11 +5,11 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::RwLock;
 
+use crate::projection::domain::runtime_metadata::ProjectionDescriptor;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use service_projection::ProjectionDescriptor;
 
-use crate::projection::application::projection_runtime::Projection;
+use crate::projection::domain::projection::Projection;
 use crate::projection::domain::trace::{
     best_path, correlations, detect_cycles, remove_tracked_cursor, trace_key, trace_matches,
     SpanEventV1, SpanLinkV1, SpanRecordV1, TraceLocation, TracePage, TraceQuery, TraceResultV1,
@@ -217,6 +217,8 @@ impl Default for TraceProjection {
 }
 
 impl Projection for TraceProjection {
+    type Error = anyhow::Error;
+
     fn descriptor(&self) -> ProjectionDescriptor {
         ProjectionDescriptor {
             name: PROJECTION_TRACE_STORE.into(),

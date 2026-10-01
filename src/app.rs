@@ -17,3 +17,5 @@ pub(crate) mod system_clock;
 mod journal_command_wiring;
 
 mod journal_storage_wiring;
+
+mod projection_wiring;

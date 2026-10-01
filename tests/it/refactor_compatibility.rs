@@ -150,19 +150,19 @@ fn projection_snapshots_read_and_reencode_without_change() {
     let trace = TraceProjection::with_max_spans(10).unwrap();
     for (projection, signal, cursor, name) in [
         (
-            &log as &dyn Projection,
+            &log as &dyn Projection<Error = anyhow::Error>,
             SignalKind::Log,
             1,
             "projection-log.json",
         ),
         (
-            &metric as &dyn Projection,
+            &metric as &dyn Projection<Error = anyhow::Error>,
             SignalKind::Metric,
             2,
             "projection-metric.json",
         ),
         (
-            &trace as &dyn Projection,
+            &trace as &dyn Projection<Error = anyhow::Error>,
             SignalKind::Span,
             3,
             "projection-trace.json",

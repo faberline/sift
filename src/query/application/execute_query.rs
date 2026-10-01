@@ -56,7 +56,9 @@ pub(in crate::query) fn execute_query_v1(
             query.after_cursor = after_cursor;
             query.limit = projection::MAX_LOG_QUERY_LIMIT;
             let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
-                let archived = projection::LoggingProjection::new()
+                let archived = state
+                    .projections
+                    .new_log_replay()
                     .map_err(|error| ApiError::internal(error.to_string()))?;
                 let status = replay_cold_query(
                     state,
@@ -156,7 +158,7 @@ pub(in crate::query) fn execute_query_v1(
             query.after_series_id = decode_query_cursor("metrics", request.cursor.as_deref())?;
             query.limit = projection::MAX_METRIC_QUERY_LIMIT;
             let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
-                let archived = projection::MetricProjection::new();
+                let archived = state.projections.new_metric_replay();
                 let status = replay_cold_query(
                     state,
                     &cold_query_scope(request),
@@ -281,7 +283,7 @@ pub(in crate::query) fn execute_query_v1(
             query.after_trace_id = decode_query_cursor("traces", request.cursor.as_deref())?;
             query.limit = projection::MAX_TRACE_QUERY_LIMIT;
             let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
-                let archived = projection::TraceProjection::new();
+                let archived = state.projections.new_trace_replay();
                 let status = replay_cold_query(
                     state,
                     &cold_query_scope(request),

@@ -18,11 +18,11 @@ pub(crate) struct ColdQueryScope<'a> {
     pub(crate) end: Option<&'a str>,
 }
 
-pub(crate) fn replay_cold_query(
+pub(crate) fn replay_cold_query<Q, P>(
     state: &ServiceState,
     scope: &ColdQueryScope<'_>,
     signal: SignalKind,
-    projection: &dyn crate::projection::Projection,
+    projection: &crate::projection::application::replay_service::ReplayService<Q, P>,
 ) -> ArchiveQueryStatus {
     let replay = crate::archive::application::replay_committed_events::replay_committed_events(
         state.journal().storage().root(),
@@ -56,12 +56,12 @@ pub(crate) fn replay_cold_query(
     ArchiveQueryStatus::Ready(replay)
 }
 
-fn replay_local_events_after_archive(
+fn replay_local_events_after_archive<Q, P>(
     state: &ServiceState,
     scope: &ColdQueryScope<'_>,
     signal: SignalKind,
     mut after: u64,
-    projection: &dyn crate::projection::Projection,
+    projection: &crate::projection::application::replay_service::ReplayService<Q, P>,
 ) -> Result<()> {
     loop {
         let events = state.journal().query(EventQuery {

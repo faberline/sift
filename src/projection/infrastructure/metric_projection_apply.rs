@@ -5,11 +5,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
 
+use crate::projection::domain::runtime_metadata::ProjectionDescriptor;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use service_projection::ProjectionDescriptor;
 
-use crate::projection::application::projection_runtime::Projection;
 use crate::projection::domain::metric::{
     parse_time, MetricHistogramV1, MetricPointV1, METRIC_SCHEMA_VERSION, PROJECTION_METRIC_STORE,
 };
@@ -19,6 +18,7 @@ use crate::projection::domain::metric_memory_size::{
 use crate::projection::domain::metric_series::{
     identity_material, make_chunks, point_order, push_metric_point, MetricState, StoredMetricSeries,
 };
+use crate::projection::domain::projection::Projection;
 use crate::projection::infrastructure::metric_projection::MetricProjection;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
@@ -45,6 +45,8 @@ struct MetricPayload {
 }
 
 impl Projection for MetricProjection {
+    type Error = anyhow::Error;
+
     fn descriptor(&self) -> ProjectionDescriptor {
         ProjectionDescriptor {
             name: PROJECTION_METRIC_STORE.into(),
