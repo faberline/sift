@@ -264,30 +264,3 @@ domain = "src/operations/domain"
 application = "src/operations/application"
 infrastructure = "src/operations/infrastructure"
 interfaces = "src/operations/interfaces"
-
-
-# Earlier P2 moves and splits remain recorded against main for the ratchet.
-# These entries do not suppress a finding.
-
-[[renames]]
-from = "src/archive/application/replay_cold_query.rs"
-to = ["src/query/application/replay_cold_query.rs"]
-
-[[renames]]
-from = "src/archive/application/expire_committed_events.rs"
-to = [
-  "src/archive/application/retention_expiration.rs",
-  "src/archive/application/retention_pass.rs",
-  "src/archive/application/rewrite_retained_segment.rs",
-]
-
-[[renames]]
-from = "src/archive/interfaces/lifecycle_worker.rs"
-to = [
-  "src/archive/application/lifecycle_tick.rs",
-  "src/archive/application/lifecycle_checkpoint.rs",
-]
-
-[[renames]]
-from = "src/ingest/domain/raft_batch_splitter.rs"
-to = ["src/ingest/application/raft_batch_splitter.rs"]

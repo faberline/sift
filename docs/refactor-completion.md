@@ -1,7 +1,7 @@
 # P2 completion report
 
 - Date: 2026-10-01.
-- Branch: `refactor/ddd-p2`.
+- Refactor branch: `refactor/ddd-p2`.
 - Starting commit: `5ae45b9079538af8f70a5bfd4f3c0948adff83a6`.
 - Validated implementation commit: `370adf3ca3655b4a1122d835e18268520d96ecc0`.
 - Delivery: local commits.
@@ -53,7 +53,21 @@ Later rows use `test.log`, `test-diff.log`, `build.log`, `clippy.jsonl`,
 
 Local evidence is under `/private/tmp/sift-refactor-completion-20261001`.
 The final documentation batch passed the same checks in `phase18-documentation`.
-`final-receipt.json` records the final local HEAD and results after that commit.
+`final-receipt.json` records the refactor branch HEAD and results after that commit.
+
+## Local main landing
+
+Local `main` moved from `61ba693` to the verified `cff6f07` by fast-forward.
+This kept the complete commit history.
+The first landing check found four completed rename entries in `ddd.toml`.
+The entries were needed against the earlier `main` and are now removed.
+The checker and policy stay unchanged.
+Rust source and all compatibility fixture bytes stay unchanged.
+
+The follow-up batch passed the same full checks in `phase19-main-landing`.
+Strict architecture and the exception audit report zero errors and warnings.
+The full suite still has 271 passing cases and the same 24 ignored cases.
+`landing-receipt.json` records the local `main` HEAD after the follow-up commit.
 
 ## Compatibility evidence
 
