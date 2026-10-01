@@ -5,3 +5,5 @@
 pub(crate) mod governance_policy_file;
 pub(crate) mod ingest_batch_coordinator;
 pub(crate) mod ingest_limits_env;
+
+pub(crate) mod capacity_adapter;

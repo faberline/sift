@@ -52,14 +52,14 @@ impl QueryRoleService {
 
         let job = self
             .service
-            .query_jobs
+            .query_jobs()
             .create(request.clone())
             .map_err(|error| ApiError::internal(format!("create query job: {error}")))?;
         let query_id = job.query_id.clone();
         let worker_id = query_id.clone();
         let log_query_id = query_id.clone();
         let forwarding = self.forwarding.clone();
-        let runner = service_executor::JobRunner::new(self.service.query_jobs.clone());
+        let runner = service_executor::JobRunner::new(self.service.query_jobs().clone());
         let task = runner.spawn_async(worker_id, job.request, move |mut request| async move {
             request.mode = QueryModeV1::Sync;
             let response = forwarding.forward(headers, &request).await?;

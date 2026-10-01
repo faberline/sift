@@ -4,9 +4,9 @@ use std::sync::atomic::Ordering;
 
 use anyhow::Result;
 
-use crate::app::service_state::ServiceState;
+use crate::ingest::application::ingest_service::IngestService;
 
-impl ServiceState {
+impl IngestService {
     pub fn start_drain(&self) {
         self.draining.store(true, Ordering::Release);
         self.batch_submission.close();

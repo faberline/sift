@@ -1,6 +1,5 @@
 //! Assembly of command, capacity and governance ports over shared backends.
 
-use crate::app::service_state::ServiceState;
 use crate::ingest::domain::governance_policy::GovernancePolicySet;
 use crate::journal::application::commit_append_batch::CommitContext;
 use crate::journal::application::journal_service::DurableJournal;
@@ -52,18 +51,6 @@ impl JournalCapacity for CapacityAdapter {
 impl CapacityReservation for storage_durable::CapacityReservation<'_> {
     fn commit(self: Box<Self>) {
         (*self).commit();
-    }
-}
-
-impl ServiceState {
-    pub(crate) fn commit_context(&self) -> CommitContext {
-        commit_context(
-            self.journal.clone(),
-            self.raft.clone(),
-            self.state_machine.clone(),
-            self.local_command.clone(),
-            self.local_capacity.clone(),
-        )
     }
 }
 

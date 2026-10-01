@@ -24,7 +24,7 @@ pub(crate) fn replay_cold_query<Q, P>(
     signal: SignalKind,
     projection: &crate::projection::application::replay_service::ReplayService<Q, P>,
 ) -> ArchiveQueryStatus {
-    let replay = crate::app::archive_wiring::replay_committed_events(
+    let replay = state.archive_reads().replay_committed_events(
         state.journal().storage().root(),
         signal,
         scope.project,

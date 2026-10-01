@@ -27,7 +27,7 @@ pub(crate) fn prometheus_instant_query(
 ) -> Result<serde_json::Value, ApiError> {
     authorize_project_read(principal, &params.project)?;
     state
-        .journal
+        .journal()
         .ensure_queryable()
         .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
     let parsed = parse_promql(&params.query)
@@ -40,7 +40,7 @@ pub(crate) fn prometheus_instant_query(
         .map_err(|error| ApiError::bad_request("bad_data", error.to_string()))?
         .unwrap_or_else(|| Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX));
     state
-        .projections
+        .projections()
         .catch_up(projection::PROJECTION_METRIC_STORE)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let mut query = prom_metric_query(&params.project, params.environment, &parsed)?;
@@ -55,7 +55,7 @@ pub(crate) fn prometheus_instant_query(
         .transpose()
         .map_err(|error| ApiError::bad_request("bad_data", error.to_string()))?;
     let page = state
-        .projections
+        .projections()
         .query_metrics(&query)
         .map_err(|error| ApiError::bad_request("bad_data", error.to_string()))?;
     let page = prom_page(page);
@@ -126,7 +126,7 @@ pub(crate) fn prometheus_range_query(
 ) -> Result<serde_json::Value, ApiError> {
     authorize_project_read(principal, &params.project)?;
     state
-        .journal
+        .journal()
         .ensure_queryable()
         .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
     let parsed = parse_promql(&params.query)
@@ -151,7 +151,7 @@ pub(crate) fn prometheus_range_query(
         ));
     }
     state
-        .projections
+        .projections()
         .catch_up(projection::PROJECTION_METRIC_STORE)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let mut query = prom_metric_query(&params.project, params.environment, &parsed)?;
@@ -166,7 +166,7 @@ pub(crate) fn prometheus_range_query(
         .transpose()
         .map_err(|error| ApiError::bad_request("bad_data", error.to_string()))?;
     let page = state
-        .projections
+        .projections()
         .query_metrics(&query)
         .map_err(|error| ApiError::bad_request("bad_data", error.to_string()))?;
     let page = prom_page(page);

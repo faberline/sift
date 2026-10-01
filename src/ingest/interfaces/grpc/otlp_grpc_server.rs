@@ -31,7 +31,7 @@ pub async fn serve<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let maximum = state.admission.limits().max_decoded_body_bytes;
+    let maximum = state.admission().limits().max_decoded_body_bytes;
     transport_otlp::serve_grpc(
         listener,
         Arc::new(SiftGrpcConsumer { state }),
@@ -63,7 +63,7 @@ impl transport_otlp::OtlpConsumer for SiftGrpcConsumer {
         })?;
         let _permit = self
             .state
-            .admission
+            .admission()
             .acquire(project, decoded.item_count(), self.state.is_draining())
             .map_err(|error| transport_otlp::TransportError::Consumer {
                 message: error.message,
@@ -95,7 +95,7 @@ impl transport_otlp::OtlpConsumer for SiftGrpcConsumer {
             let event_bytes = serde_json::to_vec(&event)
                 .map(|bytes| bytes.len())
                 .unwrap_or(usize::MAX);
-            if let Err(error) = self.state.admission.validate_event_bytes(event_bytes) {
+            if let Err(error) = self.state.admission().validate_event_bytes(event_bytes) {
                 rejected += 1;
                 push_message(&mut messages, error.message);
                 continue;

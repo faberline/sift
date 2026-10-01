@@ -39,7 +39,7 @@ pub(super) fn archive_gcs_captured_streaming(
 ) -> Result<ArchiveReceipt> {
     let (bucket, prefix) = services.resources.parse_destination(destination_uri)?;
     services.reconcile_staged_archive_gc(storage.root())?;
-    let layout: crate::node::infrastructure::data_layout::LayoutManifest = serde_json::from_slice(
+    let layout: crate::shared_kernel::layout_manifest::LayoutManifest = serde_json::from_slice(
         &std::fs::read(storage.root().join("layout.json"))
             .context("read Sift layout for archive identity")?,
     )

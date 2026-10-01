@@ -118,6 +118,9 @@ impl GcObjectPort for NativeGcTarget {
 }
 pub(crate) struct NativeArchiveResources;
 impl ArchiveResources for NativeArchiveResources {
+    fn cleanup_orphan_spills(&self, root: &Path) -> Result<usize> {
+        crate::archive::infrastructure::spill_catalog::cleanup_orphan_spills(root)
+    }
     fn fetch_object(&self, uri: &str) -> Result<Vec<u8>> {
         service_backup::fetch_backup_object(uri)
     }

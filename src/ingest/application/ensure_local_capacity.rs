@@ -2,16 +2,16 @@
 
 use anyhow::Result;
 
-use crate::app::service_state::ServiceState;
+use crate::ingest::application::ingest_service::IngestService;
 use crate::ingest::domain::admission_error::AdmissionError;
 use crate::shared_kernel::storage_reservation::storage_reservation;
 
-impl ServiceState {
+impl IngestService {
     pub(crate) fn ensure_local_capacity(
         &self,
         incoming_bytes: usize,
     ) -> Result<(), AdmissionError> {
-        self.local_capacity
+        self.capacity
             .preflight(storage_reservation(incoming_bytes as u64, 1))
             .map_err(|error| AdmissionError::local_storage_backpressure(error.to_string()))
     }

@@ -54,3 +54,8 @@ pub(crate) mod spill_blob_reference;
 pub(crate) mod recover_upload;
 
 pub(crate) mod upload_referenced_blobs;
+
+pub(crate) mod lifecycle_service;
+pub(crate) mod read_service;
+
+pub(crate) mod restore_layout_service;

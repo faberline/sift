@@ -24,15 +24,15 @@ pub(crate) async fn get_trace(
         ));
     }
     state
-        .journal
+        .journal()
         .ensure_queryable()
         .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
     state
-        .projections
+        .projections()
         .catch_up(projection::PROJECTION_TRACE_STORE)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let projection_cursor = state
-        .projections
+        .projections()
         .wait_for_min_cursor(
             projection::PROJECTION_TRACE_STORE,
             min_cursor.unwrap_or(0),
@@ -41,7 +41,7 @@ pub(crate) async fn get_trace(
         .await
         .map_err(ApiError::projection_lag)?;
     let mut trace = state
-        .projections
+        .projections()
         .get_trace(&project, &id)
         .map_err(|error| ApiError::bad_request("invalid_trace_query", error.to_string()))?
         .ok_or_else(|| {

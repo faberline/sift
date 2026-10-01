@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 use storage_durable::{DataRoot, DataRootPolicy};
 
 use crate::node::domain::storage_role::StorageRole;
@@ -39,16 +38,7 @@ const DIRECTORIES: &[&str] = &[
     "tmp",
 ];
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LayoutManifest {
-    pub format_version: u32,
-    pub cluster_id: String,
-    pub node_id: String,
-    pub role: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub restored_from: Option<String>,
-}
+pub use crate::shared_kernel::layout_manifest::LayoutManifest;
 
 #[derive(Clone, Copy)]
 struct SiftDataRootPolicy {

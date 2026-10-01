@@ -34,14 +34,14 @@ pub(crate) async fn run_query(
         || (request.mode == QueryModeV1::Auto && request.limit > 500);
     if asynchronous {
         let job = state
-            .query_jobs
+            .query_jobs()
             .create(request.clone())
             .map_err(|error| ApiError::internal(format!("create query job: {error}")))?;
         let query_id = job.query_id.clone();
         let worker_id = query_id.clone();
         let log_query_id = query_id.clone();
         let worker_state = state.clone();
-        let runner = service_executor::JobRunner::new(state.query_jobs.clone());
+        let runner = service_executor::JobRunner::new(state.query_jobs().clone());
         let task = runner.spawn_blocking(worker_id, job.request, move |request| {
             execute_query_v1(&worker_state, &request).map_err(|error| error.message)
         });

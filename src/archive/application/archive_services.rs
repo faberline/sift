@@ -47,6 +47,14 @@ pub(crate) struct ArchiveServices {
 }
 
 impl ArchiveServices {
+    pub(crate) fn open_restore_layout(
+        &self,
+        root: &Path,
+    ) -> Result<crate::archive::application::restore_layout_service::RestoreLayoutService> {
+        self.restore_store
+            .open_layout(root)
+            .map(crate::archive::application::restore_layout_service::RestoreLayoutService::new)
+    }
     pub(crate) fn read_commit_state(&self, root: &Path) -> Result<Option<ArchiveCommitState>> {
         self.commit_store.read_commit_state(root)
     }

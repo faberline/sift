@@ -9,3 +9,5 @@ pub(crate) mod ingest_limits;
 pub(crate) mod otlp_event_id;
 
 pub(crate) mod batch_submission;
+
+pub(crate) mod capacity_port;

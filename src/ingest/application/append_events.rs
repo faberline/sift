@@ -3,13 +3,13 @@
 
 use anyhow::{bail, Result};
 
-use crate::app::service_state::ServiceState;
+use crate::ingest::application::ingest_service::IngestService;
 use crate::ingest::application::raft_batch_splitter::split_governed_batches;
 use crate::shared_kernel::append_result::AppendResult;
 use crate::shared_kernel::event::EventEnvelope;
 use crate::shared_kernel::single_signal_batch::ensure_single_signal;
 
-impl ServiceState {
+impl IngestService {
     /// Govern and durably commit one Raft batch. Every returned event shares
     /// the same commit index, which is acknowledged only after local apply (or
     /// quorum apply in three-replica mode).
@@ -65,6 +65,6 @@ impl ServiceState {
         &self,
         governed: Vec<EventEnvelope>,
     ) -> Result<Vec<AppendResult>> {
-        self.commit_context().append_governed_batch(governed).await
+        self.context.append_governed_batch(governed).await
     }
 }

@@ -34,7 +34,7 @@ pub(crate) async fn prometheus_remote_write(
         .and_then(|value| value.to_str().ok());
     metrics_remote_write::validate_headers(content_type, content_encoding, remote_write_version)
         .map_err(|error| ApiError::unsupported_media(error.to_string()))?;
-    let limits = state.admission.limits();
+    let limits = state.admission().limits();
     if body.len() > limits.max_compressed_body_bytes {
         return Err(ApiError::from_admission(admission_failure::invalid(
             "compressed_body_too_large",
@@ -67,7 +67,7 @@ pub(crate) async fn prometheus_remote_write(
         &decoded.project,
     )?;
     let _permit = state
-        .admission
+        .admission()
         .acquire(&decoded.project, decoded.events.len(), state.is_draining())
         .map_err(ApiError::from_admission)?;
     let written = decoded.events.len();
@@ -76,7 +76,7 @@ pub(crate) async fn prometheus_remote_write(
             .map(|bytes| bytes.len())
             .unwrap_or(usize::MAX);
         state
-            .admission
+            .admission()
             .validate_event_bytes(bytes)
             .map_err(ApiError::from_admission)?;
         if let Some(message) = retention_rejection(event) {

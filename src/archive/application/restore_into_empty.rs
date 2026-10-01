@@ -14,8 +14,6 @@ use crate::archive::domain::archive_event_time::event_time_unix_nano;
 use crate::archive::domain::blob_hash_set::BlobHashSet;
 use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::event_set_digest::{include_event_content, include_event_id};
-use crate::node::domain::storage_role::StorageRole;
-use crate::node::infrastructure::data_layout::DataLayout;
 use crate::shared_kernel::archive_manifest::ArchiveManifest;
 use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
@@ -35,7 +33,7 @@ pub(super) fn restore_gcs_into_empty(
         serde_json::from_slice(&manifest_bytes).context("decode Sift archive manifest")?;
     validate_archive_manifest(&manifest)?;
 
-    let layout = DataLayout::open(target, StorageRole::All)?;
+    let layout = services.open_restore_layout(target)?;
     if layout.manifest().cluster_id == manifest.source_cluster_id {
         bail!("cold restore must create a new Sift cluster ID");
     }
@@ -205,7 +203,7 @@ pub(super) fn restore_gcs_into_empty(
     };
     services.adopt_verified_archive_receipt(target, &receipt)?;
     drop(journal);
-    let mut layout = DataLayout::open(target, StorageRole::All)?;
+    let mut layout = services.open_restore_layout(target)?;
     layout.mark_restored_from(manifest_uri)?;
     manifest.segments.clear();
     manifest.blobs.clear();

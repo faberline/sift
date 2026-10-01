@@ -30,7 +30,7 @@ pub(crate) fn list_services(
     }
     authorize_project_read(principal, &query.project)?;
     state
-        .journal
+        .journal()
         .ensure_queryable()
         .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
     let mut summaries =
@@ -38,7 +38,7 @@ pub(crate) fn list_services(
     let mut after = 0;
     loop {
         let events = state
-            .journal
+            .journal()
             .query(EventQuery {
                 signal: None,
                 after,

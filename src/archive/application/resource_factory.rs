@@ -19,6 +19,9 @@ pub(crate) struct ResourceFactory {
     port: Arc<ResourcePort>,
 }
 impl ResourceFactory {
+    pub(crate) fn cleanup_orphan_spills(&self, root: &Path) -> Result<usize> {
+        self.port.cleanup_orphan_spills(root)
+    }
     pub(crate) fn fetch_object(&self, uri: &str) -> Result<Vec<u8>> {
         self.port.fetch_object(uri)
     }

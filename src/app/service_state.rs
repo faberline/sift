@@ -21,28 +21,7 @@ use crate::node::infrastructure::local_capacity::LocalCapacity;
 use crate::projection::application::projection_runtime::ProjectionRuntime;
 use crate::query::application::job_service::QueryJobService;
 
-/// Shared HTTP state: journal access plus the drain bit read by `/readyz`.
-#[derive(Clone)]
-pub struct ServiceState {
-    pub(crate) journal: Arc<DurableJournal>,
-    pub(crate) draining: Arc<AtomicBool>,
-    pub(crate) raft: Option<Arc<raft_runtime::RaftHost>>,
-    pub(crate) peer_transport: Option<raft_runtime::PeerTransport>,
-    pub(crate) peer_port: Option<u16>,
-    pub(crate) state_machine:
-        Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
-    pub(crate) local_command: Arc<tokio::sync::Mutex<()>>,
-    pub(crate) checkpoints:
-        Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
-    pub(crate) checkpoint_raft:
-        Option<Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>>,
-    pub(crate) projections: Arc<ProjectionRuntime>,
-    pub(crate) admission: Arc<AdmissionController>,
-    pub(crate) local_capacity: Arc<LocalCapacity>,
-    pub(crate) query_jobs: Arc<QueryJobService>,
-    pub(crate) journal_batches: Arc<crate::journal::application::batch_limits::JournalBatchSizing>,
-    pub(crate) batch_submission: Arc<dyn BatchSubmission<Error = anyhow::Error>>,
-}
+pub use super::ServiceState;
 
 impl ServiceState {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
@@ -125,27 +104,55 @@ impl ServiceState {
                 context.commands.clone(),
             ),
         );
+        // Keep the original initialization order for the three I/O services.
+        let projections = Arc::new(ProjectionRuntime::open(data_dir, journal.clone())?);
+        let admission = Arc::new(AdmissionController::new(limits)?);
+        let query_jobs = Arc::new(QueryJobService::open(data_dir.join("query-jobs"))?);
+        let batch_submission: Arc<dyn BatchSubmission<Error = anyhow::Error>> =
+            Arc::new(IngestBatchBackend {
+                coordinator: std::sync::Mutex::new(IngestBatchCoordinator::default()),
+                draining: draining.clone(),
+                context: context.clone(),
+                sizing: journal_batches.clone(),
+            });
+        let ingest = Arc::new(
+            crate::ingest::application::ingest_service::IngestService::new(
+                journal.clone(),
+                draining.clone(),
+                context,
+                journal_batches,
+                batch_submission,
+                Arc::new(
+                    crate::ingest::infrastructure::capacity_adapter::NativeIngestCapacity {
+                        capacity: local_capacity.clone(),
+                    },
+                ),
+            ),
+        );
+        let archive_services = Arc::new(super::archive_wiring::archive_services());
         Ok(Self {
-            projections: Arc::new(ProjectionRuntime::open(data_dir, journal.clone())?),
+            projections,
             journal,
             draining: draining.clone(),
             raft,
             peer_transport,
             peer_port,
-            state_machine,
-            local_command,
             checkpoints,
             checkpoint_raft,
-            admission: Arc::new(AdmissionController::new(limits)?),
+            admission,
             local_capacity,
-            query_jobs: Arc::new(QueryJobService::open(data_dir.join("query-jobs"))?),
-            journal_batches: journal_batches.clone(),
-            batch_submission: Arc::new(IngestBatchBackend {
-                coordinator: std::sync::Mutex::new(IngestBatchCoordinator::default()),
-                draining,
-                context,
-                sizing: journal_batches,
-            }),
+            query_jobs,
+            ingest,
+            archive_reads: Arc::new(
+                crate::archive::application::read_service::ArchiveReadService::new(
+                    archive_services.clone(),
+                ),
+            ),
+            archive_lifecycle: Arc::new(
+                crate::archive::application::lifecycle_service::ArchiveLifecycleService::new(
+                    archive_services,
+                ),
+            ),
         })
     }
 
@@ -156,4 +163,68 @@ impl ServiceState {
     pub fn projections(&self) -> &ProjectionRuntime {
         &self.projections
     }
+
+    pub(crate) fn journal_service(&self) -> Arc<DurableJournal> {
+        self.journal.clone()
+    }
+
+    pub(crate) fn projection_service(&self) -> Arc<ProjectionRuntime> {
+        self.projections.clone()
+    }
+
+    pub(crate) fn admission(&self) -> &AdmissionController {
+        &self.admission
+    }
+
+    pub(crate) fn query_jobs(&self) -> &Arc<QueryJobService> {
+        &self.query_jobs
+    }
+
+    pub(crate) fn archive_reads(
+        &self,
+    ) -> &crate::archive::application::read_service::ArchiveReadService {
+        &self.archive_reads
+    }
+
+    pub(crate) fn ingest_service(
+        &self,
+    ) -> &crate::ingest::application::ingest_service::IngestService {
+        &self.ingest
+    }
+
+    pub async fn append_batch(
+        &self,
+        events: Vec<crate::shared_kernel::event::EventEnvelope>,
+    ) -> Result<Vec<crate::shared_kernel::append_result::AppendResult>> {
+        self.ingest_service().append_batch(events).await
+    }
+
+    pub async fn append_events(
+        &self,
+        events: Vec<crate::shared_kernel::event::EventEnvelope>,
+    ) -> Result<Vec<crate::shared_kernel::append_result::AppendResult>> {
+        self.ingest_service().append_events(events).await
+    }
+
+    pub fn start_drain(&self) {
+        self.ingest_service().start_drain();
+    }
+
+    pub async fn finish_drain(&self) -> Result<()> {
+        self.ingest_service().finish_drain().await
+    }
+
+    pub fn is_draining(&self) -> bool {
+        self.ingest_service().is_draining()
+    }
+
+    pub(crate) fn ensure_local_capacity(
+        &self,
+        incoming_bytes: usize,
+    ) -> Result<(), crate::ingest::domain::admission_error::AdmissionError> {
+        self.ingest_service().ensure_local_capacity(incoming_bytes)
+    }
 }
+
+#[cfg(test)]
+mod tests;

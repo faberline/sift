@@ -1,4 +1,4 @@
-//! The dedicated, mutually authenticated Raft peer listener.
+//! Assemble the dedicated, mutually authenticated Raft peer listener.
 
 use axum::Router;
 

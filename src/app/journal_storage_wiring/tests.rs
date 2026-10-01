@@ -175,14 +175,11 @@ fn recovered_head_is_persisted_after_replay() {
 #[test]
 fn raft_and_read_session_share_runtime_without_archive_ownership_cycle() {
     let root = tempfile::tempdir().unwrap();
+    let ports = dependencies(StorageRole::All);
+    let archive_reads = ports.archive_read.clone();
+    let archive_lifecycle = ports.archive_maintenance.clone();
     let runtime = Arc::new(
-        JournalRuntime::open_configured(
-            root.path(),
-            Arc::new(Policy(true)),
-            128,
-            dependencies(StorageRole::All),
-        )
-        .unwrap(),
+        JournalRuntime::open_configured(root.path(), Arc::new(Policy(true)), 128, ports).unwrap(),
     );
     let weak = Arc::downgrade(&runtime);
     let journal = Arc::new(JournalService::owned(runtime.clone()));
@@ -197,5 +194,11 @@ fn raft_and_read_session_share_runtime_without_archive_ownership_cycle() {
     drop(journal);
     drop(runtime);
     assert!(weak.upgrade().is_none());
+    // Both archive services outlive the journal. Neither owns its runtime.
+    assert_eq!(
+        archive_reads.committed_watermarks(root.path()).unwrap(),
+        ArchiveWatermarks::default()
+    );
+    archive_lifecycle.reconcile_staged_gc(root.path()).unwrap();
 }
 mod restore;

@@ -21,7 +21,7 @@ pub(crate) fn correlate(
         .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?;
     authorize_project_read(principal, &request.project)?;
     state
-        .journal
+        .journal()
         .ensure_queryable()
         .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
     for projection in [
@@ -30,7 +30,7 @@ pub(crate) fn correlate(
         projection::PROJECTION_TRACE_STORE,
     ] {
         state
-            .projections
+            .projections()
             .catch_up(projection)
             .map_err(|error| ApiError::internal(error.to_string()))?;
     }
@@ -55,7 +55,7 @@ pub(crate) fn correlate(
     log_query.attribute_equals = attributes.clone();
     log_query.limit = request.limit;
     let logs = state
-        .projections
+        .projections()
         .query_logs(&log_query)
         .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
         .records;
@@ -72,7 +72,7 @@ pub(crate) fn correlate(
     }
     metric_query.limit = projection::MAX_METRIC_QUERY_LIMIT;
     let mut metrics = state
-        .projections
+        .projections()
         .query_metrics(&metric_query)
         .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
         .series;
@@ -97,7 +97,7 @@ pub(crate) fn correlate(
     let mut warnings = Vec::new();
     let traces = if let Some(trace_id) = &request.trace_id {
         match state
-            .projections
+            .projections()
             .get_trace(&request.project, trace_id)
             .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
         {
@@ -126,7 +126,7 @@ pub(crate) fn correlate(
         trace_query.attributes = attributes;
         trace_query.limit = request.limit;
         let mut traces = state
-            .projections
+            .projections()
             .query_traces(&trace_query)
             .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
             .traces;
@@ -141,7 +141,7 @@ pub(crate) fn correlate(
         projection::PROJECTION_TRACE_STORE,
     ]
     .into_iter()
-    .map(|projection| state.projections.current_cursor(projection))
+    .map(|projection| state.projections().current_cursor(projection))
     .collect::<Result<Vec<_>>>()
     .map_err(|error| ApiError::internal(error.to_string()))?
     .into_iter()

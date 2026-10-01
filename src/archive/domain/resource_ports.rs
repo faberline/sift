@@ -121,6 +121,7 @@ pub(crate) type ObjectResource<E, C> = Arc<dyn ArchiveObjectPort<Error = E, Cata
 pub(crate) type SpillResource<E, C> = Box<dyn ArchiveSpillPort<Error = E, CatalogError = C>>;
 
 pub(crate) trait ArchiveResources: Send + Sync {
+    fn cleanup_orphan_spills(&self, root: &Path) -> Result<usize, Self::Error>;
     fn fetch_object(&self, uri: &str) -> Result<Vec<u8>, Self::Error>;
     fn gc_target(
         &self,

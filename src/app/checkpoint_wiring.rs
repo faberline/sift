@@ -32,7 +32,7 @@ pub(super) fn checkpoint_services(
 impl ServiceState {
     pub(crate) fn lifecycle_context(&self, destination: Option<String>) -> LifecycleContext {
         LifecycleContext {
-            services: Arc::new(crate::app::archive_wiring::archive_services()),
+            services: self.archive_lifecycle.services().clone(),
             journal: self.journal.clone(),
             raft: self.checkpoint_raft.clone(),
             state_machine: self.checkpoints.clone(),

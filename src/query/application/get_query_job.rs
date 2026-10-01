@@ -16,7 +16,7 @@ pub(in crate::query) fn query_job_for_project(
 ) -> Result<QueryJobV1, ApiError> {
     authorize_project_read(principal, project)?;
     let job = state
-        .query_jobs
+        .query_jobs()
         .get(id)
         .map_err(|error| ApiError::bad_request("invalid_query_id", error.to_string()))?
         .filter(|job| job.project == project)

@@ -13,3 +13,5 @@ pub(crate) mod retention_admission;
 pub(crate) mod admission_failure;
 pub(crate) mod event_identity;
 pub(crate) mod request_body_decoder;
+
+pub(crate) mod ingest_service;
