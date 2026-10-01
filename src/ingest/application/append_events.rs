@@ -19,7 +19,7 @@ impl ServiceState {
         if events.is_empty() {
             bail!("Sift Raft batch must not be empty");
         }
-        ensure_single_signal(&events)?;
+        ensure_single_signal("Sift batch", &events)?;
         // Govern before the Raft proposal so sensitive content never enters a
         // replicated log, even transiently. DurableJournal repeats the policy
         // idempotently at the raw boundary for direct/single-node callers.
@@ -36,7 +36,7 @@ impl ServiceState {
         if self.is_draining() {
             bail!("Sift is draining and cannot accept a new ingest batch");
         }
-        ensure_single_signal(&events)?;
+        ensure_single_signal("Sift batch", &events)?;
         let governed = self.govern_events(events)?;
         let chunks = split_governed_batches(governed)?;
         let queue = self.ingest_batch_queue()?;

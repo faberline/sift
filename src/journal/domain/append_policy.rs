@@ -5,14 +5,13 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use crate::journal::domain::retention_fence::RetentionFenceV1;
+use crate::shared_kernel::single_signal_batch::{ensure_single_signal, SingleSignalError};
 use crate::{EventEnvelope, EventError};
 
 #[derive(Debug, Error)]
 pub(in crate::journal) enum AppendPolicyError {
-    #[error("Sift Raft batch must not be empty")]
-    EmptyBatch,
-    #[error("Sift Raft batch must contain exactly one signal")]
-    MixedSignals,
+    #[error(transparent)]
+    SingleSignal(#[from] SingleSignalError),
     #[error(transparent)]
     Event(#[from] EventError),
     #[error("Sift Raft acknowledgement time must be RFC3339")]
@@ -30,13 +29,7 @@ pub(in crate::journal) enum AppendPolicyError {
 pub(in crate::journal) fn validate_events(
     events: &[EventEnvelope],
 ) -> Result<(), AppendPolicyError> {
-    if events.is_empty() {
-        return Err(AppendPolicyError::EmptyBatch);
-    }
-    let signal = events[0].signal;
-    if events.iter().any(|event| event.signal != signal) {
-        return Err(AppendPolicyError::MixedSignals);
-    }
+    ensure_single_signal("Sift Raft batch", events)?;
     for event in events {
         event.validate()?;
     }

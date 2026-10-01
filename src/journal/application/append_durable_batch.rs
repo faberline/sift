@@ -12,6 +12,7 @@ use crate::journal::domain::recent_cursor::recent_receipt_at;
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::shared_kernel::event::EventEnvelope;
 use crate::shared_kernel::retention_boundary::retention_rejection_at;
+use crate::shared_kernel::single_signal_batch::ensure_single_signal;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 impl DurableJournal {
@@ -46,13 +47,7 @@ impl DurableJournal {
         // this gate through the durable append so retention cannot delete a
         // newly created blob before its event reference becomes visible.
         let _blob_gate = self.blob_gate.lock().expect("Sift blob gate poisoned");
-        let signal = events
-            .first()
-            .context("Sift durable batch must not be empty")?
-            .signal;
-        if events.iter().any(|event| event.signal != signal) {
-            bail!("Sift durable batch must contain exactly one signal");
-        }
+        ensure_single_signal("Sift durable batch", &events)?;
         let mut governed = Vec::with_capacity(events.len());
         for event in events {
             let event = self.govern_event(event)?;
