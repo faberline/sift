@@ -4,7 +4,6 @@
 
 pub(crate) mod archive_catalog;
 pub(crate) mod archive_commit_state;
-pub(crate) mod archive_control_paths;
 pub(crate) mod archive_gc_pending_store;
 pub(crate) mod archive_integrity;
 pub(crate) mod archive_segment_cache;
@@ -26,3 +25,17 @@ pub(crate) mod spill_catalog;
 pub(crate) mod verified_manifest_fetcher;
 
 pub(crate) mod lifecycle_capacity_adapter;
+
+pub(crate) mod commit_store_adapter;
+
+pub(crate) mod upload_store_adapter;
+
+pub(crate) mod gc_store_adapter;
+
+pub(crate) mod manifest_store_adapter;
+
+pub(crate) mod segment_codec_adapter;
+
+pub(crate) mod restore_store_adapter;
+
+pub(crate) mod file_modes_adapter;

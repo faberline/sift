@@ -1,5 +1,7 @@
 //! Compacting the resident journal on every voter, or on a quorum without GC.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -8,6 +10,7 @@ use crate::archive::application::run_lifecycle_attempt::prepare_lifecycle_checkp
 use crate::journal::application::journal_service::JournalService as DurableJournal;
 
 pub(in crate::archive) async fn compact_remote_quorum_without_gc(
+    services: std::sync::Arc<ArchiveServices>,
     journal: &Arc<DurableJournal<'static>>,
     state_machine: &Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
     destination: &Option<String>,
@@ -18,6 +21,7 @@ pub(in crate::archive) async fn compact_remote_quorum_without_gc(
     let checkpoint_destination = destination.clone();
     let up_to = tokio::task::spawn_blocking(move || {
         prepare_lifecycle_checkpoint(
+            &services,
             &checkpoint_journal,
             &checkpoint_state_machine,
             checkpoint_destination.as_deref(),

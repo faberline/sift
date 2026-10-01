@@ -13,3 +13,20 @@ pub(crate) mod portable_manifest;
 pub(crate) mod retention_policy;
 
 pub(crate) mod lifecycle_capacity;
+
+pub(crate) mod control_paths;
+pub(crate) mod control_values;
+
+pub(crate) mod commit_store_port;
+
+pub(crate) mod upload_store_port;
+
+pub(crate) mod gc_store_port;
+
+pub(crate) mod manifest_store_port;
+
+pub(crate) mod segment_codec_port;
+
+pub(crate) mod restore_store_port;
+
+pub(crate) mod file_modes_port;

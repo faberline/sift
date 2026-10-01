@@ -1,6 +1,10 @@
 //! Uploading a captured snapshot's segments, blobs and dedupe receipts, then
 //! its catalog and manifest.
 
+use crate::archive::application::archive_services::ArchiveServices;
+use crate::archive::infrastructure::archive_upload_intent::recover_uploaded_archive;
+use crate::archive::infrastructure::parquet_event_codec::SiftSignalPartitioner;
+
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
@@ -18,18 +22,12 @@ use crate::archive::domain::portable_manifest::portable_manifest;
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
-use crate::archive::infrastructure::archive_commit_state::read_commit_state;
-use crate::archive::infrastructure::archive_gc_pending_store::reconcile_staged_archive_gc;
-use crate::archive::infrastructure::archive_upload_intent::{
-    prepare_archive_upload_intent, recover_uploaded_archive,
-};
 use crate::archive::infrastructure::dedupe_receipt_archive::archive_dedupe_receipts;
 use crate::archive::infrastructure::gc_plan_builder::{
     build_gc_catalog_from_spills, cleanup_observed_catalog_pages, record_catalog_page,
     spill_pending_archive_gc,
 };
 use crate::archive::infrastructure::gcs_uri::{gcs_destination, gcs_uri, split_gcs_uri};
-use crate::archive::infrastructure::parquet_event_codec::{encode_parquet, SiftSignalPartitioner};
 use crate::archive::infrastructure::spill_catalog::{
     add_spill_blob_reference, SpillBlobReference, SpillCatalog,
 };
@@ -43,6 +41,7 @@ use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::SignalKind;
 
 pub(super) fn archive_gcs_captured_streaming(
+    services: &ArchiveServices,
     storage: &RawStorage,
     destination_uri: &str,
     mut captured_cursor: u64,
@@ -50,13 +49,13 @@ pub(super) fn archive_gcs_captured_streaming(
 ) -> Result<ArchiveReceipt> {
     let destination = service_backup::BackupDestination::from_uri(destination_uri)?;
     let (bucket, prefix) = gcs_destination(&destination)?;
-    reconcile_staged_archive_gc(storage.root())?;
+    services.reconcile_staged_archive_gc(storage.root())?;
     let layout: crate::node::infrastructure::data_layout::LayoutManifest = serde_json::from_slice(
         &std::fs::read(storage.root().join("layout.json"))
             .context("read Sift layout for archive identity")?,
     )
     .context("decode Sift layout for archive identity")?;
-    let previous_state = read_commit_state(storage.root())?;
+    let previous_state = services.read_commit_state(storage.root())?;
     let previous = previous_state.as_ref().map(|state| &state.manifest);
     if previous.is_some_and(|manifest| manifest.source_cluster_id != layout.cluster_id) {
         bail!("committed archive belongs to a different Sift cluster");
@@ -65,7 +64,7 @@ pub(super) fn archive_gcs_captured_streaming(
         bail!("bounded retention must complete before a newer archive suffix is committed");
     }
     let canonical_destination = format!("gs://{bucket}/{prefix}");
-    let intent = prepare_archive_upload_intent(
+    let intent = services.prepare_archive_upload_intent(
         storage.root(),
         &canonical_destination,
         &prefix,
@@ -206,7 +205,7 @@ pub(super) fn archive_gcs_captured_streaming(
                 add_spill_blob_reference(&mut referenced, reference)?;
             }
         }
-        let parquet = encode_parquet(&events)?;
+        let parquet = services.encode_parquet(&events)?;
         let parquet_sha256 = sha256_hex(&parquet);
         let key = format!(
             "{archive_prefix}/segments/{partition}/{}.parquet",

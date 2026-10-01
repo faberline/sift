@@ -6,7 +6,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 
 use crate::archive::infrastructure::ephemeral_file_object_store::EphemeralFileObjectStore;
 use crate::shared_kernel::sha256_hex::sha256_hex;
@@ -23,11 +22,7 @@ const ARCHIVE_SPILL_PREFIXES: [&str; 8] = [
     "restore-blob-counts-",
 ];
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(in crate::archive) struct SpillBlobReference {
-    pub(in crate::archive) reference: ContentBlobRef,
-    pub(in crate::archive) count: u64,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::SpillBlobReference;
 
 pub(in crate::archive) fn add_spill_blob_reference(
     target: &mut SpillCatalog,

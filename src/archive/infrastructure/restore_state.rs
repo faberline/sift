@@ -3,9 +3,8 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 
-use crate::archive::infrastructure::archive_control_paths::{
+use crate::archive::domain::control_paths::{
     RESTORE_STAGE_DIR, RESTORE_STATE_FORMAT_VERSION, RESTORE_STATE_PATH,
 };
 use crate::archive::infrastructure::archive_gc_pending_store::remove_archive_gc_pending;
@@ -13,20 +12,9 @@ use crate::archive::infrastructure::archive_gc_pending_store::remove_archive_gc_
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(in crate::archive) enum RestorePhase {
-    Building,
-    Ready,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::RestorePhase;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::archive) struct RestoreState {
-    pub(in crate::archive) format_version: u16,
-    pub(in crate::archive) manifest_uri: String,
-    pub(in crate::archive) phase: RestorePhase,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::RestoreState;
 
 pub(in crate::archive) fn read_restore_state(path: &Path) -> Result<Option<RestoreState>> {
     if !path.exists() {

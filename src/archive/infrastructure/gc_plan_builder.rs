@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
+use crate::archive::domain::control_paths::ARCHIVE_GC_PATH;
 use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
 use crate::archive::infrastructure::archive_commit_state::read_commit_state;
-use crate::archive::infrastructure::archive_control_paths::ARCHIVE_GC_PATH;
 use crate::archive::infrastructure::archive_gc_pending_store::{
     read_archive_gc_pending, reconcile_staged_archive_gc, remove_archive_gc_pending,
 };
@@ -34,8 +34,8 @@ pub(in crate::archive) fn spill_pending_archive_gc(
     }
     let catalog = catalog_for_uri(&pending.gc_plan_uri)?;
     let mut reader = match pending.cursor.as_deref() {
-        Some(cursor) => catalog.reader_after(&pending.gc_plan_root, cursor)?,
-        None => catalog.reader(&pending.gc_plan_root)?,
+        Some(cursor) => catalog.reader_after(&(&pending.gc_plan_root).into(), cursor)?,
+        None => catalog.reader(&(&pending.gc_plan_root).into())?,
     };
     for entry in &mut reader {
         let entry = entry?;

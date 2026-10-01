@@ -1,6 +1,8 @@
 //! Preparing the retention fence a lifecycle pass carries, and clearing it once
 //! done.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -9,6 +11,7 @@ use chrono::Utc;
 use crate::journal::application::journal_service::JournalService as DurableJournal;
 
 pub(in crate::archive) async fn prepare_retention_fence(
+    services: &ArchiveServices,
     journal: &Arc<DurableJournal<'static>>,
     state_machine: &Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
     raft: Option<&Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>>,
@@ -22,6 +25,7 @@ pub(in crate::archive) async fn prepare_retention_fence(
                 .context("wait for every Sift voter to apply the retention fence")?;
         }
         if let Some(status) = crate::archive::application::archive_status_queries::committed_status(
+            services,
             journal.storage().root(),
         )? {
             if status.retention_scan_pending
@@ -63,12 +67,14 @@ pub(in crate::archive) async fn prepare_retention_fence(
     }
     let evaluate_at = Utc::now();
     if !crate::archive::application::retention_due::retention_due_at(
+        services,
         journal.storage().root(),
         evaluate_at,
     )? {
         return Ok(None);
     }
     let status = crate::archive::application::archive_status_queries::committed_status(
+        services,
         journal.storage().root(),
     )?
     .context("Sift retention requires a committed archive")?;

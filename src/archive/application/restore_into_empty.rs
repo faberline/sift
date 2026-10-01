@@ -1,5 +1,7 @@
 //! Restoring an archive into an empty data directory, page by page.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -13,10 +15,7 @@ use crate::archive::domain::event_set_digest::{include_event_content, include_ev
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
-use crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt;
 use crate::archive::infrastructure::archive_signal_stream::ArchiveSignalStream;
-use crate::archive::infrastructure::dedupe_receipt_archive::fetch_dedupe_receipts;
-use crate::archive::infrastructure::restore_state::require_empty_restore_target;
 use crate::archive::infrastructure::spill_catalog::SpillCatalog;
 use crate::journal::infrastructure::storage::blob_store::BlobStore;
 use crate::journal::infrastructure::storage::shard_router::write_epoch_maps;
@@ -29,8 +28,12 @@ use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
-pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Result<ArchiveManifest> {
-    require_empty_restore_target(target)?;
+pub(super) fn restore_gcs_into_empty(
+    services: &ArchiveServices,
+    manifest_uri: &str,
+    target: &Path,
+) -> Result<ArchiveManifest> {
+    services.require_empty_restore_target(target)?;
     let manifest_bytes = service_backup::fetch_backup_object(manifest_uri)?;
     let manifest_sha256 = sha256_hex(&manifest_bytes);
     let mut manifest: ArchiveManifest =
@@ -184,7 +187,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
         let ArchiveCatalogItem::Receipt(receipt) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
-        let rows = fetch_dedupe_receipts(&receipt)?;
+        let rows = services.fetch_dedupe_receipts(&receipt)?;
         journal.restore_archive_receipts(&rows, manifest.raft_snapshot_index)?;
         restored_receipt_segments = restored_receipt_segments.saturating_add(1);
     }
@@ -198,7 +201,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
         manifest_sha256,
         manifest: manifest.clone(),
     };
-    adopt_verified_archive_receipt(target, &receipt)?;
+    services.adopt_verified_archive_receipt(target, &receipt)?;
     drop(journal);
     let mut layout = DataLayout::open(target, StorageRole::All)?;
     layout.mark_restored_from(manifest_uri)?;

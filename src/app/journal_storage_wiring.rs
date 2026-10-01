@@ -34,12 +34,17 @@ pub(super) fn open_journal(
 }
 
 fn dependencies(role: StorageRole) -> JournalDependencies {
+    let archive_services = Arc::new(crate::app::archive_wiring::archive_services());
     JournalDependencies {
         resources: Arc::new(
             crate::journal::infrastructure::recovery_store_adapter::StorageRecoveryAdapter { role },
         ),
-        archive_read: Arc::new(ArchiveReads),
-        archive_maintenance: Arc::new(ArchiveMaintenanceBridge),
+        archive_read: Arc::new(ArchiveReads {
+            services: archive_services.clone(),
+        }),
+        archive_maintenance: Arc::new(ArchiveMaintenanceBridge {
+            services: archive_services,
+        }),
         snapshots: Arc::new(
             crate::journal::infrastructure::snapshot_codec_adapter::JournalSnapshotCodec,
         ),
@@ -53,20 +58,31 @@ impl JournalStaging for Staging {
         Ok(DurableJournal::open(root)?.port())
     }
 }
-struct ArchiveReads;
+struct ArchiveReads {
+    services: Arc<crate::archive::application::archive_services::ArchiveServices>,
+}
 impl ArchiveRead for ArchiveReads {
     type Error = anyhow::Error;
     fn committed_watermarks(&self, root: &Path) -> Result<ArchiveWatermarks> {
-        crate::archive::application::archive_status_queries::committed_watermarks(root)
+        crate::archive::application::archive_status_queries::committed_watermarks(
+            &self.services,
+            root,
+        )
     }
     fn committed_status(&self, root: &Path) -> Result<Option<ArchiveCommitStatus>> {
-        crate::archive::application::archive_status_queries::committed_status(root)
+        crate::archive::application::archive_status_queries::committed_status(&self.services, root)
     }
     fn local_committed_status(&self, root: &Path) -> Result<Option<LocalArchiveStatus>> {
-        crate::archive::application::archive_status_queries::local_committed_status(root)
+        crate::archive::application::archive_status_queries::local_committed_status(
+            &self.services,
+            root,
+        )
     }
     fn remote_retained_state(&self, root: &Path) -> Result<Option<RemoteRetainedState>> {
-        crate::archive::application::archive_status_queries::remote_retained_state(root)
+        crate::archive::application::archive_status_queries::remote_retained_state(
+            &self.services,
+            root,
+        )
     }
     fn read_committed_events_after(
         &self,
@@ -75,7 +91,10 @@ impl ArchiveRead for ArchiveReads {
         limit: usize,
     ) -> Result<Option<Vec<StoredEvent>>> {
         crate::archive::application::replay_committed_events::read_committed_events_after(
-            root, after, limit,
+            &self.services,
+            root,
+            after,
+            limit,
         )
     }
     fn open_reader(
@@ -84,7 +103,7 @@ impl ArchiveRead for ArchiveReads {
         after: u64,
     ) -> Result<Option<Box<dyn ArchivedEventReader<Error = Self::Error>>>> {
         Ok(
-            crate::archive::application::committed_event_reader::CommittedEventReader::open(
+            crate::archive::application::committed_event_reader::CommittedEventReader::open_with_services(&self.services,
                 root, after,
             )?
             .map(|r| Box::new(r) as Box<dyn ArchivedEventReader<Error = Self::Error>>),
@@ -97,7 +116,10 @@ impl ArchiveRead for ArchiveReads {
         visitor: &mut dyn FnMut(StoredEvent) -> Result<()>,
     ) -> Result<Option<ArchiveReplay>> {
         crate::archive::application::replay_recent_committed::replay_recent_committed_events(
-            root, since, visitor,
+            &self.services,
+            root,
+            since,
+            visitor,
         )
     }
     fn replay_recent_receipts(
@@ -107,7 +129,10 @@ impl ArchiveRead for ArchiveReads {
         visitor: &mut dyn FnMut(DedupeReceipt) -> Result<()>,
     ) -> Result<Option<u64>> {
         crate::archive::application::replay_recent_committed::replay_recent_committed_receipts(
-            root, since, visitor,
+            &self.services,
+            root,
+            since,
+            visitor,
         )
     }
     fn validate_manifest(&self, manifest: &ArchiveManifest) -> Result<()> {
@@ -125,14 +150,16 @@ impl ArchivedEventReader
         self.read_next(limit)
     }
 }
-struct ArchiveMaintenanceBridge;
+struct ArchiveMaintenanceBridge {
+    services: Arc<crate::archive::application::archive_services::ArchiveServices>,
+}
 impl ArchiveMaintenance for ArchiveMaintenanceBridge {
     type Error = anyhow::Error;
     fn cleanup_orphan_spills(&self, root: &Path) -> Result<()> {
         crate::archive::infrastructure::spill_catalog::cleanup_orphan_spills(root).map(|_| ())
     }
     fn reconcile_staged_gc(&self, root: &Path) -> Result<()> {
-        crate::archive::infrastructure::archive_gc_pending_store::reconcile_staged_archive_gc(root)
+        self.services.reconcile_staged_archive_gc(root)
     }
     fn reconcile_retention(
         &self,
@@ -141,15 +168,14 @@ impl ArchiveMaintenance for ArchiveMaintenanceBridge {
         generation: u64,
     ) -> Result<Option<u64>> {
         crate::archive::application::reconcile_committed_retention::reconcile_committed_retention(
+            &self.services,
             root,
             &RawEventService::new(storage),
             generation,
         )
     }
     fn adopt_receipt(&self, root: &Path, receipt: &ArchiveReceipt) -> Result<ArchiveWatermarks> {
-        crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt(
-            root, receipt,
-        )
+        self.services.adopt_verified_archive_receipt(root, receipt)
     }
     fn resume_local_blob_gc(
         &self,
@@ -158,6 +184,7 @@ impl ArchiveMaintenance for ArchiveMaintenanceBridge {
         max_scan: usize,
     ) -> Result<(usize, bool)> {
         crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
+            &self.services,
             &JournalService::borrowed(journal),
             max_plan,
             max_scan,
@@ -165,6 +192,7 @@ impl ArchiveMaintenance for ArchiveMaintenanceBridge {
     }
     fn finish_local_blob_gc(&self, journal: &dyn JournalApi<Error = Self::Error>) -> Result<usize> {
         crate::archive::application::resume_local_blob_gc::finish_local_blob_gc(
+            &self.services,
             &JournalService::borrowed(journal),
         )
     }
@@ -173,6 +201,7 @@ impl ArchiveMaintenance for ArchiveMaintenanceBridge {
         journal: &dyn JournalApi<Error = Self::Error>,
     ) -> Result<LocalArchiveReceipt> {
         crate::archive::application::archive_journal_local::archive_journal_local(
+            &self.services,
             &JournalService::borrowed(journal),
         )
     }
@@ -182,6 +211,7 @@ impl ArchiveMaintenance for ArchiveMaintenanceBridge {
         now: DateTime<Utc>,
     ) -> Result<HotEvictionReceipt> {
         crate::archive::application::evict_cold_segments::evict_committed_cold_segments_at(
+            &self.services,
             &JournalService::borrowed(journal),
             now,
         )
@@ -192,20 +222,19 @@ impl ArchiveMaintenance for ArchiveMaintenanceBridge {
         now: DateTime<Utc>,
     ) -> Result<ExpirationReceipt> {
         crate::archive::application::retention_expiration::expire_committed_events_at(
+            &self.services,
             &JournalService::borrowed(journal),
             now,
         )
     }
     fn restore_gcs(&self, uri: &str, target: &Path) -> Result<ArchiveManifest> {
-        crate::archive::application::restore_gcs::restore_gcs(uri, target)
+        crate::archive::application::restore_gcs::restore_gcs(&self.services, uri, target)
     }
     fn install_gc_plan(&self, root: &Path, receipt: &ArchiveReceipt) -> Result<()> {
-        crate::archive::infrastructure::archive_gc_pending_store::install_archive_gc_plan(
-            root, receipt,
-        )
+        self.services.install_archive_gc_plan(root, receipt)
     }
     fn withhold_gc_plan(&self, root: &Path) -> Result<()> {
-        crate::archive::infrastructure::archive_gc_pending_store::withhold_archive_gc_plan(root)
+        self.services.withhold_archive_gc_plan(root)
     }
 }
 impl RawEventService {

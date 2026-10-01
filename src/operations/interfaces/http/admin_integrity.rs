@@ -48,9 +48,8 @@ pub(crate) async fn admin_integrity(
     )
     .map_err(|error| ApiError::internal(format!("decode integrity layout: {error}")))?;
     let storage_root = state.journal().storage().root();
-    let archive =
-        crate::archive::application::archive_status_queries::committed_status(storage_root)
-            .map_err(|error| ApiError::internal(format!("read archive integrity: {error}")))?;
+    let archive = crate::app::archive_wiring::committed_status(storage_root)
+        .map_err(|error| ApiError::internal(format!("read archive integrity: {error}")))?;
     let watermarks = archive
         .as_ref()
         .map(|status| status.watermarks)

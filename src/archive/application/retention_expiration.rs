@@ -1,5 +1,7 @@
 //! Expiring committed events past the retention window in bounded passes.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -20,20 +22,15 @@ use crate::archive::application::rewrite_retained_segment::rewrite_retained_segm
 use crate::archive::domain::archive_catalog_item::{
     dedupe_receipt_catalog_key, segment_catalog_key, ArchiveCatalogItem,
 };
+use crate::archive::domain::control_values::ArchiveCommitState;
 use crate::archive::domain::retention_policy::{
     include_retention_oldest, RETENTION_SCAN_BATCH_SEGMENTS,
 };
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
-use crate::archive::infrastructure::archive_commit_state::{read_commit_state, ArchiveCommitState};
-use crate::archive::infrastructure::archive_integrity::verify_archive_segment;
-use crate::archive::infrastructure::archive_segment_cache::cached_segment_bytes;
-use crate::archive::infrastructure::dedupe_receipt_archive::fetch_dedupe_receipts;
 use crate::archive::infrastructure::gc_plan_builder::build_gc_catalog_from_spills;
 use crate::archive::infrastructure::gcs_uri::{gcs_uri, split_gcs_uri};
-use crate::archive::infrastructure::parquet_event_codec::decode_parquet;
-use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
 use crate::shared_kernel::archive_manifest::{ArchiveManifest, ArchiveRetentionScan};
 use crate::shared_kernel::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
 use crate::shared_kernel::sha256_hex::sha256_hex;
@@ -41,21 +38,23 @@ use crate::shared_kernel::sha256_hex::sha256_hex;
 /// Remove events older than the fixed 180-day boundary from the committed
 /// manifest. A mixed Parquet segment is rewritten with only retained rows.
 /// The new objects and manifest commit before the prior objects are deleted.
-pub fn expire_committed_events_at(
+pub(crate) fn expire_committed_events_at(
+    services: &ArchiveServices,
     journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
 ) -> Result<ExpirationReceipt> {
-    expire_committed_events_bounded_at(journal, now)
+    expire_committed_events_bounded_at(services, journal, now)
 }
 
 fn expire_committed_events_bounded_at(
+    services: &ArchiveServices,
     journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
 ) -> Result<ExpirationReceipt> {
     const BATCH_PARQUET_BYTES: u64 = 64 * 1024 * 1024;
 
     let root = journal.storage().root();
-    let (current_state, current) = ensure_retention_head_reconciled(journal, root)?;
+    let (current_state, current) = ensure_retention_head_reconciled(services, journal, root)?;
     let (requested_cutoff_nanos, receipt_cutoff_nanos) = retention_cutoffs(now)?;
     if current.retention_scan.is_none()
         && current
@@ -101,7 +100,7 @@ fn expire_committed_events_bounded_at(
         &manifest_key,
         &current_state,
     )? {
-        return finish_bounded_retention_commit(journal, &current, receipt);
+        return finish_bounded_retention_commit(services, journal, &current, receipt);
     }
 
     let current_catalog = catalog_for_uri(&current.catalog_uri)?;
@@ -145,9 +144,9 @@ fn expire_committed_events_bounded_at(
         }
 
         fetched_parquet_bytes = fetched_parquet_bytes.saturating_add(segment.parquet_bytes);
-        let bytes = cached_segment_bytes(root, &segment)?;
-        let events = decode_parquet(&bytes)?;
-        verify_archive_segment(&segment, &events)?;
+        let bytes = services.cached_segment_bytes(root, &segment)?;
+        let events = services.decode_parquet(&bytes)?;
+        services.verify_archive_segment(&segment, &events)?;
         let (retained, segment_expired, has_active_expired_receipt) =
             pass.partition_expired_events(events, cutoff, now)?;
         if segment_expired == 0 {
@@ -174,7 +173,8 @@ fn expire_committed_events_bounded_at(
             .checked_sub(1)
             .context("retained segment count underflow")?;
         if has_active_expired_receipt {
-            fetch_dedupe_receipts(&segment.dedupe_receipt)
+            services
+                .fetch_dedupe_receipts(&segment.dedupe_receipt)
                 .context("verify active dedupe receipt before retaining it")?;
             apply_catalog_upsert(
                 &current_catalog,
@@ -198,6 +198,7 @@ fn expire_committed_events_bounded_at(
 
         pass.replaced_segments += 1;
         let replacement = rewrite_retained_segment(
+            services,
             &mut transaction,
             &segment,
             &retained,
@@ -265,7 +266,7 @@ fn expire_committed_events_bounded_at(
         manifest_sha256: commit.manifest.sha256,
         manifest,
     };
-    finish_bounded_retention_commit(journal, &current, receipt).map(|mut outcome| {
+    finish_bounded_retention_commit(services, journal, &current, receipt).map(|mut outcome| {
         outcome.expired_events = pass.expired_events;
         outcome.replaced_segments = pass.replaced_segments;
         outcome.removed_segments = pass.removed_segments;
@@ -278,13 +279,16 @@ fn expire_committed_events_bounded_at(
 /// archive's snapshot, the archive's retained events plus its own suffix, and
 /// the archive's retention generation.
 fn ensure_retention_head_reconciled(
+    services: &ArchiveServices,
     journal: &crate::journal::application::journal_service::JournalService<'_>,
     root: &Path,
 ) -> Result<(ArchiveCommitState, ArchiveManifest)> {
-    reconcile_live_committed_retention(journal)?;
-    let current_state = read_commit_state(root)?
+    reconcile_live_committed_retention(services, journal)?;
+    let current_state = services
+        .read_commit_state(root)?
         .context("180-day expiration requires a committed remote manifest")?;
-    let current = fetch_verified_committed_root(root)?
+    let current = services
+        .fetch_verified_committed_root(root)?
         .context("180-day expiration requires a readable remote manifest")?;
     if journal.last_cursor() < current.raft_snapshot_index {
         bail!(

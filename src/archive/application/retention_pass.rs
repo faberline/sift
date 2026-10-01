@@ -15,6 +15,7 @@ use crate::archive::application::retention_catalog_ops::{
 use crate::archive::domain::archive_catalog_item::{blob_catalog_key, ArchiveCatalogItem};
 use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
+use crate::archive::domain::control_values::ArchiveCommitState;
 use crate::archive::domain::event_set_digest::{
     decode_event_content_digest, decode_event_id_digest, include_event_content, include_event_id,
 };
@@ -22,7 +23,6 @@ use crate::archive::domain::retention_policy::RETENTION_SCAN_BATCH_SEGMENTS;
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
-use crate::archive::infrastructure::archive_commit_state::ArchiveCommitState;
 use crate::archive::infrastructure::gc_plan_builder::spill_pending_archive_gc;
 use crate::archive::infrastructure::gcs_uri::{gcs_uri, split_gcs_uri};
 use crate::archive::infrastructure::spill_catalog::SpillCatalog;

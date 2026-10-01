@@ -5,30 +5,17 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::archive::infrastructure::archive_commit_state::read_commit_state;
-use crate::archive::infrastructure::archive_control_paths::{
+use crate::archive::domain::control_paths::{
     LOCAL_BLOB_GC_COMPLETE_PATH, LOCAL_BLOB_GC_FORMAT_VERSION, LOCAL_BLOB_GC_PATH,
 };
+use crate::archive::infrastructure::archive_commit_state::read_commit_state;
 use crate::archive::infrastructure::local_blob_live_index::remove_local_blob_live_index;
 use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::archive) struct LocalBlobGcPending {
-    format_version: u16,
-    replacement_manifest_uri: String,
-    pub(in crate::archive) replacement_manifest_sha256: String,
-    pub(in crate::archive) gc_plan_uri: String,
-    pub(in crate::archive) gc_plan_root: storage_segment::CatalogRoot,
-    pub(in crate::archive) plan_cursor: Option<String>,
-    pub(in crate::archive) plan_exhausted: bool,
-    pub(in crate::archive) candidates: Vec<String>,
-    scan_start_cursor: u64,
-    pub(in crate::archive) scanned_through_cursor: u64,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::LocalBlobGcPending;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -50,7 +37,7 @@ fn local_blob_gc_pending_for_receipt(receipt: &ArchiveReceipt) -> Option<LocalBl
         replacement_manifest_uri: receipt.manifest_uri.clone(),
         replacement_manifest_sha256: receipt.manifest_sha256.clone(),
         gc_plan_uri,
-        gc_plan_root: (&gc_plan_root).into(),
+        gc_plan_root,
         plan_cursor: None,
         plan_exhausted: false,
         candidates: Vec::new(),

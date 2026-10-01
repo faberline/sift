@@ -1,5 +1,7 @@
 //! Replaying the recent committed events and dedupe receipts into the journal.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -10,11 +12,6 @@ use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
-use crate::archive::infrastructure::archive_integrity::verify_archive_segment;
-use crate::archive::infrastructure::archive_segment_cache::cached_segment_bytes;
-use crate::archive::infrastructure::dedupe_receipt_archive::fetch_dedupe_receipts;
-use crate::archive::infrastructure::parquet_event_codec::decode_parquet;
-use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
 use crate::shared_kernel::archive_receipts::ArchiveReplay;
 use crate::shared_kernel::dedupe_receipt::DedupeReceipt;
 use crate::shared_kernel::stored_event::StoredEvent;
@@ -23,6 +20,7 @@ use crate::shared_kernel::stored_event::StoredEvent;
 /// Segment acceptance-time bounds avoid downloading the 180-day cold archive
 /// when a rebuildable dedupe index is lost.
 pub(crate) fn replay_recent_committed_events<F>(
+    services: &ArchiveServices,
     root: &Path,
     since: DateTime<Utc>,
     mut visitor: F,
@@ -30,7 +28,7 @@ pub(crate) fn replay_recent_committed_events<F>(
 where
     F: FnMut(StoredEvent) -> Result<()>,
 {
-    let Some(manifest) = fetch_verified_committed_root(root)? else {
+    let Some(manifest) = services.fetch_verified_committed_root(root)? else {
         return Ok(None);
     };
     let cutoff_nanos = since
@@ -49,9 +47,9 @@ where
         if segment.max_acknowledged_at_unix_nano < cutoff_nanos {
             continue;
         }
-        let bytes = cached_segment_bytes(root, &segment)?;
-        let events = decode_parquet(&bytes)?;
-        verify_archive_segment(&segment, &events)?;
+        let bytes = services.cached_segment_bytes(root, &segment)?;
+        let events = services.decode_parquet(&bytes)?;
+        services.verify_archive_segment(&segment, &events)?;
         for event in events {
             scanned = scanned.saturating_add(1);
             if acknowledgement_time_unix_nano(&event)? < cutoff_nanos {
@@ -69,6 +67,7 @@ where
 }
 
 pub(crate) fn replay_recent_committed_receipts<F>(
+    services: &ArchiveServices,
     root: &Path,
     since: DateTime<Utc>,
     mut visitor: F,
@@ -76,7 +75,7 @@ pub(crate) fn replay_recent_committed_receipts<F>(
 where
     F: FnMut(DedupeReceipt) -> Result<()>,
 {
-    let Some(manifest) = fetch_verified_committed_root(root)? else {
+    let Some(manifest) = services.fetch_verified_committed_root(root)? else {
         return Ok(None);
     };
     let cutoff_nanos = since
@@ -95,7 +94,7 @@ where
         if receipt.max_acknowledged_at_unix_nano < cutoff_nanos {
             continue;
         }
-        for row in fetch_dedupe_receipts(&receipt)? {
+        for row in services.fetch_dedupe_receipts(&receipt)? {
             if row.acknowledged_at_unix_nano < cutoff_nanos {
                 continue;
             }

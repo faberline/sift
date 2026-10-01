@@ -5,7 +5,7 @@
 //! rules of its own.
 
 mod access_wiring;
-mod archive_wiring;
+pub(crate) mod archive_wiring;
 pub(crate) mod collector_wiring;
 pub(crate) mod grpc_authorization;
 mod instance_wiring;

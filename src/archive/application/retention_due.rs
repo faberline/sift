@@ -1,5 +1,7 @@
 //! Whether the committed archive has events or dedupe receipts past retention.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -10,7 +12,6 @@ use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
 use crate::archive::infrastructure::archive_catalog::{
     catalog_for_uri, decode_archive_catalog_entry,
 };
-use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
 use crate::shared_kernel::archive_manifest::ArchiveManifest;
 
 pub(super) fn committed_has_expired_dedupe_receipt(
@@ -39,8 +40,12 @@ pub(super) fn committed_has_expired_dedupe_receipt(
 }
 
 #[doc(hidden)]
-pub fn retention_due_at(root: &Path, now: DateTime<Utc>) -> Result<bool> {
-    let Some(manifest) = fetch_verified_committed_root(root)? else {
+pub(crate) fn retention_due_at(
+    services: &ArchiveServices,
+    root: &Path,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    let Some(manifest) = services.fetch_verified_committed_root(root)? else {
         return Ok(false);
     };
     if manifest.retention_scan.is_some() {

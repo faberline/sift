@@ -1,6 +1,8 @@
 //! Rewriting a segment that retention expires only in part: a new Parquet
 //! object with the retained events and a dedupe receipt of its own.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -10,7 +12,6 @@ use crate::archive::domain::archive_event_time::{
 };
 use crate::archive::infrastructure::dedupe_receipt_archive::archive_dedupe_receipts;
 use crate::archive::infrastructure::gcs_uri::gcs_uri;
-use crate::archive::infrastructure::parquet_event_codec::encode_parquet;
 use crate::shared_kernel::archive_manifest::ArchiveSegment;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
@@ -19,13 +20,14 @@ use crate::shared_kernel::stored_event::StoredEvent;
 /// with its own dedupe receipt, into a retention pass's archive
 /// transaction, and return the replacement's manifest segment.
 pub(super) fn rewrite_retained_segment(
+    services: &ArchiveServices,
     transaction: &mut storage_segment::ArchiveTransaction,
     segment: &ArchiveSegment,
     retained: &[StoredEvent],
     bucket: &str,
     rewrite_prefix: &str,
 ) -> Result<ArchiveSegment> {
-    let parquet = encode_parquet(retained)?;
+    let parquet = services.encode_parquet(retained)?;
     let parquet_sha256 = sha256_hex(&parquet);
     let key = format!(
         "{rewrite_prefix}/segments/{}/{}.parquet",

@@ -5,12 +5,11 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 
-use crate::archive::infrastructure::archive_commit_state::{read_commit_state, ArchiveCommitState};
-use crate::archive::infrastructure::archive_control_paths::{
+use crate::archive::domain::control_paths::{
     ARCHIVE_UPLOAD_INTENT_FORMAT_VERSION, ARCHIVE_UPLOAD_INTENT_PATH,
 };
+use crate::archive::infrastructure::archive_commit_state::{read_commit_state, ArchiveCommitState};
 use crate::archive::infrastructure::gcs_uri::split_gcs_uri;
 use crate::archive::infrastructure::manifest_validation::validate_archive_manifest;
 use crate::shared_kernel::archive_manifest::ArchiveManifest;
@@ -20,19 +19,7 @@ use crate::shared_kernel::sha256_hex::sha256_hex;
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::archive) struct ArchiveUploadIntent {
-    pub(in crate::archive) format_version: u16,
-    destination_uri: String,
-    pub(in crate::archive) archive_prefix: String,
-    pub(in crate::archive) manifest_uri: String,
-    pub(in crate::archive) generated_at: String,
-    pub(in crate::archive) captured_cursor: u64,
-    pub(in crate::archive) source_cluster_id: String,
-    source_manifest_uri: Option<String>,
-    source_manifest_sha256: Option<String>,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::ArchiveUploadIntent;
 
 pub(in crate::archive) fn prepare_archive_upload_intent(
     root: &Path,

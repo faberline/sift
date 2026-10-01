@@ -1,6 +1,8 @@
 //! One lifecycle attempt: archive, checkpoint and collect, and what it
 //! committed; and the context every lifecycle tick runs against.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
@@ -30,6 +32,7 @@ pub(in crate::archive) struct LifecycleOutcome {
 /// machine, the Raft host of a replicated store, the local capacity guard,
 /// and the remote archive destination, if there is one.
 pub(crate) struct LifecycleContext {
+    pub(crate) services: std::sync::Arc<ArchiveServices>,
     pub(crate) journal: Arc<DurableJournal<'static>>,
     pub(crate) raft:
         Option<Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>>,
@@ -40,29 +43,33 @@ pub(crate) struct LifecycleContext {
 }
 
 pub(in crate::archive) fn run_lifecycle_attempt(
+    services: &ArchiveServices,
     journal: &DurableJournal<'_>,
     state_machine: &crate::journal::application::checkpoint_service::JournalCheckpointService,
     destination: Option<&str>,
     retention_fence: Option<crate::shared_kernel::retention_fence::RetentionFenceV1>,
 ) -> Result<LifecycleOutcome> {
     crate::archive::application::reconcile_committed_retention::reconcile_live_committed_retention(
-        journal,
+        services, journal,
     )?;
-    crate::archive::application::archive_journal_to_gcs::reconcile_committed_wal(journal)?;
+    crate::archive::application::archive_journal_to_gcs::reconcile_committed_wal(
+        services, journal,
+    )?;
     crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
-        journal, 128, 1_280_000,
+        services, journal, 128, 1_280_000,
     )?;
     let (applied_index, raw_cursor, segments) = state_machine.capture_archive_prefix()?;
     match destination {
         Some(destination) => {
             let committed_cursor =
                 crate::archive::application::archive_status_queries::committed_status(
+                    services,
                     journal.storage().root(),
                 )?
                 .map(|status| status.snapshot_index)
                 .unwrap_or_default();
             let mut commit = if retention_fence.is_none() && raw_cursor > committed_cursor {
-                let receipt = crate::archive::application::archive_journal_to_gcs::archive_journal_gcs_captured(
+                let receipt = crate::archive::application::archive_journal_to_gcs::archive_journal_gcs_captured(services,
                     journal,
                     destination,
                     raw_cursor,
@@ -77,17 +84,20 @@ pub(in crate::archive) fn run_lifecycle_attempt(
                 None
             };
             if crate::archive::application::archive_status_queries::committed_status(
+                services,
                 journal.storage().root(),
             )?
             .is_some()
             {
                 crate::archive::application::evict_cold_segments::evict_committed_cold_segments_at(
+                    services,
                     journal,
                     Utc::now(),
                 )?;
                 if let Some(fence) = retention_fence {
                     let status =
                         crate::archive::application::archive_status_queries::committed_status(
+                            services,
                             journal.storage().root(),
                         )?
                         .context("Sift retention fence requires a committed archive")?;
@@ -117,15 +127,13 @@ pub(in crate::archive) fn run_lifecycle_attempt(
                 }
             }
             let status = crate::archive::application::archive_status_queries::committed_status(
+                services,
                 journal.storage().root(),
             )?;
             Ok(LifecycleOutcome {
                 commit,
                 captured_applied_index: applied_index,
-                pending_archive_gc:
-                    crate::archive::infrastructure::archive_gc_pending_store::archive_gc_pending(
-                        journal.storage().root(),
-                    ),
+                pending_archive_gc: services.archive_gc_pending(journal.storage().root()),
                 retention_generation: status.as_ref().map(|status| status.retention_generation),
                 manifest_uri: status.as_ref().map(|status| status.manifest_uri.clone()),
                 manifest_sha256: status.as_ref().map(|status| status.manifest_sha256.clone()),
@@ -137,11 +145,12 @@ pub(in crate::archive) fn run_lifecycle_attempt(
         None => {
             let committed_cursor =
                 crate::archive::application::archive_status_queries::local_committed_watermarks(
+                    services,
                     journal.storage().root(),
                 )?
                 .max_cursor();
             let commit = if raw_cursor > committed_cursor {
-                let receipt = crate::archive::application::archive_journal_local::archive_journal_local_captured(
+                let receipt = crate::archive::application::archive_journal_local::archive_journal_local_captured(services,
                     journal, raw_cursor, segments,
                 )?;
                 Some(LifecycleCommit {
@@ -162,6 +171,7 @@ pub(in crate::archive) fn run_lifecycle_attempt(
 }
 
 pub(in crate::archive) fn prepare_lifecycle_checkpoint(
+    services: &ArchiveServices,
     journal: &DurableJournal<'_>,
     state_machine: &crate::journal::application::checkpoint_service::JournalCheckpointService,
     destination: Option<&str>,
@@ -175,12 +185,14 @@ pub(in crate::archive) fn prepare_lifecycle_checkpoint(
         Some(destination) => {
             let committed_cursor =
                 crate::archive::application::archive_status_queries::committed_status(
+                    services,
                     journal.storage().root(),
                 )?
                 .map(|status| status.snapshot_index)
                 .unwrap_or_default();
             if raw_cursor > committed_cursor {
                 crate::archive::application::archive_journal_to_gcs::archive_journal_gcs_captured(
+                    services,
                     journal,
                     destination,
                     raw_cursor,
@@ -196,12 +208,13 @@ pub(in crate::archive) fn prepare_lifecycle_checkpoint(
         None => {
             let committed_cursor =
                 crate::archive::application::archive_status_queries::local_committed_watermarks(
+                    services,
                     journal.storage().root(),
                 )?
                 .max_cursor();
             if raw_cursor > committed_cursor {
                 crate::archive::application::archive_journal_local::archive_journal_local_captured(
-                    journal, raw_cursor, segments,
+                    services, journal, raw_cursor, segments,
                 )?;
             }
             state_machine.prepare_local_checkpoint(applied_index, raw_cursor)?;

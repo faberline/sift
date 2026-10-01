@@ -1,5 +1,7 @@
 //! Reading the committed archive's events in cursor order.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -7,7 +9,6 @@ use anyhow::{Context, Result};
 use crate::archive::application::archive_status_queries::committed_status;
 use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
 use crate::archive::infrastructure::archive_signal_stream::ArchiveSignalStream;
-use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
@@ -23,14 +24,19 @@ pub struct CommittedEventReader {
 }
 
 impl CommittedEventReader {
-    pub fn open(root: &Path, after: u64) -> Result<Option<Self>> {
-        let Some(status) = committed_status(root)? else {
+    pub(crate) fn open_with_services(
+        services: &ArchiveServices,
+        root: &Path,
+        after: u64,
+    ) -> Result<Option<Self>> {
+        let Some(status) = committed_status(services, root)? else {
             return Ok(None);
         };
         if after >= status.snapshot_index {
             return Ok(None);
         }
-        let manifest = fetch_verified_committed_root(root)?
+        let manifest = services
+            .fetch_verified_committed_root(root)?
             .context("committed archive receipt has no readable manifest")?;
         let catalog = catalog_for_uri(&manifest.catalog_uri)?;
         let stream = |signal| -> Result<ArchiveSignalStream> {

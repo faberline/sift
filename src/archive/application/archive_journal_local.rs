@@ -1,13 +1,13 @@
 //! Committing a local archive of the journal's sealed segments.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::collections::BTreeSet;
 
 use anyhow::{bail, Result};
 use chrono::Utc;
 
-use crate::archive::infrastructure::archive_control_paths::{
-    LOCAL_COMMIT_FORMAT_VERSION, LOCAL_COMMIT_PATH,
-};
+use crate::archive::domain::control_paths::{LOCAL_COMMIT_FORMAT_VERSION, LOCAL_COMMIT_PATH};
 use crate::archive::infrastructure::local_segment_commit_state::{
     LocalCommittedSegment, LocalSegmentCommitState,
 };
@@ -16,21 +16,20 @@ use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
-#[cfg(any(not(unix), unix))]
-use crate::archive::infrastructure::private_fs_mode::set_private_file;
-
 /// Seal local immutable segments and commit their exact manifest set before
 /// compacting the corresponding WAL. This is the durable fallback for local
 /// installations without GCS.
-pub fn archive_journal_local(
+pub(crate) fn archive_journal_local(
+    services: &ArchiveServices,
     journal: &crate::journal::application::journal_service::JournalService<'_>,
 ) -> Result<LocalArchiveReceipt> {
     let (snapshot_index, segments) = journal.seal_archive_prefix()?;
-    archive_journal_local_captured(journal, snapshot_index, segments)
+    archive_journal_local_captured(services, journal, snapshot_index, segments)
 }
 
 #[doc(hidden)]
-pub fn archive_journal_local_captured(
+pub(crate) fn archive_journal_local_captured(
+    services: &ArchiveServices,
     journal: &crate::journal::application::journal_service::JournalService<'_>,
     snapshot_index: u64,
     segments: Vec<(SignalKind, SegmentManifest)>,
@@ -76,7 +75,7 @@ pub fn archive_journal_local_captured(
         &serde_json::to_vec_pretty(&state)?,
         storage_durable::FsyncPolicy::Always,
     )?;
-    set_private_file(&path)?;
+    services.set_private_file(&path)?;
     journal.compact_archived_wal(watermarks)?;
     Ok(LocalArchiveReceipt {
         committed_at,

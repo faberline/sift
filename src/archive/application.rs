@@ -32,3 +32,5 @@ pub(crate) mod run_lifecycle_attempt;
 pub(crate) mod upload_archive_snapshot;
 
 pub(crate) mod lifecycle_capacity;
+
+pub(crate) mod archive_services;

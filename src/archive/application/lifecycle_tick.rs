@@ -20,6 +20,7 @@ pub(super) struct TickFlags {
 
 /// Run one lifecycle tick. The worker calls it only while this node leads.
 pub(in crate::archive) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
+    let services = ctx.services.as_ref();
     let remote_archive = ctx.destination.is_some();
     let replicated = ctx.raft.is_some();
     let retention_capable = if remote_archive && replicated {
@@ -43,6 +44,7 @@ pub(in crate::archive) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
         true
     };
     let retention_fence = prepare_retention_fence(
+        services,
         &ctx.journal,
         &ctx.state_machine,
         ctx.raft.as_ref(),
@@ -52,11 +54,13 @@ pub(in crate::archive) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
     .await;
     let archive = match retention_fence {
         Ok(retention_fence) => {
+            let attempt_services = ctx.services.clone();
             let attempt_journal = ctx.journal.clone();
             let attempt_state_machine = ctx.state_machine.clone();
             let attempt_destination = ctx.destination.clone();
             match tokio::task::spawn_blocking(move || {
                 run_lifecycle_attempt(
+                    &attempt_services,
                     &attempt_journal,
                     &attempt_state_machine,
                     attempt_destination.as_deref(),

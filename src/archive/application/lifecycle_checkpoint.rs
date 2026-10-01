@@ -112,11 +112,13 @@ pub(super) async fn run_all_voter_checkpoint(
     remote_archive: bool,
     flags: &mut TickFlags,
 ) {
+    let services = ctx.services.clone();
     let checkpoint_journal = ctx.journal.clone();
     let checkpoint_state_machine = ctx.state_machine.clone();
     let checkpoint_destination = ctx.destination.clone();
     let prepared = tokio::task::spawn_blocking(move || {
         prepare_lifecycle_checkpoint(
+            &services,
             &checkpoint_journal,
             &checkpoint_state_machine,
             checkpoint_destination.as_deref(),
@@ -170,6 +172,7 @@ pub(super) async fn run_all_voter_checkpoint(
                     );
                     if remote_archive {
                         match compact_remote_quorum_without_gc(
+                            ctx.services.clone(),
                             &ctx.journal,
                             &ctx.state_machine,
                             &ctx.destination,
@@ -239,8 +242,14 @@ pub(super) async fn run_no_gc_quorum_checkpoint(
     outcome: &LifecycleOutcome,
     flags: &mut TickFlags,
 ) {
-    match compact_remote_quorum_without_gc(&ctx.journal, &ctx.state_machine, &ctx.destination, raft)
-        .await
+    match compact_remote_quorum_without_gc(
+        ctx.services.clone(),
+        &ctx.journal,
+        &ctx.state_machine,
+        &ctx.destination,
+        raft,
+    )
+    .await
     {
         Ok(compaction) if compaction.installed => {
             flags.changed = true;
@@ -272,10 +281,11 @@ pub(super) async fn run_no_gc_quorum_checkpoint(
 /// Finish local blob GC and delete one batch of obsolete archive objects once
 /// a checkpoint allows it.
 pub(super) async fn run_archive_gc_after_checkpoint(ctx: &LifecycleContext) {
+    let services = ctx.services.clone();
     let gc_journal = ctx.journal.clone();
     match tokio::task::spawn_blocking(move || {
-        crate::archive::application::resume_local_blob_gc::finish_local_blob_gc(&gc_journal)?;
-        crate::archive::application::finalize_archive_gc::finalize_archive_gc_batch_after_checkpoint(
+        crate::archive::application::resume_local_blob_gc::finish_local_blob_gc(&services, &gc_journal)?;
+        crate::archive::application::finalize_archive_gc::finalize_archive_gc_batch_after_checkpoint(&services,
             gc_journal.storage().root(),
             ARCHIVE_GC_BATCH_OBJECTS,
         )
