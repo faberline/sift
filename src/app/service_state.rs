@@ -19,7 +19,7 @@ use crate::journal::infrastructure::raft::sift_membership_policy::SiftMembership
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::local_capacity::LocalCapacity;
 use crate::projection::application::projection_runtime::ProjectionRuntime;
-use crate::query::infrastructure::file_query_job_store::QueryJobStore;
+use crate::query::application::job_service::QueryJobService;
 
 /// Shared HTTP state: journal access plus the drain bit read by `/readyz`.
 #[derive(Clone)]
@@ -35,7 +35,7 @@ pub struct ServiceState {
     pub(crate) projections: Arc<ProjectionRuntime>,
     pub(crate) admission: Arc<AdmissionController>,
     pub(crate) local_capacity: Arc<LocalCapacity>,
-    pub(crate) query_jobs: Arc<QueryJobStore>,
+    pub(crate) query_jobs: Arc<QueryJobService>,
     pub(crate) journal_batches: Arc<crate::journal::application::batch_limits::JournalBatchSizing>,
     pub(crate) batch_submission: Arc<dyn BatchSubmission<Error = anyhow::Error>>,
 }
@@ -130,7 +130,7 @@ impl ServiceState {
             local_command,
             admission: Arc::new(AdmissionController::new(limits)?),
             local_capacity,
-            query_jobs: Arc::new(QueryJobStore::open(data_dir.join("query-jobs"))?),
+            query_jobs: Arc::new(QueryJobService::open(data_dir.join("query-jobs"))?),
             journal_batches: journal_batches.clone(),
             batch_submission: Arc::new(IngestBatchBackend {
                 coordinator: std::sync::Mutex::new(IngestBatchCoordinator::default()),

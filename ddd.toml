@@ -178,7 +178,7 @@ interfaces = "src/projection/interfaces"
 # the query role's other routes to the store role.
 [[contexts]]
 name = "query"
-depends_on = ["projection", "journal", "archive", "access", "operations"]
+depends_on = ["projection", "journal", "archive", "access"]
 
 [contexts.layers]
 domain = "src/query/domain"
@@ -194,21 +194,11 @@ interfaces = "src/query/interfaces"
 
 
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/query/interfaces/http/query_role_router.rs", "src/query/interfaces/mcp/mcp_transport.rs", "src/query/interfaces/mcp/sift_mcp_server.rs"]
-subject = "interfaces->infrastructure"
-reason = "query_role_query_v1 calls forward_query_to_store and decode_store_query_response, and serve_stdio and http_router build the SiftApiClient that SiftMcpServer holds and calls; P1 moves the handlers and the MCP server whole. P2: application ports for forwarding a query to the store and for reaching the Sift API, with the composition root injecting store_query_client and SiftApiClient behind them."
 
 
 
 
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/query/interfaces/http/query_role_router.rs"]
-subject = "operations.interfaces"
-reason = "query_role_router falls back to query_router, the gateway proxy's reverse-proxy router to the store role, for every route the query role does not answer itself; P1 moves proxy.rs to operations' interfaces and the query role router keeps calling it. P2: the composition root builds the store-forwarding router and passes it to query_role_router, so query no longer names operations and drops it from depends_on."
 
 # Ingest: telemetry admitted within bounded limits, decoded from OTLP, Cloud
 # Logging structured JSON and Prometheus remote write into operational

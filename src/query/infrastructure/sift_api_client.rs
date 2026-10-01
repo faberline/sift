@@ -21,14 +21,14 @@ const SIFT_API_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 /// Small client shared by the CLI and MCP tools.
 #[derive(Clone)]
-pub struct SiftApiClient {
+pub(crate) struct NativeApiClient {
     pub(in crate::query) endpoint: Url,
     token: Option<Arc<str>>,
     http: reqwest::Client,
     timeout: Duration,
 }
 
-impl SiftApiClient {
+impl NativeApiClient {
     pub fn new(endpoint: &str, token: Option<String>, timeout: Duration) -> Result<Self> {
         let mut endpoint = Url::parse(endpoint).context("parse Sift API endpoint")?;
         if !matches!(endpoint.scheme(), "http" | "https") {

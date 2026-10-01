@@ -18,6 +18,7 @@ pub use crate::app::interfaces::http::openapi::{openapi, openapi_json};
 pub use crate::app::interfaces::http::router::{
     protected_router, protected_router_with_mcp, router,
 };
+pub use crate::app::query_wiring::query_role_router;
 pub use crate::app::service_state::ServiceState;
 pub use crate::archive::interfaces::archive_worker::ArchiveWorker;
 pub use crate::ingest::domain::governance_policy::{
@@ -30,7 +31,6 @@ pub use crate::operations::interfaces::http::integrity_report_v1::{
     IntegrityStorageV1, IntegrityWalBytesV1, IntegrityWatermarksV1,
 };
 pub use crate::projection::interfaces::projection_worker::ProjectionWorker;
-pub use crate::query::interfaces::http::query_role_router::query_role_router;
 pub use crate::shared_kernel::append_result::AppendResult;
 pub use crate::shared_kernel::event::{
     decode_event_json, AttributeValue, ContentBlobRef, EventEnvelope, IncomingEvent,

@@ -140,20 +140,22 @@ impl QueryJobStore {
     }
 }
 
-impl service_executor::JobState<QueryResponseV1> for QueryJobStore {
+impl crate::query::domain::job_store_port::QueryJobStorePort for QueryJobStore {
     type Error = anyhow::Error;
-    type Id = String;
-
-    fn mark_running(&self, id: &Self::Id) -> Result<()> {
-        QueryJobStore::mark_running(self, id)
+    fn create(&self, request: QueryRequestV1) -> Result<QueryJobV1> {
+        QueryJobStore::create(self, request)
     }
-
-    fn succeed(&self, id: &Self::Id, output: QueryResponseV1) -> Result<()> {
-        QueryJobStore::succeed(self, id, output)
+    fn get(&self, query_id: &str) -> Result<Option<QueryJobV1>> {
+        QueryJobStore::get(self, query_id)
     }
-
-    fn fail(&self, id: &Self::Id, message: String) -> Result<()> {
-        QueryJobStore::fail(self, id, message)
+    fn mark_running(&self, query_id: &str) -> Result<()> {
+        QueryJobStore::mark_running(self, query_id)
+    }
+    fn succeed(&self, query_id: &str, result: QueryResponseV1) -> Result<()> {
+        QueryJobStore::succeed(self, query_id, result)
+    }
+    fn fail(&self, query_id: &str, message: String) -> Result<()> {
+        QueryJobStore::fail(self, query_id, message)
     }
 }
 

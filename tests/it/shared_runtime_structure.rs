@@ -149,7 +149,7 @@ fn persistent_query_job_transitions_use_service_executor() {
     .expect("read Sift query handlers");
     let query_role = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/query/interfaces/http/query_role_router.rs"
+        "/src/query/application/query_role_service.rs"
     ))
     .expect("read Sift query role router");
     let source = library + &query_v1 + &query_role;
