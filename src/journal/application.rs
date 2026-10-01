@@ -40,3 +40,5 @@ pub(crate) mod journal_service_port;
 pub(crate) mod checkpoint_service;
 
 pub(crate) mod raft_checkpoint_service;
+
+pub(crate) mod restore_target_service;

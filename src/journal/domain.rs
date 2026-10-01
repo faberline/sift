@@ -36,3 +36,5 @@ pub(crate) mod projection_reader;
 pub(crate) mod checkpoint_port;
 
 pub(crate) mod raft_checkpoint_port;
+
+pub(crate) mod restore_target;

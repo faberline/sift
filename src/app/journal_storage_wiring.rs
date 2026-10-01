@@ -4,6 +4,7 @@ use crate::journal::application::{
     journal_runtime::JournalRuntime,
     journal_service::{DurableJournal, JournalService},
     raw_event_service::RawEventService,
+    restore_target_service::RestoreTargetService,
 };
 use crate::journal::domain::{
     archive_access::{ArchiveMaintenance, ArchiveRead, ArchivedEventReader},
@@ -52,6 +53,14 @@ fn dependencies(role: StorageRole) -> JournalDependencies {
     }
 }
 struct Staging;
+
+pub(super) fn restore_target_service() -> RestoreTargetService {
+    RestoreTargetService::new(
+        Arc::new(crate::journal::infrastructure::restore_target_adapter::NativeRestoreResources),
+        Arc::new(Staging),
+    )
+}
+
 impl JournalStaging for Staging {
     type Error = anyhow::Error;
     fn open(&self, root: &Path) -> Result<Arc<dyn JournalApi<Error = Self::Error>>> {

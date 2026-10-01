@@ -14,8 +14,6 @@ use crate::archive::domain::archive_event_time::event_time_unix_nano;
 use crate::archive::domain::blob_hash_set::BlobHashSet;
 use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::event_set_digest::{include_event_content, include_event_id};
-use crate::journal::infrastructure::storage::blob_store::BlobStore;
-use crate::journal::infrastructure::storage::shard_router::write_epoch_maps;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::data_layout::DataLayout;
 use crate::shared_kernel::archive_manifest::ArchiveManifest;
@@ -42,8 +40,10 @@ pub(super) fn restore_gcs_into_empty(
         bail!("cold restore must create a new Sift cluster ID");
     }
     drop(layout);
-    write_epoch_maps(target, &manifest.epochs)?;
-    let journal = crate::journal::application::journal_service::DurableJournal::open(target)?;
+    services
+        .restore_target
+        .write_epochs(target, &manifest.epochs)?;
+    let journal = services.restore_target.open_journal(target)?;
     let hot_cutoff_nanos = (Utc::now() - chrono::Duration::days(30))
         .timestamp_nanos_opt()
         .context("30-day hot restore cutoff is outside the nanosecond range")?;
@@ -145,7 +145,7 @@ pub(super) fn restore_gcs_into_empty(
         bail!("Sift archive manifest count, digest, watermark, or Raft snapshot index mismatch");
     }
 
-    let blob_store = BlobStore::open(target, 65_536)?;
+    let blob_store = services.restore_target.open_blob_writer(target, 65_536)?;
     let mut restored_blobs = 0_u64;
     for entry in catalog.reader(&manifest.catalog_root)? {
         let ArchiveCatalogItem::Blob(blob) = decode_archive_catalog_entry(entry?)? else {

@@ -17,6 +17,8 @@ use anyhow::Result;
 use std::path::Path;
 
 pub(crate) struct ArchiveServices {
+    pub(crate) restore_target:
+        crate::journal::application::restore_target_service::RestoreTargetService,
     pub(crate) resources: crate::archive::application::resource_factory::ResourceFactory,
     pub(crate) commit_store: std::sync::Arc<
         dyn crate::archive::domain::commit_store_port::CommitStorePort<Error = anyhow::Error>,

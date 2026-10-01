@@ -198,3 +198,4 @@ fn raft_and_read_session_share_runtime_without_archive_ownership_cycle() {
     drop(runtime);
     assert!(weak.upgrade().is_none());
 }
+mod restore;

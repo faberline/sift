@@ -9,3 +9,5 @@ pub(crate) mod storage;
 pub(crate) mod recovery_store_adapter;
 
 pub(crate) mod snapshot_codec_adapter;
+
+pub(crate) mod restore_target_adapter;

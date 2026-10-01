@@ -276,12 +276,6 @@ interfaces = "src/archive/interfaces"
 
 
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/archive/application/restore_into_empty.rs"]
-subject = "journal.infrastructure"
-reason = "The archive use cases act on the journal's live stores: they take DurableJournal to capture, evict, expire, compact, reconcile and restore sealed segments, read segments and blobs through RawStorage and BlobStore, restore writes the epoch maps with write_epoch_maps, and the lifecycle, retention fence and compaction propose and apply through SiftStateMachine; P1 moves them as-is. P2: the journal's application exposes the snapshot, eviction, expiration, compaction and restore operations the archive needs, and the archive holds that port instead of DurableJournal, RawStorage and SiftStateMachine."
-
 # The node: one Sift process's own data root. It owns the private, versioned
 # data directory with its layout manifest, the role the process runs as, and
 # the local disk-capacity guard. It has no application layer, so the journal

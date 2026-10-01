@@ -25,6 +25,7 @@ use std::path::Path;
 
 pub(crate) fn archive_services() -> ArchiveServices {
     ArchiveServices {
+        restore_target: super::journal_storage_wiring::restore_target_service(),
         resources: crate::archive::application::resource_factory::ResourceFactory::new(Arc::new(
             crate::archive::infrastructure::resource_adapter::NativeArchiveResources,
         )),
