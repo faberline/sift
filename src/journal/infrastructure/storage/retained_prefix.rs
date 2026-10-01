@@ -3,8 +3,8 @@
 
 use anyhow::Result;
 
+use crate::journal::domain::event_store::{EventReader, RawEventStore};
 use crate::journal::infrastructure::storage::raw_storage::RawStorage;
-use crate::journal::infrastructure::storage::segment_read::SegmentEventReader;
 use crate::shared_kernel::retained_prefix_reconcile_stats::RetainedPrefixReconcileStats;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
@@ -16,7 +16,7 @@ impl RawStorage {
     #[doc(hidden)]
     pub fn reconcile_retained_prefix(
         &self,
-        retained: &RawStorage,
+        retained: &dyn RawEventStore<Error = anyhow::Error>,
         snapshot_index: u64,
     ) -> Result<RetainedPrefixReconcileStats> {
         let mut stats = RetainedPrefixReconcileStats::default();
@@ -48,7 +48,7 @@ impl RawStorage {
         // The source reader owns one frame at a time. The append batch is also
         // bounded by item count and encoded bytes.
         for signal in SignalKind::ALL {
-            let mut reader = retained.segments.for_signal(signal)?.reader(0)?;
+            let mut reader = retained.signal_reader(signal, 0)?;
             let mut batch = Vec::with_capacity(1_000);
             let mut batch_bytes = 0_usize;
             while let Some(event) = reader.next_event()? {
@@ -84,15 +84,16 @@ impl RawStorage {
 
 fn verify_local_retained_exact(
     local: &RawStorage,
-    retained: &RawStorage,
+    retained: &dyn RawEventStore<Error = anyhow::Error>,
     snapshot_index: u64,
 ) -> Result<()> {
     for signal in SignalKind::ALL {
         let mut local_reader = local.segments.for_signal(signal)?.reader(0)?;
-        let mut retained_reader = retained.segments.for_signal(signal)?.reader(0)?;
+        let mut retained_reader = retained.signal_reader(signal, 0)?;
         loop {
             let local_event = next_prefix_event(&mut local_reader, signal, snapshot_index)?;
-            let retained_event = next_prefix_event(&mut retained_reader, signal, snapshot_index)?;
+            let retained_event =
+                next_prefix_event(retained_reader.as_mut(), signal, snapshot_index)?;
             if local_event != retained_event {
                 anyhow::bail!(
                     "local {} prefix does not equal the retained archive through cursor {snapshot_index}",
@@ -108,7 +109,7 @@ fn verify_local_retained_exact(
 }
 
 fn next_prefix_event(
-    reader: &mut SegmentEventReader,
+    reader: &mut dyn EventReader<Error = anyhow::Error>,
     signal: SignalKind,
     snapshot_index: u64,
 ) -> Result<Option<StoredEvent>> {

@@ -7,7 +7,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::domain::append_policy::validate_retention_fence;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::domain::journal_api::JournalApi;
+type DurableJournal<'a> = dyn JournalApi<Error = anyhow::Error> + 'a;
 use crate::journal::infrastructure::raft::archive_checkpoint_install::{
     archive_checkpoint_install_mode, ArchiveCheckpointInstallMode, ValidatedArchiveStage,
 };
@@ -123,6 +124,7 @@ pub(super) fn validate_archive_checkpoint(checkpoint: &ArchiveCheckpointV1) -> R
 /// SHA-256, decodes and validates it, and checks that it covers the
 /// checkpoint. The fetch and decode errors carry the caller's context.
 pub(super) fn fetch_checkpoint_manifest(
+    journal: &DurableJournal<'_>,
     checkpoint: &ArchiveCheckpointV1,
     fetch_context: &'static str,
     decode_context: &'static str,
@@ -135,7 +137,7 @@ pub(super) fn fetch_checkpoint_manifest(
     }
     let manifest: crate::shared_kernel::archive_manifest::ArchiveManifest =
         serde_json::from_slice(&manifest_bytes).context(decode_context)?;
-    crate::archive::application::manifest_validation::validate_archive_manifest(&manifest)?;
+    journal.archive_read().validate_manifest(&manifest)?;
     if manifest.raft_snapshot_index != checkpoint.archive_snapshot_index
         || manifest.watermarks != checkpoint.watermarks
         || manifest.raft_snapshot_index != checkpoint.raw_cursor
@@ -147,11 +149,12 @@ pub(super) fn fetch_checkpoint_manifest(
 }
 
 pub(super) fn restore_archive_checkpoint(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     checkpoint: &ArchiveCheckpointV1,
     staged_archive: Option<ValidatedArchiveStage>,
 ) -> Result<SnapshotMetadata> {
     let expected_manifest = fetch_checkpoint_manifest(
+        journal,
         checkpoint,
         "fetch Sift archive checkpoint manifest",
         "decode Sift archive checkpoint manifest",
@@ -181,43 +184,43 @@ pub(super) fn restore_archive_checkpoint(
                         restore_parent.display()
                     )
                 })?;
-                let restored_manifest = crate::archive::application::restore_gcs::restore_gcs(
-                    &checkpoint.manifest_uri,
-                    restored_root.path(),
-                )
-                .context("restore Sift archive checkpoint into an isolated data root")?;
+                let restored_manifest = journal
+                    .archive_maintenance()
+                    .restore_gcs(&checkpoint.manifest_uri, restored_root.path())
+                    .context("restore Sift archive checkpoint into an isolated data root")?;
                 if restored_manifest != expected_manifest {
                     bail!("Sift archive checkpoint manifest changed during restore");
                 }
                 restored_root
             }
         };
-        let restored = DurableJournal::open(restored_root.path())
+        let restored = journal
+            .open_staging(restored_root.path())
             .context("open isolated Sift archive checkpoint journal")?;
-        journal.adopt_archive_checkpoint(&restored, &receipt, checkpoint.raw_cursor)?;
+        journal.adopt_archive_checkpoint(restored.as_ref(), &receipt, checkpoint.raw_cursor)?;
     } else if install_mode == ArchiveCheckpointInstallMode::RetentionDelta {
         journal.adopt_archive_retention_delta(&receipt, checkpoint.raw_cursor)?;
     } else {
         journal.adopt_archive_coverage(&receipt, checkpoint.raw_cursor)?;
     }
     if checkpoint.archive_gc_authorized {
-        crate::archive::infrastructure::archive_gc_pending_store::install_archive_gc_plan(
-            journal.data_dir(),
-            &receipt,
-        )?;
+        journal
+            .archive_maintenance()
+            .install_gc_plan(journal.data_dir(), &receipt)?;
         // Every voter must finish its local content-addressed blob plan before
         // it acknowledges this all-voter checkpoint. The leader can then
         // delete the remote plan pages without stranding a follower.
-        crate::archive::application::resume_local_blob_gc::finish_local_blob_gc(journal)?;
+        journal
+            .archive_maintenance()
+            .finish_local_blob_gc(journal)?;
     } else {
-        crate::archive::infrastructure::archive_gc_pending_store::withhold_archive_gc_plan(
-            journal.data_dir(),
-        )?;
+        journal
+            .archive_maintenance()
+            .withhold_gc_plan(journal.data_dir())?;
     }
-    crate::archive::application::evict_cold_segments::evict_committed_cold_segments_at(
-        journal,
-        chrono::Utc::now(),
-    )?;
+    journal
+        .archive_maintenance()
+        .evict_cold(journal, chrono::Utc::now())?;
     Ok(SnapshotMetadata {
         applied_index: checkpoint.applied_index,
         last_cursor: expected_manifest.raft_snapshot_index,

@@ -9,7 +9,7 @@ use crate::archive::application::archive_status_queries::committed_status;
 use crate::archive::application::restore_gcs::restore_gcs;
 use crate::archive::domain::event_set_digest::decode_event_content_digest;
 use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
-use crate::journal::infrastructure::storage::raw_storage::RawStorage;
+use crate::journal::application::raw_event_service::RawEventService as RawStorage;
 
 /// Finish a retention commit that reached the local archive receipt but was
 /// interrupted before the local hot set and projection generation changed.
@@ -59,7 +59,7 @@ pub(crate) fn reconcile_committed_retention(
 /// failure. The remote manifest is already the durable authority. Reapply its
 /// idempotent local delta and persist the journal head before serving again.
 pub(crate) fn reconcile_live_committed_retention(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
 ) -> Result<()> {
     let current_generation = journal.retention_generation();
     let Some(status) = committed_status(journal.data_dir())? else {

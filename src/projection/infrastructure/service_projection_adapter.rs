@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::DurableJournal;
 use crate::projection::application::projection_runtime::Projection;
 use crate::projection::infrastructure::logging_projection::LoggingProjection;
 use crate::projection::infrastructure::metric_projection::MetricProjection;
@@ -62,7 +62,8 @@ pub(in crate::projection) struct JournalProjectionSource {
 }
 
 struct JournalProjectionSession {
-    inner: crate::journal::infrastructure::journal_projection_read_session::JournalProjectionReadSession,
+    inner:
+        crate::journal::application::journal_projection_read_session::JournalProjectionReadSession,
 }
 
 impl service_projection::ProjectionReadSession<StoredEvent> for JournalProjectionSession {

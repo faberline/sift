@@ -17,7 +17,7 @@ use crate::SignalKind;
 
 /// Commit a remote archive locally before any canonical WAL bytes are removed.
 pub fn archive_journal_gcs(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     destination_uri: &str,
 ) -> Result<ArchiveReceipt> {
     let (captured_cursor, segments) = journal.seal_archive_prefix()?;
@@ -26,7 +26,7 @@ pub fn archive_journal_gcs(
 
 #[doc(hidden)]
 pub fn archive_journal_gcs_captured(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     destination_uri: &str,
     captured_cursor: u64,
     segments: Vec<(SignalKind, SegmentManifest)>,
@@ -50,7 +50,7 @@ pub fn archive_journal_gcs_captured(
 /// commit. This is safe to call after a crash between receipt commit and WAL
 /// truncation.
 pub(crate) fn reconcile_committed_wal(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
 ) -> Result<()> {
     journal.compact_archived_wal(committed_watermarks(journal.storage().root())?)
 }

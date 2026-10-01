@@ -39,7 +39,7 @@ pub(super) fn validate_retention_receipt_source(
 }
 
 pub(super) fn finish_bounded_retention_commit(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     source: &ArchiveManifest,
     receipt: ArchiveReceipt,
 ) -> Result<ExpirationReceipt> {

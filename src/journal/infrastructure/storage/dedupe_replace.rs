@@ -38,15 +38,14 @@ struct ReplaceIntent {
 }
 
 impl DedupeIndex {
-    pub(crate) fn replace_from(&self, source: &DedupeIndex) -> Result<DedupeStats> {
-        let _source = source.state.read().expect("source dedupe lock poisoned");
+    pub(super) fn replace_from_root(&self, source_root: &Path) -> Result<DedupeStats> {
         let mut target = self.state.write().expect("dedupe state lock poisoned");
         let now = Utc::now();
         reconcile_replace(&self.root, now)?;
         let paths = replace_paths(&self.root)?;
         remove_real_dir_if_exists(&paths.stage)?;
         remove_real_dir_if_exists(&paths.backup)?;
-        copy_dedupe_tree(&source.root, &paths.stage)?;
+        copy_dedupe_tree(source_root, &paths.stage)?;
         let staged = load_state(&paths.stage, generation_for(now))?;
         if staged.rebuild_required {
             bail!("replacement dedupe index has no durable metadata");

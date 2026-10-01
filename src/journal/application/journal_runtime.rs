@@ -8,33 +8,41 @@ use std::sync::{Arc, Mutex, RwLock};
 use anyhow::{bail, Result};
 use metrics_prometheus::Counter;
 
+use crate::journal::domain::archive_access::{ArchiveMaintenance, ArchiveRead};
 use crate::journal::domain::command_submission::JournalGovernance;
+use crate::journal::domain::dedupe_store::DedupeStore;
+use crate::journal::domain::event_store::RawEventStore;
+use crate::journal::domain::recovery_store::{JournalRoot, RecoveryStore};
 use crate::journal::domain::resident_window::ResidentWindow;
-use crate::node::infrastructure::data_layout::DataLayout;
+use crate::journal::domain::snapshot_ports::{JournalStaging, SnapshotCodec};
+use crate::journal::domain::wal_store::WalStore;
 use crate::shared_kernel::event::EventEnvelope;
 
 /// Append-only JSONL journal. State is updated only after `sync_data` succeeds,
 /// making a successful [`append`](Self::append) acknowledgement durable.
-pub struct DurableJournal {
-    pub(in crate::journal) _layout: DataLayout,
-    pub(in crate::journal) wal: crate::journal::infrastructure::storage::wal::SignalWal,
-    pub(in crate::journal) storage:
-        crate::journal::infrastructure::storage::raw_storage::RawStorage,
-    pub(in crate::journal) dedupe:
-        crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
-    pub(in crate::journal) blob_gate: Mutex<()>,
-    pub(in crate::journal) state: RwLock<ResidentWindow>,
-    pub(in crate::journal) resident_limit: usize,
-    pub(in crate::journal) governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
-    pub(in crate::journal) accepted: Counter,
-    pub(in crate::journal) duplicates: Counter,
-    pub(in crate::journal) fsyncs: Counter,
-    pub(in crate::journal) recovery_required: AtomicBool,
-    pub(in crate::journal) retention_fenced: AtomicBool,
+pub(crate) struct JournalRuntime {
+    pub(super) _layout: Arc<dyn JournalRoot>,
+    pub(super) wal: Arc<dyn WalStore<Error = anyhow::Error>>,
+    pub(super) storage: Arc<dyn RawEventStore<Error = anyhow::Error>>,
+    pub(super) dedupe: Arc<dyn DedupeStore<Error = anyhow::Error>>,
+    pub(super) resources: Arc<dyn RecoveryStore<Error = anyhow::Error>>,
+    pub(super) archive_read: Arc<dyn ArchiveRead<Error = anyhow::Error>>,
+    pub(super) archive_maintenance: Arc<dyn ArchiveMaintenance<Error = anyhow::Error>>,
+    pub(super) snapshots: Arc<dyn SnapshotCodec<Error = anyhow::Error>>,
+    pub(super) staging: Arc<dyn JournalStaging<Error = anyhow::Error>>,
+    pub(super) blob_gate: Mutex<()>,
+    pub(super) state: RwLock<ResidentWindow>,
+    pub(super) resident_limit: usize,
+    pub(super) governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
+    pub(super) accepted: Counter,
+    pub(super) duplicates: Counter,
+    pub(super) fsyncs: Counter,
+    pub(super) recovery_required: AtomicBool,
+    pub(super) retention_fenced: AtomicBool,
 }
 
-impl DurableJournal {
-    pub(in crate::journal) fn ensure_recovered(&self) -> Result<()> {
+impl JournalRuntime {
+    pub(super) fn ensure_recovered(&self) -> Result<()> {
         if self.recovery_required.load(Ordering::Acquire) {
             bail!("Sift journal requires archive recovery before it can serve data");
         }
@@ -70,10 +78,6 @@ impl DurableJournal {
 
     pub fn govern_event(&self, event: EventEnvelope) -> Result<EventEnvelope> {
         self.governance.govern(event)
-    }
-
-    pub fn storage(&self) -> &crate::journal::infrastructure::storage::raw_storage::RawStorage {
-        &self.storage
     }
 
     pub(crate) fn last_cursor(&self) -> u64 {

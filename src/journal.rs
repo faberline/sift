@@ -26,7 +26,6 @@ pub use crate::journal::{
         storage::{
             blob_store::BlobStore,
             dedupe_index::DedupeIndex,
-            raw_storage::RawStorage,
             wal::{SignalWal, SignalWalReader},
         },
     },
@@ -42,3 +41,5 @@ pub use crate::shared_kernel::{
 pub use crate::shared_kernel::raft_batch_limits::{
     RAFT_BATCH_MAX_BYTES, RAFT_BATCH_MAX_DELAY, RAFT_BATCH_MAX_ITEMS,
 };
+
+pub use crate::journal::application::raw_event_service::RawEventService as RawStorage;

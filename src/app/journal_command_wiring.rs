@@ -3,11 +3,11 @@
 use crate::app::service_state::ServiceState;
 use crate::ingest::domain::governance_policy::GovernancePolicySet;
 use crate::journal::application::commit_append_batch::CommitContext;
+use crate::journal::application::journal_service::DurableJournal;
 use crate::journal::domain::command_submission::{
     CapacityReservation, JournalCapacity, JournalGovernance, JournalReceiptLookup,
 };
 use crate::journal::domain::journal_limits::DEFAULT_RESIDENT_JOURNAL_EVENTS;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::command_committer::RaftCommandCommitter;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::local_capacity::LocalCapacity;
@@ -85,7 +85,7 @@ impl DurableJournal {
         governance: GovernancePolicySet,
         role: StorageRole,
     ) -> Result<Self> {
-        Self::open_configured(
+        crate::app::journal_storage_wiring::open_journal(
             data_dir,
             Arc::new(GovernanceAdapter(governance)),
             role,
@@ -96,7 +96,7 @@ impl DurableJournal {
         data_dir: impl AsRef<Path>,
         resident_limit: usize,
     ) -> Result<Self> {
-        Self::open_configured(
+        crate::app::journal_storage_wiring::open_journal(
             data_dir,
             Arc::new(GovernanceAdapter(GovernancePolicySet::from_env()?)),
             StorageRole::All,

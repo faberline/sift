@@ -11,7 +11,8 @@ use raft_runtime::{OutcomeWindow, RaftStateMachine};
 
 use crate::journal::domain::checkpoint_position::CheckpointPosition;
 use crate::journal::domain::control_state::{ControlState, CONTROL_STATE_FORMAT_VERSION};
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::domain::journal_api::JournalApi;
+type DurableJournal<'a> = dyn JournalApi<Error = anyhow::Error> + 'a;
 use crate::journal::infrastructure::raft::archive_checkpoint::ArchiveCheckpointV1;
 use crate::journal::infrastructure::raft::archive_checkpoint_install::ValidatedArchiveStage;
 use crate::journal::infrastructure::raft::control_state_store::{
@@ -31,7 +32,7 @@ const APPEND_OUTCOME_WINDOW: u64 = 64;
 
 /// Applies one committed Raft batch to the canonical per-signal WAL.
 pub struct SiftStateMachine {
-    pub(super) journal: Arc<DurableJournal>,
+    pub(super) journal: Arc<DurableJournal<'static>>,
     pub(super) commit_gate: Mutex<()>,
     pub(super) control_path: PathBuf,
     pub(super) control: Mutex<ControlState>,
@@ -45,12 +46,10 @@ pub struct SiftStateMachine {
 }
 
 impl SiftStateMachine {
-    pub fn new(journal: Arc<DurableJournal>) -> Self {
-        let data_dir = journal.data_dir().to_path_buf();
-        Self::open(data_dir, journal).expect("open Sift state-machine control state")
-    }
-
-    pub fn open(data_dir: impl AsRef<Path>, journal: Arc<DurableJournal>) -> Result<Self> {
+    pub(crate) fn open_backend(
+        data_dir: impl AsRef<Path>,
+        journal: Arc<DurableJournal<'static>>,
+    ) -> Result<Self> {
         let control_dir = data_dir.as_ref().join("control");
         fs::create_dir_all(&control_dir)
             .with_context(|| format!("create Sift control directory {}", control_dir.display()))?;
@@ -112,10 +111,11 @@ impl SiftStateMachine {
         &self,
         retention_generation: u64,
     ) -> Result<()> {
-        if crate::archive::application::archive_status_queries::committed_status(
-            self.journal.data_dir(),
-        )?
-        .is_some_and(|status| status.retention_scan_pending)
+        if self
+            .journal
+            .archive_read()
+            .committed_status(self.journal.data_dir())?
+            .is_some_and(|status| status.retention_scan_pending)
         {
             return Ok(());
         }
@@ -203,10 +203,10 @@ impl SiftStateMachine {
         &self,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<Option<crate::shared_kernel::archive_receipts::ExpirationReceipt>> {
-        let Some(remote) =
-            crate::archive::application::archive_status_queries::remote_retained_state(
-                self.journal.data_dir(),
-            )?
+        let Some(remote) = self
+            .journal
+            .archive_read()
+            .remote_retained_state(self.journal.data_dir())?
         else {
             return Ok(None);
         };
@@ -221,11 +221,10 @@ impl SiftStateMachine {
         let recovery_pending = self.journal.recovery_required()
             || self.journal.total_event_count() != expected_local_events
             || self.journal.retention_generation() != remote.retention_generation;
-        let receipt =
-            crate::archive::application::retention_expiration::expire_committed_events_at(
-                &self.journal,
-                now,
-            )?;
+        let receipt = self
+            .journal
+            .archive_maintenance()
+            .expire_committed(self.journal.as_ref(), now)?;
         if receipt.expired_events > 0 || recovery_pending {
             Ok(Some(receipt))
         } else {

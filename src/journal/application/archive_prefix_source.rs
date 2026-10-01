@@ -2,10 +2,10 @@
 
 use anyhow::Result;
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::shared_kernel::event::SignalKind;
 
-impl DurableJournal {
+impl JournalRuntime {
     /// Seal one globally consistent archive prefix.
     ///
     /// Ingest holds this same journal-state write lock while it allocates a

@@ -3,7 +3,7 @@
 use anyhow::{bail, Context, Result};
 
 use crate::archive::application::upload_archive_snapshot::archive_gcs_captured_streaming;
-use crate::journal::infrastructure::storage::raw_storage::RawStorage;
+use crate::journal::application::raw_event_service::RawEventService as RawStorage;
 use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;

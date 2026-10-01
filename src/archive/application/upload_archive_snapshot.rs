@@ -33,7 +33,7 @@ use crate::archive::infrastructure::parquet_event_codec::{encode_parquet, SiftSi
 use crate::archive::infrastructure::spill_catalog::{
     add_spill_blob_reference, SpillBlobReference, SpillCatalog,
 };
-use crate::journal::infrastructure::storage::raw_storage::RawStorage;
+use crate::journal::application::raw_event_service::RawEventService as RawStorage;
 use crate::shared_kernel::archive_manifest::{
     empty_dedupe_receipt, ArchiveBlob, ArchiveManifest, ArchiveSegment, ARCHIVE_FORMAT_VERSION,
 };

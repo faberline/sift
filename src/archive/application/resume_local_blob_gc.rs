@@ -17,7 +17,7 @@ use crate::archive::infrastructure::local_blob_live_index::{
 
 #[doc(hidden)]
 pub fn resume_local_blob_gc_batch(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     max_plan_entries: usize,
     max_scan_events: usize,
 ) -> Result<(usize, bool)> {
@@ -112,7 +112,7 @@ pub fn resume_local_blob_gc_batch(
 }
 
 pub(crate) fn finish_local_blob_gc(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
 ) -> Result<usize> {
     let mut removed = 0_usize;
     loop {

@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use service_projection::{ProjectionLag, RebuildComparison};
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::DurableJournal;
 use crate::projection::domain::log::{LogPage, LogQuery, PROJECTION_LOGGING_STORE};
 use crate::projection::domain::metric::{MetricPage, MetricQuery, PROJECTION_METRIC_STORE};
 use crate::projection::domain::trace::{

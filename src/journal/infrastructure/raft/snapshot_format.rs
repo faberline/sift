@@ -5,10 +5,10 @@ use std::io::{Read, Write};
 
 use anyhow::{bail, Context, Result};
 
-use crate::shared_kernel::retention_fence::RetentionFenceV1;
+pub(crate) use crate::shared_kernel::snapshot_metadata::SnapshotMetadata;
 use crate::shared_kernel::stored_event::StoredEvent;
 
-pub const SNAPSHOT_CONTENT_TYPE: &str = "application/vnd.axiom.sift-snapshot";
+pub use crate::shared_kernel::snapshot_metadata::SNAPSHOT_CONTENT_TYPE;
 
 const SNAPSHOT_MAGIC: &[u8; 8] = b"SIFTSNP2";
 
@@ -21,16 +21,6 @@ pub(super) const SNAPSHOT_FRAME_HEADER_BYTES: usize = 16;
 pub(super) const SNAPSHOT_PAGE_EVENTS: usize = 10_000;
 
 pub(super) const MAX_SNAPSHOT_EVENT_BYTES: usize = 16 * 1024 * 1024;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SnapshotMetadata {
-    pub applied_index: u64,
-    pub last_cursor: u64,
-    pub event_count: u64,
-    /// `None` means the legacy full snapshot had no control-state field.
-    /// `Some(None)` is an authoritative cleared fence.
-    pub pending_retention: Option<Option<RetentionFenceV1>>,
-}
 
 pub(super) fn write_snapshot_header(
     writer: &mut dyn Write,

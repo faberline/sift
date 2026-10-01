@@ -4,11 +4,10 @@ use std::collections::BTreeSet;
 
 use anyhow::{bail, Result};
 
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::journal_limits::RECOVERY_PAGE_BYTES;
-use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
 
-impl DurableJournal {
+impl JournalRuntime {
     pub(crate) fn scan_blob_references_page(
         &self,
         after: u64,
@@ -17,11 +16,14 @@ impl DurableJournal {
         if limit == 0 {
             bail!("blob reference scan limit must be greater than zero");
         }
-        let archived = crate::archive::application::archive_status_queries::committed_watermarks(
-            self.data_dir(),
+        let archived = self.archive_read.committed_watermarks(self.data_dir())?;
+        let mut reader = self.resources.reader(
+            self.storage.as_ref(),
+            self.wal.as_ref(),
+            archived,
+            after,
+            true,
         )?;
-        let mut reader =
-            CanonicalRecoveryReader::open(&self.storage, &self.wal, archived, after, true)?;
         let (page, exhausted) = reader.read_page_with_limits(limit, RECOVERY_PAGE_BYTES)?;
         let scanned_through = page.last().map(|event| event.cursor).unwrap_or_else(|| {
             if exhausted {

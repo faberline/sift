@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::JournalService as DurableJournal;
 use crate::node::infrastructure::local_capacity::LocalCapacity;
 
 pub(in crate::archive) struct LifecycleCommit {
@@ -30,7 +30,7 @@ pub(in crate::archive) struct LifecycleOutcome {
 /// machine, the Raft host of a replicated store, the local capacity guard,
 /// and the remote archive destination, if there is one.
 pub(in crate::archive) struct LifecycleContext {
-    pub(in crate::archive) journal: Arc<DurableJournal>,
+    pub(in crate::archive) journal: Arc<DurableJournal<'static>>,
     pub(in crate::archive) raft: Option<Arc<raft_runtime::RaftHost>>,
     pub(in crate::archive) state_machine:
         Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
@@ -39,7 +39,7 @@ pub(in crate::archive) struct LifecycleContext {
 }
 
 pub(in crate::archive) fn run_lifecycle_attempt(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     state_machine: &crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine,
     destination: Option<&str>,
     retention_fence: Option<crate::shared_kernel::retention_fence::RetentionFenceV1>,
@@ -161,7 +161,7 @@ pub(in crate::archive) fn run_lifecycle_attempt(
 }
 
 pub(in crate::archive) fn prepare_lifecycle_checkpoint(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     state_machine: &crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine,
     destination: Option<&str>,
     archive_gc_authorized: bool,

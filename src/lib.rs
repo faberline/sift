@@ -23,8 +23,8 @@ pub use crate::archive::interfaces::archive_worker::ArchiveWorker;
 pub use crate::ingest::domain::governance_policy::{
     GovernanceError, GovernancePolicy, GovernancePolicySet,
 };
-pub use crate::journal::infrastructure::durable_journal::DurableJournal;
-pub use crate::journal::infrastructure::journal_projection_read_session::JournalProjectionReadSession;
+pub use crate::journal::application::journal_projection_read_session::JournalProjectionReadSession;
+pub use crate::journal::application::journal_service::DurableJournal;
 pub use crate::operations::interfaces::http::integrity_report_v1::{
     IntegrityArchiveV1, IntegrityReportV1, IntegritySignalV1, IntegritySignalsV1,
     IntegrityStorageV1, IntegrityWalBytesV1, IntegrityWatermarksV1,

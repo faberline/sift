@@ -43,7 +43,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
     }
     drop(layout);
     write_epoch_maps(target, &manifest.epochs)?;
-    let journal = crate::journal::infrastructure::durable_journal::DurableJournal::open(target)?;
+    let journal = crate::journal::application::journal_service::DurableJournal::open(target)?;
     let hot_cutoff_nanos = (Utc::now() - chrono::Duration::days(30))
         .timestamp_nanos_opt()
         .context("30-day hot restore cutoff is outside the nanosecond range")?;
@@ -209,7 +209,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
 }
 
 fn restore_archive_page<H>(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     events: Vec<StoredEvent>,
     hot_cutoff_nanos: i64,
     hot_blob_hashes: &mut H,

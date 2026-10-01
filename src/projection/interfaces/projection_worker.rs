@@ -8,7 +8,7 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use crate::app::service_state::ServiceState;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::DurableJournal;
 use crate::projection::application::projection_runtime::ProjectionRuntime;
 
 pub struct ProjectionWorker {

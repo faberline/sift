@@ -15,7 +15,7 @@ use crate::shared_kernel::archive_receipts::HotEvictionReceipt;
 /// Evict local copies whose complete event set is older than the 30-day hot
 /// window and is present in the verified remote manifest.
 pub fn evict_committed_cold_segments_at(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
 ) -> Result<HotEvictionReceipt> {
     let manifest = fetch_verified_committed_root(journal.storage().root())?

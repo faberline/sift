@@ -15,3 +15,5 @@ pub(crate) mod service_state;
 pub(crate) mod system_clock;
 
 mod journal_command_wiring;
+
+mod journal_storage_wiring;

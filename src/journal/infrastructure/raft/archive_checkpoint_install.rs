@@ -2,7 +2,8 @@
 
 use anyhow::{bail, Context, Result};
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::domain::journal_api::JournalApi;
+type DurableJournal<'a> = dyn JournalApi<Error = anyhow::Error> + 'a;
 use crate::journal::infrastructure::raft::archive_checkpoint::{
     fetch_checkpoint_manifest, ArchiveCheckpointV1,
 };
@@ -21,10 +22,11 @@ pub(super) enum ArchiveCheckpointInstallMode {
 }
 
 pub(super) fn validate_archive_checkpoint_install(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     checkpoint: &ArchiveCheckpointV1,
 ) -> Result<Option<ValidatedArchiveStage>> {
     let manifest = fetch_checkpoint_manifest(
+        journal,
         checkpoint,
         "fetch Sift archive checkpoint manifest during validation",
         "decode Sift archive checkpoint manifest during validation",
@@ -33,11 +35,10 @@ pub(super) fn validate_archive_checkpoint_install(
         == ArchiveCheckpointInstallMode::FullRestore
     {
         let restored_root = tempfile::tempdir_in(journal.data_dir().join("tmp"))?;
-        let restored = crate::archive::application::restore_gcs::restore_gcs(
-            &checkpoint.manifest_uri,
-            restored_root.path(),
-        )
-        .context("stage Sift archive checkpoint validation restore")?;
+        let restored = journal
+            .archive_maintenance()
+            .restore_gcs(&checkpoint.manifest_uri, restored_root.path())
+            .context("stage Sift archive checkpoint validation restore")?;
         if restored != manifest {
             bail!("Sift archive checkpoint manifest changed during validation");
         }
@@ -46,15 +47,13 @@ pub(super) fn validate_archive_checkpoint_install(
             manifest_sha256: checkpoint.manifest_sha256.clone(),
             manifest: manifest.clone(),
         };
-        crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt(
-            restored_root.path(),
-            &receipt,
-        )?;
-        let staged = DurableJournal::open(restored_root.path())?;
-        crate::archive::application::evict_cold_segments::evict_committed_cold_segments_at(
-            &staged,
-            chrono::Utc::now(),
-        )?;
+        journal
+            .archive_maintenance()
+            .adopt_receipt(restored_root.path(), &receipt)?;
+        let staged = journal.open_staging(restored_root.path())?;
+        journal
+            .archive_maintenance()
+            .evict_cold(staged.as_ref(), chrono::Utc::now())?;
         drop(staged);
         return Ok(Some(ValidatedArchiveStage {
             checkpoint: checkpoint.clone(),
@@ -66,7 +65,7 @@ pub(super) fn validate_archive_checkpoint_install(
 }
 
 pub(super) fn archive_checkpoint_install_mode(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     checkpoint: &ArchiveCheckpointV1,
     manifest: &crate::shared_kernel::archive_manifest::ArchiveManifest,
 ) -> Result<ArchiveCheckpointInstallMode> {
@@ -74,8 +73,9 @@ pub(super) fn archive_checkpoint_install_mode(
     if empty || journal.last_cursor() < checkpoint.raw_cursor {
         return Ok(ArchiveCheckpointInstallMode::FullRestore);
     }
-    let local_status =
-        crate::archive::application::archive_status_queries::committed_status(journal.data_dir())?;
+    let local_status = journal
+        .archive_read()
+        .committed_status(journal.data_dir())?;
     let local_generation = local_status
         .as_ref()
         .map(|status| status.retention_generation)

@@ -33,3 +33,5 @@ pub(crate) mod stored_event;
 pub(crate) mod utf8_truncate;
 
 pub(crate) mod raft_batch_limits;
+
+pub(crate) mod snapshot_metadata;

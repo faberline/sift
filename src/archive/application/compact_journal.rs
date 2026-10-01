@@ -5,10 +5,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::archive::application::run_lifecycle_attempt::prepare_lifecycle_checkpoint;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::JournalService as DurableJournal;
 
 pub(in crate::archive) async fn compact_remote_quorum_without_gc(
-    journal: &Arc<DurableJournal>,
+    journal: &Arc<DurableJournal<'static>>,
     state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     destination: &Option<String>,
     raft: &Arc<raft_runtime::RaftHost>,

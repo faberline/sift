@@ -7,7 +7,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::domain::append_policy::validate_retention_fence;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::domain::journal_api::JournalApi;
+type DurableJournal<'a> = dyn JournalApi<Error = anyhow::Error> + 'a;
 use crate::journal::infrastructure::raft::archive_checkpoint::{
     ARCHIVE_CHECKPOINT_HEADER_BYTES, MAX_ARCHIVE_CHECKPOINT_BYTES,
 };
@@ -105,7 +106,7 @@ pub(super) fn validate_resident_checkpoint(checkpoint: &ResidentCheckpointV1) ->
 }
 
 pub(super) fn restore_resident_checkpoint(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     checkpoint: &ResidentCheckpointV1,
 ) -> Result<SnapshotMetadata> {
     if journal.last_cursor() < checkpoint.raw_cursor {

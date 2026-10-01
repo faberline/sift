@@ -179,11 +179,6 @@ paths = ["src/projection/infrastructure/logging_projection.rs", "src/projection/
 subject = "infrastructure->application"
 reason = "The three projections implement the Projection trait, service_projection_adapter binds that trait to service_projection's, and LoggingProjection maps each event with normalize; §2.7 puts the trait and the normalizer in application, and P1 follows it. P2: move the Projection trait into the domain as a port and log_record_normalizer with it, so infrastructure depends only on the domain."
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/projection/application/projection_runtime.rs", "src/projection/infrastructure/service_projection_adapter.rs", "src/projection/interfaces/projection_worker.rs"]
-subject = "journal.infrastructure"
-reason = "ProjectionRuntime::open, ProjectionWorker and JournalProjectionSource hold an Arc<DurableJournal>, and JournalProjectionSource reads it through JournalProjectionReadSession; §2 keeps DurableJournal as the journal's infrastructure facade under its old name, and P1 moves the projections' side as-is. P2: journal's application exposes a projection-source read use case (read_projection_source) that the projections call, and the composition root passes it in instead of the DurableJournal."
 
 # Queries: the versioned query API over logs, metrics and traces, its async
 # jobs, the Prometheus-compatible endpoints, the query role and the
@@ -303,31 +298,11 @@ interfaces = "src/journal/interfaces"
 # reason says.
 
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/append_durable_batch.rs", "src/journal/application/apply_retention_expiration.rs", "src/journal/application/checkpoint_identity.rs", "src/journal/application/dedupe_window.rs", "src/journal/application/query_events.rs", "src/journal/application/recover_journal.rs", "src/journal/application/restore_journal.rs"]
-subject = "application->infrastructure"
-reason = "§2 splits durability.rs and lib.rs's DurableJournal so the use cases (recover, append_durable_batch, the dedupe window upkeep and rebuild, adopt_archive_*, retention expiration, checkpoint_identity, restore and query_events) stay impl DurableJournal blocks over the infrastructure facade, reading its RawStorage, SignalWal, DedupeIndex, JournalHead file and CanonicalRecoveryReader, and CommitContext holds the DurableJournal and the SiftStateMachine; §2 wins over layer_deps here. P2: the use cases become application services over domain ports (event store, dedupe index, recovery reader, command committer) that durable_journal, the storage and the Raft state machine implement."
 
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/journal/interfaces/journal_metrics.rs"]
-subject = "interfaces->infrastructure"
-reason = "metrics_text is an impl DurableJournal block that renders the accepted, duplicate and fsync counters and the resident-event gauge; §2 puts journal_metrics in interfaces, and P1 moves it as-is. P2: the application exposes a journal metrics snapshot, and the interface renders it."
 
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/append_durable_batch.rs", "src/journal/application/apply_retention_expiration.rs", "src/journal/application/dedupe_window.rs", "src/journal/application/query_events.rs", "src/journal/application/recover_journal.rs", "src/journal/infrastructure/blob_reference_scan.rs", "src/journal/infrastructure/journal_projection_read_session.rs", "src/journal/infrastructure/raft/archive_checkpoint.rs", "src/journal/infrastructure/raft/archive_checkpoint_install.rs", "src/journal/infrastructure/raft/local_checkpoint.rs", "src/journal/infrastructure/raft/raft_state_machine_impl.rs", "src/journal/infrastructure/raft/sift_state_machine.rs", "src/journal/infrastructure/raft/sift_state_machine_checkpoints.rs"]
-subject = "archive.application"
-reason = "The journal reads the archive's committed state throughout: recovery, append, the dedupe window, retention expiration, query_events, the blob reference scan and the state machine read committed_watermarks, committed_status, local_committed_status and remote_retained_state; recovery reconciles retention (reconcile_committed_retention) and resumes local blob GC (resume_local_blob_gc_batch, finish_local_blob_gc); the dedupe window replays archived receipts (replay_recent_committed_events, replay_recent_committed_receipts); query_events and the projection read session read archived events (read_committed_events_after, CommittedEventReader); and the Raft state machine archives locally, evicts, expires, restores and adopts archive checkpoints (archive_journal_local, evict_committed_cold_segments_at, expire_committed_events_at, restore_gcs, ArchiveReceipt, ExpirationReceipt). declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: an archive port in the journal's domain (committed watermarks and status, archived-event reader, checkpoint adoption) that the archive implements, which breaks the cycle."
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/recover_journal.rs", "src/journal/infrastructure/raft/archive_checkpoint.rs", "src/journal/infrastructure/raft/archive_checkpoint_install.rs"]
-subject = "archive.infrastructure"
-reason = "Recovery and the archive-checkpoint adoption and install run the archive's control-record steps directly: adopt_verified_archive_receipt, cleanup_orphan_spills, reconcile_staged_archive_gc, install_archive_gc_plan and withhold_archive_gc_plan; declaring archive in depends_on would close a journal-archive cycle, since the archive archives, evicts and expires the journal's segments. P2: the same archive port exposes these steps from the archive's application, and the journal stops reaching its infrastructure."
 
 
 # The archive: Sift's cold tier. It uploads the journal's sealed segments,
@@ -363,7 +338,7 @@ reason = "§2 splits storage/archive.rs into use cases over the archive's contro
 
 [[exceptions]]
 rule = "B4"
-paths = ["src/archive/application/archive_journal_local.rs", "src/archive/application/archive_journal_to_gcs.rs", "src/archive/application/archive_raw_storage_to_gcs.rs", "src/archive/application/compact_journal.rs", "src/archive/application/evict_cold_segments.rs", "src/archive/application/prepare_retention_fence.rs", "src/archive/application/reconcile_committed_retention.rs", "src/archive/application/restore_into_empty.rs", "src/archive/application/resume_local_blob_gc.rs", "src/archive/application/retention_expiration.rs", "src/archive/application/retention_manifest_commit.rs", "src/archive/application/run_lifecycle_attempt.rs", "src/archive/application/upload_archive_snapshot.rs"]
+paths = ["src/archive/application/compact_journal.rs", "src/archive/application/prepare_retention_fence.rs", "src/archive/application/restore_into_empty.rs", "src/archive/application/run_lifecycle_attempt.rs"]
 subject = "journal.infrastructure"
 reason = "The archive use cases act on the journal's live stores: they take DurableJournal to capture, evict, expire, compact, reconcile and restore sealed segments, read segments and blobs through RawStorage and BlobStore, restore writes the epoch maps with write_epoch_maps, and the lifecycle, retention fence and compaction propose and apply through SiftStateMachine; P1 moves them as-is. P2: the journal's application exposes the snapshot, eviction, expiration, compaction and restore operations the archive needs, and the archive holds that port instead of DurableJournal, RawStorage and SiftStateMachine."
 
@@ -422,11 +397,6 @@ interfaces = "src/operations/interfaces"
 
 
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/operations/application/journal_backup.rs", "src/operations/interfaces/http/admin_backup.rs"]
-subject = "journal.infrastructure"
-reason = "backup_journal and restore_journal take the DurableJournal, and admin_backup labels the snapshot with the journal's SNAPSHOT_CONTENT_TYPE; P1 moves backup.rs and lib.rs's admin endpoint as-is. P2: journal's application publishes snapshot_journal and restore_journal_from_bytes use cases that return and take the snapshot bytes with their content type, and operations calls them."
 
 
 # Files P2 moved or split. The ratchet lets each new path take the old path's

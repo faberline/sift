@@ -6,21 +6,23 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::journal_limits::PROJECTION_LOCAL_BUFFER_EVENTS;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::shared_kernel::event_query::EventQuery;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 #[doc(hidden)]
-pub struct JournalProjectionReadSession {
-    journal: Arc<DurableJournal>,
-    archive: Option<crate::archive::application::committed_event_reader::CommittedEventReader>,
+pub struct RuntimeReadSession {
+    journal: Arc<JournalRuntime>,
+    archive: Option<
+        Box<dyn crate::journal::domain::archive_access::ArchivedEventReader<Error = anyhow::Error>>,
+    >,
     archive_through: u64,
     cursor: u64,
     local: VecDeque<StoredEvent>,
 }
 
-impl JournalProjectionReadSession {
+impl RuntimeReadSession {
     #[doc(hidden)]
     pub fn read_next(&mut self, limit: usize) -> Result<Vec<StoredEvent>> {
         if limit == 0 {
@@ -99,11 +101,10 @@ impl JournalProjectionReadSession {
     }
 
     fn refresh_archive(&mut self) -> Result<bool> {
-        let Some(reader) =
-            crate::archive::application::committed_event_reader::CommittedEventReader::open(
-                self.journal.data_dir(),
-                self.cursor,
-            )?
+        let Some(reader) = self
+            .journal
+            .archive_read
+            .open_reader(self.journal.data_dir(), self.cursor)?
         else {
             return Ok(false);
         };
@@ -113,28 +114,49 @@ impl JournalProjectionReadSession {
     }
 }
 
-impl DurableJournal {
+impl JournalRuntime {
     #[doc(hidden)]
-    pub fn projection_read_session(
-        self: &Arc<Self>,
-        after: u64,
-    ) -> Result<JournalProjectionReadSession> {
+    pub fn projection_read_session(self: Arc<Self>, after: u64) -> Result<RuntimeReadSession> {
         self.ensure_recovered()?;
-        let archive =
-            crate::archive::application::committed_event_reader::CommittedEventReader::open(
-                self.data_dir(),
-                after,
-            )?;
+        let archive = self.archive_read.open_reader(self.data_dir(), after)?;
         let archive_through = archive
             .as_ref()
-            .map(crate::archive::application::committed_event_reader::CommittedEventReader::snapshot_index)
+            .map(|reader| reader.snapshot_index())
             .unwrap_or(after);
-        Ok(JournalProjectionReadSession {
+        Ok(RuntimeReadSession {
             journal: self.clone(),
             archive,
             archive_through,
             cursor: after,
             local: VecDeque::new(),
+        })
+    }
+}
+
+impl crate::journal::domain::projection_reader::ProjectionReader for RuntimeReadSession {
+    type Error = anyhow::Error;
+    fn read_next(&mut self, limit: usize) -> Result<Vec<StoredEvent>> {
+        RuntimeReadSession::read_next(self, limit)
+    }
+}
+#[doc(hidden)]
+pub struct JournalProjectionReadSession {
+    reader:
+        Box<dyn crate::journal::domain::projection_reader::ProjectionReader<Error = anyhow::Error>>,
+}
+impl JournalProjectionReadSession {
+    pub fn read_next(&mut self, limit: usize) -> Result<Vec<StoredEvent>> {
+        self.reader.read_next(limit)
+    }
+}
+impl super::journal_service::JournalService<'static> {
+    #[doc(hidden)]
+    pub fn projection_read_session(
+        self: &Arc<Self>,
+        after: u64,
+    ) -> Result<JournalProjectionReadSession> {
+        Ok(JournalProjectionReadSession {
+            reader: self.port().projection_read_session(after)?,
         })
     }
 }

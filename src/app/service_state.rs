@@ -14,7 +14,7 @@ use crate::ingest::domain::ingest_limits::IngestLimits;
 use crate::ingest::infrastructure::ingest_batch_coordinator::{
     IngestBatchBackend, IngestBatchCoordinator,
 };
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::DurableJournal;
 use crate::journal::infrastructure::raft::sift_membership_policy::SiftMembershipPolicy;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::local_capacity::LocalCapacity;

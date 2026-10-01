@@ -6,16 +6,17 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::journal_limits::RECOVERY_PAGE_EVENTS;
-use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(super) fn rebuild_dedupe_index(
     root: &Path,
-    storage: &crate::journal::infrastructure::storage::raw_storage::RawStorage,
-    wal: &crate::journal::infrastructure::storage::wal::SignalWal,
-    dedupe: &crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
+    resources: &dyn crate::journal::domain::recovery_store::RecoveryStore<Error = anyhow::Error>,
+    archive: &dyn crate::journal::domain::archive_access::ArchiveRead<Error = anyhow::Error>,
+    storage: &dyn crate::journal::domain::event_store::RawEventStore<Error = anyhow::Error>,
+    wal: &dyn crate::journal::domain::wal_store::WalStore<Error = anyhow::Error>,
+    dedupe: &dyn crate::journal::domain::dedupe_store::DedupeStore<Error = anyhow::Error>,
     archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     expected_last_cursor: u64,
 ) -> Result<()> {
@@ -25,19 +26,14 @@ pub(super) fn rebuild_dedupe_index(
 
     let cutoff = now
         - Duration::seconds(crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS);
-    let remote =
-        crate::archive::application::replay_recent_committed::replay_recent_committed_events(
-            root,
-            cutoff,
-            |event| {
-                page.push(event);
-                if page.len() == RECOVERY_PAGE_EVENTS {
-                    append_unique_dedupe_page_at(dedupe, &mut page, now)?;
-                    dedupe.maintain_at(now, false)?;
-                }
-                Ok(())
-            },
-        )?;
+    let remote = archive.replay_recent_events(root, cutoff, &mut |event| {
+        page.push(event);
+        if page.len() == RECOVERY_PAGE_EVENTS {
+            append_unique_dedupe_page_at(dedupe, &mut page, now)?;
+            dedupe.maintain_at(now, false)?;
+        }
+        Ok(())
+    })?;
     if !page.is_empty() {
         append_unique_dedupe_page_at(dedupe, &mut page, now)?;
         dedupe.maintain_at(now, false)?;
@@ -47,19 +43,15 @@ pub(super) fn rebuild_dedupe_index(
         Vec::<crate::shared_kernel::dedupe_receipt::DedupeReceipt>::with_capacity(
             RECOVERY_PAGE_EVENTS,
         );
-    crate::archive::application::replay_recent_committed::replay_recent_committed_receipts(
-        root,
-        cutoff,
-        |receipt| {
-            receipt_page.push(receipt);
-            if receipt_page.len() == RECOVERY_PAGE_EVENTS {
-                dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
-                receipt_page.clear();
-                dedupe.maintain_at(now, false)?;
-            }
-            Ok(())
-        },
-    )?;
+    archive.replay_recent_receipts(root, cutoff, &mut |receipt| {
+        receipt_page.push(receipt);
+        if receipt_page.len() == RECOVERY_PAGE_EVENTS {
+            dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
+            receipt_page.clear();
+            dedupe.maintain_at(now, false)?;
+        }
+        Ok(())
+    })?;
     if !receipt_page.is_empty() {
         dedupe.append_receipts_at(&receipt_page, expected_last_cursor, now)?;
         dedupe.maintain_at(now, false)?;
@@ -68,7 +60,7 @@ pub(super) fn rebuild_dedupe_index(
     let remote_watermarks = remote
         .map(|_| archived)
         .unwrap_or_else(crate::shared_kernel::archive_watermarks::ArchiveWatermarks::default);
-    let mut local_reader = CanonicalRecoveryReader::open(storage, wal, archived, 0, false)?;
+    let mut local_reader = resources.reader(storage, wal, archived, 0, false)?;
     loop {
         let local = local_reader.read_page()?;
         if local.is_empty() {
@@ -95,14 +87,14 @@ pub(super) fn rebuild_dedupe_index(
 }
 
 pub(super) fn append_unique_dedupe_page(
-    dedupe: &crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
+    dedupe: &dyn crate::journal::domain::dedupe_store::DedupeStore<Error = anyhow::Error>,
     page: &mut Vec<StoredEvent>,
 ) -> Result<()> {
     append_unique_dedupe_page_at(dedupe, page, Utc::now())
 }
 
 fn append_unique_dedupe_page_at(
-    dedupe: &crate::journal::infrastructure::storage::dedupe_index::DedupeIndex,
+    dedupe: &dyn crate::journal::domain::dedupe_store::DedupeStore<Error = anyhow::Error>,
     page: &mut Vec<StoredEvent>,
     now: DateTime<Utc>,
 ) -> Result<()> {
@@ -133,21 +125,18 @@ fn append_unique_dedupe_page_at(
     Ok(())
 }
 
-impl DurableJournal {
+impl JournalRuntime {
     pub(crate) fn maintain_dedupe_at(&self, _now: DateTime<Utc>, force: bool) -> Result<usize> {
         match self.dedupe.maintain_applied(force) {
             Ok(flushed) => Ok(flushed),
             Err(maintenance_error) => {
-                let archived =
-                    crate::archive::application::archive_status_queries::committed_watermarks(
-                        self.data_dir(),
-                    )?;
+                let archived = self.archive_read.committed_watermarks(self.data_dir())?;
                 let expected_last_cursor = self.last_cursor();
                 rebuild_dedupe_index(
-                    self.data_dir(),
-                    &self.storage,
-                    &self.wal,
-                    &self.dedupe,
+                    self.data_dir(), self.resources.as_ref(), self.archive_read.as_ref(),
+                    self.storage.as_ref(),
+                    self.wal.as_ref(),
+                    self.dedupe.as_ref(),
                     archived,
                     expected_last_cursor,
                 )

@@ -23,7 +23,7 @@ use crate::archive::infrastructure::private_fs_mode::set_private_file;
 /// compacting the corresponding WAL. This is the durable fallback for local
 /// installations without GCS.
 pub fn archive_journal_local(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
 ) -> Result<LocalArchiveReceipt> {
     let (snapshot_index, segments) = journal.seal_archive_prefix()?;
     archive_journal_local_captured(journal, snapshot_index, segments)
@@ -31,7 +31,7 @@ pub fn archive_journal_local(
 
 #[doc(hidden)]
 pub fn archive_journal_local_captured(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     snapshot_index: u64,
     segments: Vec<(SignalKind, SegmentManifest)>,
 ) -> Result<LocalArchiveReceipt> {

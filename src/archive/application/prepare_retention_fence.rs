@@ -6,10 +6,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use chrono::Utc;
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::JournalService as DurableJournal;
 
 pub(in crate::archive) async fn prepare_retention_fence(
-    journal: &Arc<DurableJournal>,
+    journal: &Arc<DurableJournal<'static>>,
     state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     raft: Option<&Arc<raft_runtime::RaftHost>>,
     remote_archive: bool,

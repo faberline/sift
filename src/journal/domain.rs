@@ -16,3 +16,19 @@ pub(crate) mod resident_window;
 pub(crate) mod storage_config;
 
 pub(crate) mod command_submission;
+
+pub(crate) mod event_store;
+
+pub(crate) mod dedupe_store;
+
+pub(crate) mod wal_store;
+
+pub(crate) mod journal_api;
+
+pub(crate) mod archive_access;
+
+pub(crate) mod recovery_store;
+
+pub(crate) mod snapshot_ports;
+
+pub(crate) mod projection_reader;

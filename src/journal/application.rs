@@ -16,3 +16,23 @@ pub(crate) mod batch_limits;
 
 #[cfg(test)]
 mod commit_append_batch_tests;
+
+pub(crate) mod raw_event_service;
+
+pub(crate) mod journal_service;
+
+pub(crate) mod journal_runtime;
+
+pub(crate) mod journal_runtime_port;
+
+pub(crate) mod archive_prefix_source;
+
+pub(crate) mod blob_reference_scan;
+
+pub(crate) mod journal_projection_read_session;
+
+pub(crate) mod snapshot_codec;
+
+pub(crate) mod journal_dependencies;
+
+pub(crate) mod journal_service_port;

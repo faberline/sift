@@ -42,14 +42,14 @@ use crate::shared_kernel::sha256_hex::sha256_hex;
 /// manifest. A mixed Parquet segment is rewritten with only retained rows.
 /// The new objects and manifest commit before the prior objects are deleted.
 pub fn expire_committed_events_at(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
 ) -> Result<ExpirationReceipt> {
     expire_committed_events_bounded_at(journal, now)
 }
 
 fn expire_committed_events_bounded_at(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
 ) -> Result<ExpirationReceipt> {
     const BATCH_PARQUET_BYTES: u64 = 64 * 1024 * 1024;
@@ -278,7 +278,7 @@ fn expire_committed_events_bounded_at(
 /// archive's snapshot, the archive's retained events plus its own suffix, and
 /// the archive's retention generation.
 fn ensure_retention_head_reconciled(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     root: &Path,
 ) -> Result<(ArchiveCommitState, ArchiveManifest)> {
     reconcile_live_committed_retention(journal)?;

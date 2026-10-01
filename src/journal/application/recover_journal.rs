@@ -10,59 +10,61 @@ use chrono::{DateTime, Utc};
 use metrics_prometheus::Counter;
 
 use crate::journal::application::dedupe_window::rebuild_dedupe_index;
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::command_submission::JournalGovernance;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
 use crate::journal::domain::recent_cursor::{recent_cursor_at, RecentCursor};
 use crate::journal::domain::resident_window::ResidentWindow;
-use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
-use crate::node::domain::storage_role::StorageRole;
-use crate::node::infrastructure::data_layout::DataLayout;
 use crate::shared_kernel::event_content_digest::xor_digest;
 use crate::shared_kernel::stored_event::StoredEvent;
 
-impl DurableJournal {
+impl JournalRuntime {
     pub(crate) fn open_configured(
         data_dir: impl AsRef<Path>,
         governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
-        role: StorageRole,
         resident_limit: usize,
+        dependencies: super::journal_dependencies::JournalDependencies,
     ) -> Result<Self> {
         governance.validate()?;
         if resident_limit == 0 {
             bail!("resident journal event limit must be greater than zero");
         }
-        let layout = DataLayout::open(data_dir, role)?;
+        let layout = dependencies.resources.initialize_root(data_dir.as_ref())?;
         let data_dir = layout.root().to_path_buf();
-        crate::archive::infrastructure::spill_catalog::cleanup_orphan_spills(&data_dir)?;
-        crate::archive::infrastructure::archive_gc_pending_store::reconcile_staged_archive_gc(
+        dependencies
+            .archive_maintenance
+            .cleanup_orphan_spills(&data_dir)?;
+        dependencies
+            .archive_maintenance
+            .reconcile_staged_gc(&data_dir)?;
+        let wal = dependencies.resources.open_wal(&data_dir)?;
+        let storage = dependencies.resources.open_events(&data_dir)?;
+        let stored_head = dependencies.resources.load_head(&data_dir)?;
+        dependencies.archive_maintenance.reconcile_retention(
             &data_dir,
-        )?;
-        let wal = crate::journal::infrastructure::storage::wal::SignalWal::open(&data_dir)?;
-        let storage =
-            crate::journal::infrastructure::storage::raw_storage::RawStorage::open(&data_dir)?;
-        let stored_head = crate::journal::domain::journal_head::JournalHead::load(&data_dir)?;
-        crate::archive::application::reconcile_committed_retention::reconcile_committed_retention(
-            &data_dir,
-            &storage,
+            storage.clone(),
             stored_head
                 .as_ref()
                 .map(|head| head.retention_generation)
                 .unwrap_or_default(),
         )?;
-        let archived =
-            crate::archive::application::archive_status_queries::committed_watermarks(&data_dir)?;
+        let archived = dependencies.archive_read.committed_watermarks(&data_dir)?;
         // A committed manifest is the durable authority for this prefix. Retry
         // compaction before comparing local segments with WAL bytes so a crash
         // after archive reconciliation cannot resurrect an older WAL copy.
         wal.compact_through(archived)?;
-        let remote_retained =
-            crate::archive::application::archive_status_queries::remote_retained_state(&data_dir)?;
+        let remote_retained = dependencies.archive_read.remote_retained_state(&data_dir)?;
         let mut state = ResidentWindow::default();
-        let (dedupe, dedupe_stats) =
-            crate::journal::infrastructure::storage::dedupe_index::DedupeIndex::open(&data_dir)?;
+        let (dedupe, dedupe_stats) = dependencies.resources.open_dedupe(&data_dir)?;
         let recovery_time = Utc::now();
-        let mut recovery = CanonicalRecoveryReader::open(&storage, &wal, archived, 0, true)?;
+        let recovery_storage = storage.clone();
+        let mut recovery = dependencies.resources.reader(
+            recovery_storage.as_ref(),
+            wal.as_ref(),
+            archived,
+            0,
+            true,
+        )?;
         let mut dedupe_matches = true;
         let mut local_after_remote = 0_u64;
         let mut local_after_remote_digest = [0_u8; 32];
@@ -133,14 +135,16 @@ impl DurableJournal {
         {
             rebuild_dedupe_index(
                 &data_dir,
-                &storage,
-                &wal,
-                &dedupe,
+                dependencies.resources.as_ref(),
+                dependencies.archive_read.as_ref(),
+                storage.as_ref(),
+                wal.as_ref(),
+                dedupe.as_ref(),
                 archived,
                 head.last_cursor,
             )?;
         }
-        head.persist(&data_dir)?;
+        dependencies.resources.persist_head(&data_dir, &head)?;
         // A durable archive receipt authorizes WAL truncation. Retry a crash
         // or late I/O failure before this journal starts serving requests.
         wal.compact_through(archived)?;
@@ -155,6 +159,11 @@ impl DurableJournal {
         let accepted = head.retained_events;
         let journal = Self {
             _layout: layout,
+            resources: dependencies.resources,
+            archive_read: dependencies.archive_read,
+            archive_maintenance: dependencies.archive_maintenance,
+            snapshots: dependencies.snapshots,
+            staging: dependencies.staging,
             wal,
             storage,
             dedupe,
@@ -169,10 +178,9 @@ impl DurableJournal {
             retention_fenced: AtomicBool::new(false),
         };
         journal.accepted.add(accepted);
-        if let Err(error) =
-            crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
-                &journal, 128, 1_280_000,
-            )
+        if let Err(error) = journal
+            .archive_maintenance
+            .resume_local_blob_gc(&journal, 128, 1_280_000)
         {
             tracing::warn!(%error, "resume local blob GC after restart failed; durable progress is retained");
         }
