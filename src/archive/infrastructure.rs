@@ -12,7 +12,6 @@ pub(crate) mod archive_upload_intent;
 mod catalog_values;
 pub(crate) mod dedupe_receipt_archive;
 pub(crate) mod ephemeral_file_object_store;
-pub(crate) mod gc_plan_builder;
 pub(crate) mod gcs_uri;
 pub(crate) mod local_blob_gc_store;
 pub(crate) mod local_blob_live_index;
@@ -39,3 +38,7 @@ pub(crate) mod segment_codec_adapter;
 pub(crate) mod restore_store_adapter;
 
 pub(crate) mod file_modes_adapter;
+
+pub(crate) mod resource_adapter;
+
+pub(crate) mod catalog_port_adapter;

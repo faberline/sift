@@ -9,9 +9,7 @@ use chrono::{DateTime, Utc};
 
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::shared_kernel::archive_receipts::ArchiveReplay;
 use crate::shared_kernel::dedupe_receipt::DedupeReceipt;
 use crate::shared_kernel::stored_event::StoredEvent;
@@ -34,10 +32,10 @@ where
     let cutoff_nanos = since
         .timestamp_nanos_opt()
         .context("dedupe rebuild cutoff is outside the nanosecond range")?;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     let mut scanned = 0_u64;
     let mut replayed = 0_u64;
-    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
+    for entry in catalog.reader(&manifest.catalog_root)? {
         let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
@@ -81,9 +79,9 @@ where
     let cutoff_nanos = since
         .timestamp_nanos_opt()
         .context("dedupe receipt rebuild cutoff is outside the nanosecond range")?;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     let mut replayed = 0_u64;
-    for entry in catalog.reader_after(&(&manifest.catalog_root).into(), "receipt/")? {
+    for entry in catalog.reader_after(&manifest.catalog_root, "receipt/")? {
         let entry = entry?;
         if !entry.key.starts_with("receipt/") {
             break;

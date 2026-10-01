@@ -8,8 +8,6 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 
 use crate::archive::infrastructure::ephemeral_file_object_store::EphemeralFileObjectStore;
-use crate::shared_kernel::sha256_hex::sha256_hex;
-use crate::ContentBlobRef;
 
 const ARCHIVE_SPILL_PREFIXES: [&str; 8] = [
     "retention-obsolete-",
@@ -21,31 +19,6 @@ const ARCHIVE_SPILL_PREFIXES: [&str; 8] = [
     "restore-hot-blobs-",
     "restore-blob-counts-",
 ];
-
-pub(in crate::archive) use crate::archive::domain::control_values::SpillBlobReference;
-
-pub(in crate::archive) fn add_spill_blob_reference(
-    target: &mut SpillCatalog,
-    reference: &ContentBlobRef,
-) -> Result<()> {
-    let key = format!("blob/{}", reference.hash);
-    let mut counted = target
-        .lookup(&key)?
-        .map(|bytes| {
-            serde_json::from_slice::<SpillBlobReference>(&bytes)
-                .context("decode archive spill blob reference")
-        })
-        .transpose()?
-        .unwrap_or_else(|| SpillBlobReference {
-            reference: reference.clone(),
-            count: 0,
-        });
-    if counted.reference != *reference {
-        bail!("one blob hash has conflicting content references");
-    }
-    counted.count = counted.count.saturating_add(1);
-    target.upsert(key, serde_json::to_vec(&counted)?)
-}
 
 /// A temporary, disk-backed ordered map used by archive maintenance.
 ///
@@ -117,69 +90,8 @@ impl SpillCatalog {
         Ok(())
     }
 
-    pub(in crate::archive) fn add_u64(&mut self, key: String, amount: u64) -> Result<()> {
-        let current = self
-            .lookup(&key)?
-            .map(|bytes| {
-                bytes
-                    .as_slice()
-                    .try_into()
-                    .map(u64::from_le_bytes)
-                    .map_err(|_| anyhow::anyhow!("archive spill count is corrupt"))
-            })
-            .transpose()?
-            .unwrap_or_default();
-        self.upsert(key, current.saturating_add(amount).to_le_bytes().to_vec())
-    }
-
-    pub(in crate::archive) fn get_u64(&self, key: &str) -> Result<u64> {
-        self.lookup(key)?
-            .map(|bytes| {
-                bytes
-                    .as_slice()
-                    .try_into()
-                    .map(u64::from_le_bytes)
-                    .map_err(|_| anyhow::anyhow!("archive spill count is corrupt"))
-            })
-            .transpose()
-            .map(|value| value.unwrap_or_default())
-    }
-
-    pub(in crate::archive) fn insert_uri(&mut self, uri: &str) -> Result<()> {
-        self.upsert(
-            format!("uri/{}", sha256_hex(uri.as_bytes())),
-            uri.as_bytes().to_vec(),
-        )
-    }
-
-    pub(in crate::archive) fn remove_uri(&mut self, uri: &str) -> Result<()> {
-        self.remove(&format!("uri/{}", sha256_hex(uri.as_bytes())))
-    }
-
-    pub(super) fn contains_uri(&self, uri: &str) -> Result<bool> {
-        Ok(self
-            .lookup(&format!("uri/{}", sha256_hex(uri.as_bytes())))?
-            .is_some())
-    }
-
     pub(in crate::archive) fn reader(&self) -> Result<storage_segment::CatalogReader> {
         self.catalog.reader(&self.root).map_err(Into::into)
-    }
-
-    pub(in crate::archive) fn len(&self) -> u64 {
-        self.root.entry_count
-    }
-}
-
-impl crate::archive::domain::blob_hash_set::BlobHashSet for SpillCatalog {
-    type Error = anyhow::Error;
-
-    fn insert_hash(&mut self, hash: &str) -> Result<()> {
-        self.upsert(format!("blob/{hash}"), Vec::new())
-    }
-
-    fn contains_hash(&self, hash: &str) -> Result<bool> {
-        Ok(self.lookup(&format!("blob/{hash}"))?.is_some())
     }
 }
 

@@ -7,8 +7,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::archive::application::archive_status_queries::committed_status;
-use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
-use crate::archive::infrastructure::archive_signal_stream::ArchiveSignalStream;
+use crate::archive::application::signal_service::SignalService as ArchiveSignalStream;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
@@ -38,12 +37,12 @@ impl CommittedEventReader {
         let manifest = services
             .fetch_verified_committed_root(root)?
             .context("committed archive receipt has no readable manifest")?;
-        let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+        let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
         let stream = |signal| -> Result<ArchiveSignalStream> {
             let prefix = format!("segment/{signal}/");
-            Ok(ArchiveSignalStream::new_after(
+            Ok(services.resources.signal_stream(
                 root,
-                catalog.reader_after(&(&manifest.catalog_root).into(), &prefix)?,
+                catalog.reader_after(&manifest.catalog_root, &prefix)?,
                 signal,
                 after,
             ))

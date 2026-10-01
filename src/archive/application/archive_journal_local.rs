@@ -8,9 +8,7 @@ use anyhow::{bail, Result};
 use chrono::Utc;
 
 use crate::archive::domain::control_paths::{LOCAL_COMMIT_FORMAT_VERSION, LOCAL_COMMIT_PATH};
-use crate::archive::infrastructure::local_segment_commit_state::{
-    LocalCommittedSegment, LocalSegmentCommitState,
-};
+use crate::archive::domain::control_values::{LocalCommittedSegment, LocalSegmentCommitState};
 use crate::shared_kernel::archive_receipts::LocalArchiveReceipt;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 use crate::shared_kernel::segment_manifest::SegmentManifest;

@@ -3,29 +3,29 @@
 //! and live objects, and the steps that expire events, blobs and dedupe
 //! receipts through them.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
+use crate::archive::application::gc_plan_builder::spill_pending_archive_gc;
 use crate::archive::application::retention_catalog_ops::{
     apply_catalog_remove, apply_catalog_upsert, retained_watermarks_from_catalog,
 };
+use crate::archive::application::spill_service::SpillService as SpillCatalog;
 use crate::archive::domain::archive_catalog_item::{blob_catalog_key, ArchiveCatalogItem};
 use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::control_values::ArchiveCommitState;
 use crate::archive::domain::event_set_digest::{
     decode_event_content_digest, decode_event_id_digest, include_event_content, include_event_id,
 };
+use crate::archive::domain::gcs_uri::{gcs_uri, split_gcs_uri};
 use crate::archive::domain::retention_policy::RETENTION_SCAN_BATCH_SEGMENTS;
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
-use crate::archive::infrastructure::gc_plan_builder::spill_pending_archive_gc;
-use crate::archive::infrastructure::gcs_uri::{gcs_uri, split_gcs_uri};
-use crate::archive::infrastructure::spill_catalog::SpillCatalog;
 use crate::shared_kernel::archive_manifest::{
     ArchiveManifest, ArchiveRetentionDelta, ArchiveRetentionScan, ARCHIVE_FORMAT_VERSION,
 };
@@ -36,7 +36,7 @@ use crate::shared_kernel::stored_event::StoredEvent;
 /// next one: the catalog root it edits, the objects it finds obsolete or still
 /// live, and the manifest totals and digests it keeps up to date.
 pub(super) struct RetentionPass {
-    pub(super) catalog_root: storage_segment::CatalogRoot,
+    pub(super) catalog_root: crate::shared_kernel::catalog_manifest::CatalogRoot,
     pub(super) gc_candidates: SpillCatalog,
     pub(super) live_objects: SpillCatalog,
     event_count: u64,
@@ -65,15 +65,18 @@ impl RetentionPass {
     /// starts with the pending local GC, the committed manifest and the
     /// objects its GC plan lists.
     pub(super) fn new(
+        services: &ArchiveServices,
         root: &Path,
         current_state: &ArchiveCommitState,
         current: &ArchiveManifest,
         spill_parent: &Path,
     ) -> Result<Self> {
-        let catalog_root = (&current.catalog_root).into();
-        let mut gc_candidates = SpillCatalog::new(spill_parent, "retention-obsolete-")?;
-        let live_objects = SpillCatalog::new(spill_parent, "retention-live-")?;
-        seed_gc_candidates(root, current_state, current, &mut gc_candidates)?;
+        let catalog_root = current.catalog_root.clone();
+        let mut gc_candidates = services
+            .resources
+            .spill(spill_parent, "retention-obsolete-")?;
+        let live_objects = services.resources.spill(spill_parent, "retention-live-")?;
+        seed_gc_candidates(services, root, current_state, current, &mut gc_candidates)?;
         Ok(Self {
             catalog_root,
             gc_candidates,
@@ -142,7 +145,7 @@ impl RetentionPass {
     /// count reaches zero leaves the catalog and becomes obsolete.
     pub(super) fn apply_blob_decrements(
         &mut self,
-        current_catalog: &storage_segment::PagedCatalog,
+        current_catalog: &crate::archive::application::catalog_service::CatalogService,
         bucket: &str,
     ) -> Result<()> {
         for (hash, &decrement) in &self.blob_decrements {
@@ -175,7 +178,7 @@ impl RetentionPass {
                 apply_catalog_upsert(
                     current_catalog,
                     &mut self.catalog_root,
-                    storage_segment::CatalogEntry {
+                    crate::archive::domain::resource_ports::CatalogEntry {
                         key: blob_catalog_key(&blob),
                         value: serde_json::to_vec(&blob)?,
                     },
@@ -193,7 +196,7 @@ impl RetentionPass {
     /// cutoff, at most one scan batch of them per pass.
     pub(super) fn expire_dedupe_receipts(
         &mut self,
-        current_catalog: &storage_segment::PagedCatalog,
+        current_catalog: &crate::archive::application::catalog_service::CatalogService,
         bucket: &str,
         receipt_cutoff_nanos: i64,
     ) -> Result<()> {
@@ -237,7 +240,7 @@ impl RetentionPass {
     /// or kept to resume after the last key this pass processed.
     pub(super) fn finalize_retention_scan(
         &self,
-        current_catalog: &storage_segment::PagedCatalog,
+        current_catalog: &crate::archive::application::catalog_service::CatalogService,
         scan: &ArchiveRetentionScan,
         scan_complete: bool,
         current_oldest_event_time_unix_nano: Option<i64>,
@@ -287,7 +290,7 @@ impl RetentionPass {
         target_generation: u64,
         scan: &ArchiveRetentionScan,
         finalized: FinalizedRetentionScan,
-        gc_plan: Option<storage_segment::StreamingCatalogBuild>,
+        gc_plan: Option<crate::archive::domain::resource_ports::CatalogBuild>,
         gc_plan_uri: Option<String>,
     ) -> ArchiveManifest {
         let gc_object_count = gc_plan
@@ -311,12 +314,12 @@ impl RetentionPass {
             oldest_event_time_unix_nano: finalized.oldest_event_time_unix_nano,
             epochs: current.epochs.clone(),
             catalog_uri: current.catalog_uri.clone(),
-            catalog_root: self.catalog_root.clone().into(),
+            catalog_root: self.catalog_root.clone(),
             segment_count: self.segment_count,
             blob_count: self.blob_count,
             dedupe_receipt_count: self.dedupe_receipt_count,
             gc_plan_uri,
-            gc_plan_root: gc_plan.map(|plan| plan.root.into()),
+            gc_plan_root: gc_plan.map(|plan| plan.root),
             gc_object_count,
             retention_delta: Some(ArchiveRetentionDelta {
                 source_manifest_uri: current_state.manifest_uri.clone(),
@@ -337,17 +340,18 @@ impl RetentionPass {
 /// Seed the obsolete-object spill with the pending local GC, the committed
 /// manifest and the objects its GC plan lists.
 fn seed_gc_candidates(
+    services: &ArchiveServices,
     root: &Path,
     current_state: &ArchiveCommitState,
     current: &ArchiveManifest,
     gc_candidates: &mut SpillCatalog,
 ) -> Result<()> {
-    spill_pending_archive_gc(root, gc_candidates)?;
+    spill_pending_archive_gc(services, root, gc_candidates)?;
     gc_candidates.insert_uri(&current_state.manifest_uri)?;
     if let (Some(gc_uri), Some(gc_root)) = (&current.gc_plan_uri, &current.gc_plan_root) {
         let (gc_bucket, _) = split_gcs_uri(gc_uri)?;
-        let current_gc = catalog_for_uri(gc_uri)?;
-        for key in current_gc.page_keys(&gc_root.into())? {
+        let current_gc = services.resources.catalog_for_uri(gc_uri)?;
+        for key in current_gc.page_keys(gc_root)? {
             gc_candidates.insert_uri(&gcs_uri(&gc_bucket, &key?))?;
         }
     }

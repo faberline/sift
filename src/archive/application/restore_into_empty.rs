@@ -8,15 +8,12 @@ use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
 use crate::archive::application::manifest_validation::validate_archive_manifest;
+use crate::archive::application::signal_service::SignalService as ArchiveSignalStream;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::event_time_unix_nano;
 use crate::archive::domain::blob_hash_set::BlobHashSet;
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::event_set_digest::{include_event_content, include_event_id};
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
-use crate::archive::infrastructure::archive_signal_stream::ArchiveSignalStream;
-use crate::archive::infrastructure::spill_catalog::SpillCatalog;
 use crate::journal::infrastructure::storage::blob_store::BlobStore;
 use crate::journal::infrastructure::storage::shard_router::write_epoch_maps;
 use crate::node::domain::storage_role::StorageRole;
@@ -34,7 +31,7 @@ pub(super) fn restore_gcs_into_empty(
     target: &Path,
 ) -> Result<ArchiveManifest> {
     services.require_empty_restore_target(target)?;
-    let manifest_bytes = service_backup::fetch_backup_object(manifest_uri)?;
+    let manifest_bytes = services.resources.fetch_object(manifest_uri)?;
     let manifest_sha256 = sha256_hex(&manifest_bytes);
     let mut manifest: ArchiveManifest =
         serde_json::from_slice(&manifest_bytes).context("decode Sift archive manifest")?;
@@ -50,13 +47,14 @@ pub(super) fn restore_gcs_into_empty(
     let hot_cutoff_nanos = (Utc::now() - chrono::Duration::days(30))
         .timestamp_nanos_opt()
         .context("30-day hot restore cutoff is outside the nanosecond range")?;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     let stream = |signal| -> Result<ArchiveSignalStream> {
         let prefix = format!("segment/{signal}/");
-        Ok(ArchiveSignalStream::new(
+        Ok(services.resources.signal_stream(
             target,
-            catalog.reader_after(&(&manifest.catalog_root).into(), &prefix)?,
+            catalog.reader_after(&manifest.catalog_root, &prefix)?,
             signal,
+            0,
         ))
     };
     let mut streams = [
@@ -66,8 +64,12 @@ pub(super) fn restore_gcs_into_empty(
     ];
     let mut page = Vec::with_capacity(10_000);
     let spill_parent = target.join("tmp");
-    let mut hot_blob_hashes = SpillCatalog::new(&spill_parent, "restore-hot-blobs-")?;
-    let mut blob_reference_counts = SpillCatalog::new(&spill_parent, "restore-blob-counts-")?;
+    let mut hot_blob_hashes = services
+        .resources
+        .spill(&spill_parent, "restore-hot-blobs-")?;
+    let mut blob_reference_counts = services
+        .resources
+        .spill(&spill_parent, "restore-blob-counts-")?;
     let mut event_count = 0_u64;
     let mut last_cursor = 0_u64;
     let mut event_id_digest = [0_u8; 32];
@@ -145,7 +147,7 @@ pub(super) fn restore_gcs_into_empty(
 
     let blob_store = BlobStore::open(target, 65_536)?;
     let mut restored_blobs = 0_u64;
-    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
+    for entry in catalog.reader(&manifest.catalog_root)? {
         let ArchiveCatalogItem::Blob(blob) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
@@ -160,7 +162,7 @@ pub(super) fn restore_gcs_into_empty(
                 blob.reference.hash
             );
         }
-        let bytes = service_backup::fetch_backup_object(&blob.object_uri)?;
+        let bytes = services.resources.fetch_object(&blob.object_uri)?;
         let actual_hash = format!("sha256:{}", sha256_hex(&bytes));
         if actual_hash != blob.reference.hash || bytes.len() as u64 != blob.reference.size {
             bail!(
@@ -183,7 +185,7 @@ pub(super) fn restore_gcs_into_empty(
     }
 
     let mut restored_receipt_segments = 0_u64;
-    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
+    for entry in catalog.reader(&manifest.catalog_root)? {
         let ArchiveCatalogItem::Receipt(receipt) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };

@@ -7,8 +7,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::archive::application::archive_status_queries::committed_status;
 use crate::archive::domain::control_paths::LOCAL_BLOB_GC_PATH;
-use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
-use crate::archive::infrastructure::gcs_uri::blob_hash_from_archive_uri;
+use crate::archive::domain::gcs_uri::blob_hash_from_archive_uri;
 
 #[doc(hidden)]
 pub(crate) fn resume_local_blob_gc_batch(
@@ -42,10 +41,10 @@ pub(crate) fn resume_local_blob_gc_batch(
     services.persist_local_blob_gc_pending(&path, &pending)?;
 
     if pending.candidates.is_empty() && !pending.plan_exhausted {
-        let catalog = catalog_for_uri(&pending.gc_plan_uri)?;
+        let catalog = services.resources.catalog_for_uri(&pending.gc_plan_uri)?;
         let mut reader = match pending.plan_cursor.as_deref() {
-            Some(cursor) => catalog.reader_after(&(&pending.gc_plan_root).into(), cursor)?,
-            None => catalog.reader(&(&pending.gc_plan_root).into())?,
+            Some(cursor) => catalog.reader_after(&pending.gc_plan_root, cursor)?,
+            None => catalog.reader(&pending.gc_plan_root)?,
         };
         let mut inspected = 0_usize;
         while inspected < max_plan_entries {

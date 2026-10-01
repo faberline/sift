@@ -366,7 +366,15 @@ fn manifest_last_archive_flow_is_owned_by_storage_segment() {
         "/src/archive/infrastructure/parquet_event_codec.rs"
     ))
     .expect("read Sift archive codec");
-    let source = upload + &expire + &codec;
+    let resources = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/archive/infrastructure/resource_adapter.rs"
+    ))
+    .expect("read Sift archive resource adapter");
+    assert!(resources.contains("storage_segment::ArchiveCoordinator"));
+    assert!(!upload.contains("storage_segment::ArchiveCoordinator"));
+    assert!(!expire.contains("storage_segment::ArchiveCoordinator"));
+    let source = upload + &expire + &codec + &resources;
 
     assert!(source.contains("storage_segment::ArchiveCoordinator"));
     assert!(source.contains("impl storage_segment::RecordCodec<StoredEvent>"));

@@ -9,7 +9,6 @@ use anyhow::{bail, Context, Result};
 
 use crate::archive::application::archive_status_queries::committed_status;
 use crate::archive::domain::control_paths::ARCHIVE_GC_PATH;
-use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
 
 /// Delete obsolete remote archive objects after the replacement checkpoint is
 /// durable on every voter. A single-node caller may use its local checkpoint
@@ -52,10 +51,10 @@ pub(crate) fn finalize_archive_gc_batch_after_checkpoint(
         bail!("archive GC replacement manifest is not the committed archive identity");
     }
     let mut deleted = 0_usize;
-    let catalog = catalog_for_uri(&pending.gc_plan_uri)?;
+    let catalog = services.resources.catalog_for_uri(&pending.gc_plan_uri)?;
     let mut reader = match pending.cursor.as_deref() {
-        Some(cursor) => catalog.reader_after(&(&pending.gc_plan_root).into(), cursor)?,
-        None => catalog.reader(&(&pending.gc_plan_root).into())?,
+        Some(cursor) => catalog.reader_after(&pending.gc_plan_root, cursor)?,
+        None => catalog.reader(&pending.gc_plan_root)?,
     };
     for entry in &mut reader {
         let entry = entry?;
@@ -63,9 +62,12 @@ pub(crate) fn finalize_archive_gc_batch_after_checkpoint(
             return Ok((deleted, false));
         }
         let uri = String::from_utf8(entry.value).context("decode archive GC object URI")?;
-        let (sink, key) = service_backup::GcsSink::from_exact_uri(&uri)
+        let target = services
+            .resources
+            .gc_target(&uri)
             .with_context(|| format!("validate archive GC object URI {uri}"))?;
-        sink.delete_object(&key)
+        target
+            .delete()
             .with_context(|| format!("delete obsolete archive object {uri}"))?;
         pending.cursor = Some(entry.key);
         deleted += 1;

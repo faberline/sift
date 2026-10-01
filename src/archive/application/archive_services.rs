@@ -17,6 +17,7 @@ use anyhow::Result;
 use std::path::Path;
 
 pub(crate) struct ArchiveServices {
+    pub(crate) resources: crate::archive::application::resource_factory::ResourceFactory,
     pub(crate) commit_store: std::sync::Arc<
         dyn crate::archive::domain::commit_store_port::CommitStorePort<Error = anyhow::Error>,
     >,
@@ -30,7 +31,10 @@ pub(crate) struct ArchiveServices {
         dyn crate::archive::domain::manifest_store_port::ManifestStorePort<Error = anyhow::Error>,
     >,
     pub(crate) segment_codec: std::sync::Arc<
-        dyn crate::archive::domain::segment_codec_port::SegmentCodecPort<Error = anyhow::Error>,
+        dyn crate::archive::domain::segment_codec_port::SegmentCodecPort<
+            Error = anyhow::Error,
+            PartitionError = storage_segment::SegmentError,
+        >,
     >,
     pub(crate) restore_store: std::sync::Arc<
         dyn crate::archive::domain::restore_store_port::RestoreStorePort<Error = anyhow::Error>,

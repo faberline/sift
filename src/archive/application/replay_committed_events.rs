@@ -11,9 +11,7 @@ use chrono::{DateTime, Utc};
 use crate::archive::application::committed_event_reader::CommittedEventReader;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::parse_optional_archive_time;
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::shared_kernel::archive_receipts::ArchiveReplay;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
@@ -47,8 +45,8 @@ where
 
     let mut scanned = 0_u64;
     let mut replayed = 0_u64;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
-    for entry in catalog.reader(&(&manifest.catalog_root).into())? {
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
+    for entry in catalog.reader(&manifest.catalog_root)? {
         let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };

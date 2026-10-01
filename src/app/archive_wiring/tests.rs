@@ -4,6 +4,8 @@ use crate::archive::domain::control_values::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 
+mod resources;
+
 fn assert_round_trip<T: DeserializeOwned + Serialize>(bytes: &[u8]) {
     let value: T = serde_json::from_slice(bytes).unwrap();
     assert_eq!(serde_json::to_vec(&value).unwrap(), bytes);

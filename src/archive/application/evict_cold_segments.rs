@@ -6,10 +6,8 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::archive::domain::archive_catalog_item::{segment_catalog_key, ArchiveCatalogItem};
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::portable_manifest::portable_manifest;
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
 use crate::shared_kernel::archive_manifest::{empty_dedupe_receipt, ArchiveSegment};
 use crate::shared_kernel::archive_receipts::HotEvictionReceipt;
 
@@ -23,7 +21,7 @@ pub(crate) fn evict_committed_cold_segments_at(
     let manifest = services
         .fetch_verified_committed_root(journal.storage().root())?
         .context("cold segment eviction requires a committed remote manifest")?;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     let cutoff = now - chrono::Duration::days(30);
     let cutoff_nanos = cutoff
         .timestamp_nanos_opt()
@@ -66,7 +64,7 @@ pub(crate) fn evict_committed_cold_segments_at(
             dedupe_receipt: empty_dedupe_receipt(),
         };
         let exact_remote = catalog
-            .lookup(&(&manifest.catalog_root).into(), &segment_catalog_key(&probe))?
+            .lookup(&manifest.catalog_root, &segment_catalog_key(&probe))?
             .map(decode_archive_catalog_entry)
             .transpose()?
             .is_some_and(|item| {

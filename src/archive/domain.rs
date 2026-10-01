@@ -30,3 +30,9 @@ pub(crate) mod segment_codec_port;
 pub(crate) mod restore_store_port;
 
 pub(crate) mod file_modes_port;
+
+pub(crate) mod resource_ports;
+
+pub(crate) mod catalog_decode;
+
+pub(crate) mod gcs_uri;

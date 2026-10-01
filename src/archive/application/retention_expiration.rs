@@ -3,11 +3,11 @@
 use crate::archive::application::archive_services::ArchiveServices;
 
 use std::path::Path;
-use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
+use crate::archive::application::gc_plan_builder::build_gc_catalog_from_spills;
 use crate::archive::application::manifest_validation::validate_archive_manifest;
 use crate::archive::application::reconcile_committed_retention::reconcile_live_committed_retention;
 use crate::archive::application::retention_catalog_ops::{
@@ -22,15 +22,12 @@ use crate::archive::application::rewrite_retained_segment::rewrite_retained_segm
 use crate::archive::domain::archive_catalog_item::{
     dedupe_receipt_catalog_key, segment_catalog_key, ArchiveCatalogItem,
 };
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::control_values::ArchiveCommitState;
+use crate::archive::domain::gcs_uri::{gcs_uri, split_gcs_uri};
 use crate::archive::domain::retention_policy::{
     include_retention_oldest, RETENTION_SCAN_BATCH_SEGMENTS,
 };
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
-use crate::archive::infrastructure::gc_plan_builder::build_gc_catalog_from_spills;
-use crate::archive::infrastructure::gcs_uri::{gcs_uri, split_gcs_uri};
 use crate::shared_kernel::archive_manifest::{ArchiveManifest, ArchiveRetentionScan};
 use crate::shared_kernel::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
 use crate::shared_kernel::sha256_hex::sha256_hex;
@@ -60,7 +57,7 @@ fn expire_committed_events_bounded_at(
         && current
             .oldest_event_time_unix_nano
             .is_none_or(|oldest| oldest >= requested_cutoff_nanos)
-        && !committed_has_expired_dedupe_receipt(&current, receipt_cutoff_nanos)?
+        && !committed_has_expired_dedupe_receipt(services, &current, receipt_cutoff_nanos)?
     {
         return Ok(ExpirationReceipt {
             manifest_uri: current_state.manifest_uri,
@@ -82,8 +79,7 @@ fn expire_committed_events_bounded_at(
         });
     let cutoff = DateTime::<Utc>::from_timestamp_nanos(scan.cutoff_unix_nano);
     let (bucket, current_manifest_key) = split_gcs_uri(&current_state.manifest_uri)?;
-    let object_store: Arc<dyn storage_object::ObjectStore> =
-        Arc::new(storage_object::GcsObjectStore::new(&bucket, "")?);
+    let object_store = services.resources.gcs_store(&bucket)?;
     let parent = current_manifest_key
         .rsplit_once('/')
         .map(|(parent, _)| parent)
@@ -94,23 +90,19 @@ fn expire_committed_events_bounded_at(
         &current_state.manifest_sha256[..16]
     );
     let manifest_key = format!("{rewrite_prefix}/manifest.json");
-    if let Some(receipt) = resume_uploaded_retention_manifest(
-        object_store.as_ref(),
-        &bucket,
-        &manifest_key,
-        &current_state,
-    )? {
+    if let Some(receipt) =
+        resume_uploaded_retention_manifest(&object_store, &bucket, &manifest_key, &current_state)?
+    {
         return finish_bounded_retention_commit(services, journal, &current, receipt);
     }
 
-    let current_catalog = catalog_for_uri(&current.catalog_uri)?;
+    let current_catalog = services.resources.catalog_for_uri(&current.catalog_uri)?;
     let mut reader =
-        current_catalog.reader_after(&(&current.catalog_root).into(), &scan.after_catalog_key)?;
+        current_catalog.reader_after(&current.catalog_root, &scan.after_catalog_key)?;
     let spill_parent = root.join("tmp");
-    let mut pass = RetentionPass::new(root, &current_state, &current, &spill_parent)?;
+    let mut pass = RetentionPass::new(services, root, &current_state, &current, &spill_parent)?;
 
-    let coordinator = storage_segment::ArchiveCoordinator::new(object_store.clone());
-    let mut transaction = coordinator.begin();
+    let mut transaction = object_store.transaction();
     let mut processed_segments = 0_usize;
     let mut fetched_parquet_bytes = 0_u64;
     let mut scan_complete = false;
@@ -179,7 +171,7 @@ fn expire_committed_events_bounded_at(
             apply_catalog_upsert(
                 &current_catalog,
                 &mut pass.catalog_root,
-                storage_segment::CatalogEntry {
+                crate::archive::domain::resource_ports::CatalogEntry {
                     key: dedupe_receipt_catalog_key(&segment.dedupe_receipt),
                     value: serde_json::to_vec(&segment.dedupe_receipt)?,
                 },
@@ -208,7 +200,7 @@ fn expire_committed_events_bounded_at(
         apply_catalog_upsert(
             &current_catalog,
             &mut pass.catalog_root,
-            storage_segment::CatalogEntry {
+            crate::archive::domain::resource_ports::CatalogEntry {
                 key: segment_catalog_key(&replacement),
                 value: serde_json::to_vec(&replacement)?,
             },
@@ -237,6 +229,7 @@ fn expire_committed_events_bounded_at(
 
     let gc_prefix = format!("{rewrite_prefix}/gc-plan");
     let gc_plan = build_gc_catalog_from_spills(
+        services,
         object_store,
         &gc_prefix,
         &pass.gc_candidates,
@@ -256,7 +249,7 @@ fn expire_committed_events_bounded_at(
     );
     validate_archive_manifest(&manifest)?;
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
-    let commit = transaction.commit(storage_segment::ArchiveObject::new(
+    let commit = transaction.commit(crate::archive::domain::resource_ports::ArchiveObject::new(
         manifest_key.clone(),
         manifest_bytes,
         "application/json",
@@ -329,7 +322,7 @@ fn retention_cutoffs(now: DateTime<Utc>) -> Result<(i64, i64)> {
 /// The manifest an earlier attempt of this pass already uploaded, if there is
 /// one. A crash after the upload resumes from it instead of rewriting.
 fn resume_uploaded_retention_manifest(
-    object_store: &dyn storage_object::ObjectStore,
+    object_store: &crate::archive::application::object_service::ObjectService,
     bucket: &str,
     manifest_key: &str,
     current_state: &ArchiveCommitState,

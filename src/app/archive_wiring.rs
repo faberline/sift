@@ -25,6 +25,9 @@ use std::path::Path;
 
 pub(crate) fn archive_services() -> ArchiveServices {
     ArchiveServices {
+        resources: crate::archive::application::resource_factory::ResourceFactory::new(Arc::new(
+            crate::archive::infrastructure::resource_adapter::NativeArchiveResources,
+        )),
         commit_store: Arc::new(
             crate::archive::infrastructure::commit_store_adapter::NativeCommitStorePort,
         ),
@@ -197,6 +200,26 @@ pub fn verify_committed_manifest_available(root: &Path) -> Result<bool> {
     crate::archive::application::archive_status_queries::verify_committed_manifest_available(
         &archive_services(),
         root,
+    )
+}
+
+pub fn inspect_archive_catalog(
+    manifest: &crate::shared_kernel::archive_manifest::ArchiveManifest,
+) -> Result<(
+    Vec<crate::shared_kernel::archive_manifest::ArchiveSegment>,
+    Vec<crate::shared_kernel::archive_manifest::ArchiveBlob>,
+)> {
+    crate::archive::application::inspect_archive_catalog::inspect_archive_catalog(
+        &archive_services(),
+        manifest,
+    )
+}
+pub fn inspect_archive_gc_plan(
+    manifest: &crate::shared_kernel::archive_manifest::ArchiveManifest,
+) -> Result<Vec<String>> {
+    crate::archive::application::inspect_archive_catalog::inspect_archive_gc_plan(
+        &archive_services(),
+        manifest,
     )
 }
 

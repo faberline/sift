@@ -6,7 +6,7 @@ use crate::shared_kernel::archive_manifest::{ArchiveBlob, ArchiveDedupeReceipt, 
 // Catalog rows are decoded and consumed one at a time. Keeping the concrete
 // values here avoids an allocation on every segment in the query hot path.
 #[allow(clippy::large_enum_variant)]
-pub(in crate::archive) enum ArchiveCatalogItem {
+pub(crate) enum ArchiveCatalogItem {
     Segment(ArchiveSegment),
     Blob(ArchiveBlob),
     Receipt(ArchiveDedupeReceipt),

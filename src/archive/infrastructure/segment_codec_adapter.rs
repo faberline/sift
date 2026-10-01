@@ -8,6 +8,14 @@ use anyhow::Result;
 pub(crate) struct NativeSegmentCodecPort;
 
 impl SegmentCodecPort for NativeSegmentCodecPort {
+    type PartitionError = storage_segment::SegmentError;
+    fn partition(&self, event: &StoredEvent) -> Result<String, Self::PartitionError> {
+        storage_segment::Partitioner::partition(
+            &crate::archive::infrastructure::parquet_event_codec::SiftSignalPartitioner,
+            event,
+        )
+    }
+
     type Error = anyhow::Error;
     fn encode_parquet(&self, events: &[StoredEvent]) -> Result<Vec<u8>> {
         crate::archive::infrastructure::parquet_event_codec::encode_parquet(events)

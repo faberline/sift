@@ -34,3 +34,23 @@ pub(crate) mod upload_archive_snapshot;
 pub(crate) mod lifecycle_capacity;
 
 pub(crate) mod archive_services;
+
+pub(crate) mod resource_factory;
+
+pub(crate) mod catalog_service;
+
+pub(crate) mod object_service;
+
+pub(crate) mod spill_service;
+
+pub(crate) mod signal_service;
+
+pub(crate) mod catalog_reads;
+
+pub(crate) mod gc_plan_builder;
+
+pub(crate) mod spill_blob_reference;
+
+pub(crate) mod recover_upload;
+
+pub(crate) mod upload_referenced_blobs;

@@ -8,15 +8,17 @@ use std::io::{Read, Write};
 
 use crate::archive::domain::archive_event_time::acknowledgement_time_unix_nano;
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
+use crate::archive::domain::gcs_uri::gcs_uri;
 use crate::archive::infrastructure::archive_integrity::verify_bytes;
-use crate::archive::infrastructure::gcs_uri::gcs_uri;
 use crate::shared_kernel::archive_manifest::ArchiveDedupeReceipt;
 use crate::shared_kernel::dedupe_receipt::DedupeReceipt;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(in crate::archive) fn archive_dedupe_receipts(
-    transaction: &mut storage_segment::ArchiveTransaction,
+    transaction: &mut dyn crate::archive::domain::resource_ports::ArchiveTransactionPort<
+        Error = storage_segment::SegmentError,
+    >,
     bucket: &str,
     archive_prefix: &str,
     events: &[StoredEvent],
@@ -42,7 +44,7 @@ pub(in crate::archive) fn archive_dedupe_receipts(
         .context("finish archive dedupe receipt gzip")?;
     let digest = sha256_hex(&bytes);
     let key = format!("{archive_prefix}/receipts/{digest}.json.gz");
-    transaction.put(storage_segment::ArchiveObject::new(
+    transaction.put(crate::archive::domain::resource_ports::ArchiveObject::new(
         key.clone(),
         bytes.clone(),
         "application/gzip",

@@ -18,10 +18,8 @@ pub use crate::app::archive_wiring::{
     replay_committed_events, restore_gcs, resume_local_blob_gc_batch, retention_due_at,
     verify_committed_manifest_available,
 };
+pub use crate::app::archive_wiring::{inspect_archive_catalog, inspect_archive_gc_plan};
 pub use crate::archive::application::committed_event_reader::CommittedEventReader;
-pub use crate::archive::application::inspect_archive_catalog::{
-    inspect_archive_catalog, inspect_archive_gc_plan,
-};
 pub use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 pub use crate::shared_kernel::catalog_manifest::{CatalogPageRef, CatalogRoot};
 
