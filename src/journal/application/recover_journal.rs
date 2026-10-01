@@ -3,14 +3,14 @@
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use metrics_prometheus::Counter;
 
-use crate::ingest::domain::governance_policy::GovernancePolicySet;
 use crate::journal::application::dedupe_window::rebuild_dedupe_index;
+use crate::journal::domain::command_submission::JournalGovernance;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
 use crate::journal::domain::recent_cursor::{recent_cursor_at, RecentCursor};
 use crate::journal::domain::resident_window::ResidentWindow;
@@ -22,9 +22,9 @@ use crate::shared_kernel::event_content_digest::xor_digest;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 impl DurableJournal {
-    pub(in crate::journal) fn open_configured(
+    pub(crate) fn open_configured(
         data_dir: impl AsRef<Path>,
-        governance: GovernancePolicySet,
+        governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
         role: StorageRole,
         resident_limit: usize,
     ) -> Result<Self> {

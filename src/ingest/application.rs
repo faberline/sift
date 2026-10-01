@@ -9,3 +9,7 @@ pub(crate) mod drain_ingest;
 pub(crate) mod ensure_local_capacity;
 pub(crate) mod raft_batch_splitter;
 pub(crate) mod retention_admission;
+
+pub(crate) mod admission_failure;
+pub(crate) mod event_identity;
+pub(crate) mod request_body_decoder;

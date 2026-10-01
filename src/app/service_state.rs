@@ -9,8 +9,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::ingest::application::admission_controller::AdmissionController;
+use crate::ingest::domain::batch_submission::BatchSubmission;
 use crate::ingest::domain::ingest_limits::IngestLimits;
-use crate::ingest::infrastructure::ingest_batch_coordinator::IngestBatchCoordinator;
+use crate::ingest::infrastructure::ingest_batch_coordinator::{
+    IngestBatchBackend, IngestBatchCoordinator,
+};
 use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::journal::infrastructure::raft::sift_membership_policy::SiftMembershipPolicy;
 use crate::node::domain::storage_role::StorageRole;
@@ -33,7 +36,8 @@ pub struct ServiceState {
     pub(crate) admission: Arc<AdmissionController>,
     pub(crate) local_capacity: Arc<LocalCapacity>,
     pub(crate) query_jobs: Arc<QueryJobStore>,
-    pub(crate) batch_coordinator: Arc<std::sync::Mutex<IngestBatchCoordinator>>,
+    pub(crate) journal_batches: Arc<crate::journal::application::batch_limits::JournalBatchSizing>,
+    pub(crate) batch_submission: Arc<dyn BatchSubmission<Error = anyhow::Error>>,
 }
 
 impl ServiceState {
@@ -101,19 +105,39 @@ impl ServiceState {
         } else {
             (None, None, None)
         };
+        let draining = Arc::new(AtomicBool::new(false));
+        let local_command = Arc::new(tokio::sync::Mutex::new(()));
+        let context = super::journal_command_wiring::commit_context(
+            journal.clone(),
+            raft.clone(),
+            state_machine.clone(),
+            local_command.clone(),
+            local_capacity.clone(),
+        );
+        let journal_batches = Arc::new(
+            crate::journal::application::batch_limits::JournalBatchSizing::new(
+                context.commands.clone(),
+            ),
+        );
         Ok(Self {
             projections: Arc::new(ProjectionRuntime::open(data_dir, journal.clone())?),
             journal,
-            draining: Arc::new(AtomicBool::new(false)),
+            draining: draining.clone(),
             raft,
             peer_transport,
             peer_port,
             state_machine,
-            local_command: Arc::new(tokio::sync::Mutex::new(())),
+            local_command,
             admission: Arc::new(AdmissionController::new(limits)?),
             local_capacity,
             query_jobs: Arc::new(QueryJobStore::open(data_dir.join("query-jobs"))?),
-            batch_coordinator: Arc::new(std::sync::Mutex::new(IngestBatchCoordinator::default())),
+            journal_batches: journal_batches.clone(),
+            batch_submission: Arc::new(IngestBatchBackend {
+                coordinator: std::sync::Mutex::new(IngestBatchCoordinator::default()),
+                draining,
+                context,
+                sizing: journal_batches,
+            }),
         })
     }
 

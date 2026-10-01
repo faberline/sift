@@ -59,7 +59,7 @@ fn ingest_admission_mechanics_are_owned_by_service_http() {
     .expect("read Sift ingest admission controller");
     let decoder = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/ingest/interfaces/http/request_body_decoder.rs"
+        "/src/ingest/application/request_body_decoder.rs"
     ))
     .expect("read Sift ingest body decoder");
     let limit_values = std::fs::read_to_string(concat!(

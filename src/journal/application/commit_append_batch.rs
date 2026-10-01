@@ -6,20 +6,18 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
-use crate::node::infrastructure::local_capacity::LocalCapacity;
+use crate::journal::domain::command_submission::{
+    CommandSubmission, JournalCapacity, JournalReceiptLookup,
+};
 use crate::shared_kernel::append_result::AppendResult;
 use crate::shared_kernel::event::EventEnvelope;
 use crate::shared_kernel::storage_reservation::storage_reservation;
 
 #[derive(Clone)]
 pub(crate) struct CommitContext {
-    pub(crate) journal: Arc<DurableJournal>,
-    pub(crate) raft: Option<Arc<raft_runtime::RaftHost>>,
-    pub(crate) state_machine:
-        Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
-    pub(crate) local_command: Arc<tokio::sync::Mutex<()>>,
-    pub(crate) local_capacity: Arc<LocalCapacity>,
+    pub(crate) journal: Arc<dyn JournalReceiptLookup<Error = anyhow::Error>>,
+    pub(crate) commands: Arc<dyn CommandSubmission<Error = anyhow::Error>>,
+    pub(crate) local_capacity: Arc<dyn JournalCapacity<Error = anyhow::Error>>,
 }
 
 impl CommitContext {
@@ -40,7 +38,7 @@ impl CommitContext {
             .reserve(storage_reservation(encoded_bytes, governed.len()))
             .context("reserve local WAL and segment capacity before Raft admission")?;
         let acknowledged_at = Utc::now();
-        let current_commit = self.state_machine.applied_commit_index();
+        let current_commit = self.commands.applied_commit_index();
         let mut duplicate_results = Vec::with_capacity(governed.len());
         let mut all_duplicates = true;
         for event in &governed {
@@ -63,6 +61,7 @@ impl CommitContext {
             .map(|event| (event.project.clone(), event.event_id.clone()))
             .collect::<Vec<_>>();
         let commit_index = self
+            .commands
             .commit_command(
                 crate::shared_kernel::sift_command::SiftCommandV1::append_events_at(
                     governed,
@@ -70,7 +69,7 @@ impl CommitContext {
                 ),
             )
             .await?;
-        let results = if let Some(results) = self.state_machine.take_append_outcomes(commit_index) {
+        let results = if let Some(results) = self.commands.take_append_outcomes(commit_index) {
             results
         } else {
             let mut recovered = Vec::with_capacity(event_ids.len());

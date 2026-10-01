@@ -12,8 +12,8 @@ use service_auth::RoleMapPrincipal;
 use crate::access::application::project_authorization::authorize_project;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
+use crate::ingest::application::admission_failure;
 use crate::ingest::application::retention_admission::retention_rejection;
-use crate::ingest::domain::admission_error::AdmissionError;
 
 pub(crate) async fn prometheus_remote_write(
     State(state): State<Arc<ServiceState>>,
@@ -36,7 +36,7 @@ pub(crate) async fn prometheus_remote_write(
         .map_err(|error| ApiError::unsupported_media(error.to_string()))?;
     let limits = state.admission.limits();
     if body.len() > limits.max_compressed_body_bytes {
-        return Err(ApiError::from_admission(AdmissionError::invalid(
+        return Err(ApiError::from_admission(admission_failure::invalid(
             "compressed_body_too_large",
             "compressed remote write body exceeds the configured limit",
         )));

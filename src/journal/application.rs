@@ -11,3 +11,8 @@ pub(crate) mod dedupe_window;
 pub(crate) mod query_events;
 pub(crate) mod recover_journal;
 pub(crate) mod restore_journal;
+
+pub(crate) mod batch_limits;
+
+#[cfg(test)]
+mod commit_append_batch_tests;

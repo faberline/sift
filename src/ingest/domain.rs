@@ -7,3 +7,5 @@ pub(crate) mod admission_error;
 pub(crate) mod governance_policy;
 pub(crate) mod ingest_limits;
 pub(crate) mod otlp_event_id;
+
+pub(crate) mod batch_submission;

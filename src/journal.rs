@@ -10,11 +10,7 @@ pub(crate) mod infrastructure;
 pub(crate) mod interfaces;
 
 pub use crate::journal::{
-    domain::{
-        journal_head::JournalHead,
-        raft_batch_limits::{RAFT_BATCH_MAX_BYTES, RAFT_BATCH_MAX_DELAY, RAFT_BATCH_MAX_ITEMS},
-        storage_config::StorageConfig,
-    },
+    domain::{journal_head::JournalHead, storage_config::StorageConfig},
     infrastructure::{
         raft::{
             diagnostics::{
@@ -41,4 +37,8 @@ pub use crate::shared_kernel::{
     retained_prefix_reconcile_stats::RetainedPrefixReconcileStats,
     segment_manifest::{AppendLocation, SegmentManifest, SegmentState},
     shard_route::{EpochMap, Route, VIRTUAL_BUCKETS},
+};
+
+pub use crate::shared_kernel::raft_batch_limits::{
+    RAFT_BATCH_MAX_BYTES, RAFT_BATCH_MAX_DELAY, RAFT_BATCH_MAX_ITEMS,
 };

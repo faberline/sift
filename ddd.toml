@@ -280,23 +280,8 @@ interfaces = "src/ingest/interfaces"
 # reason says.
 
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/ingest/application/append_events.rs"]
-subject = "application->infrastructure"
-reason = "ServiceState::append_events wraps each governed chunk in an IngestBatchRequest and submits it to the group-commit queue that ingest_batch_queue starts on IngestBatchCoordinator; P1 moves the use case whole. P2: an application port for submitting a batch, with the composition root injecting the coordinator behind it."
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/ingest/interfaces/http/prometheus_remote_write.rs", "src/ingest/interfaces/http/request_body_decoder.rs", "src/ingest/interfaces/otlp/json_logs_decoder.rs", "src/ingest/interfaces/otlp/json_metrics_decoder.rs", "src/ingest/interfaces/otlp/json_traces_decoder.rs", "src/ingest/interfaces/otlp/proto_logs_decoder.rs", "src/ingest/interfaces/otlp/proto_metrics_decoder.rs", "src/ingest/interfaces/otlp/proto_traces_decoder.rs"]
-subject = "interfaces->domain"
-reason = "The remote-write handler and AdmissionController::decode_body build AdmissionError refusals, and the OTLP decoders derive each event's id with stable_id; P1 moves the handler and the decoders whole. P2: the application re-exports AdmissionError and an event-id service the decoders call, or decoding moves behind an application use case, so the interfaces reach the domain only through the application."
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/ingest/application/append_events.rs", "src/ingest/application/raft_batch_splitter.rs"]
-subject = "journal.domain"
-reason = "Ingest sizes and commits its batches in the journal's terms: split_governed_batches and the batch coordinator bound a batch by SiftCommandV1::append_events_size_bound, RAFT_BATCH_MAX_ITEMS and RAFT_BATCH_MAX_BYTES, ingest_batch_queue tunes the group-commit queue with RAFT_BATCH_MAX_DELAY and the rest, and the queue and the append use cases return AppendResult; P1 moves them as-is. P2: journal's application publishes the batch limits, the command size bound and AppendResult, ingest reads them there, and ingest's splitter takes the limits and the bound as arguments."
 
 # The journal: Sift's durable, replicated event log. It accepts governed
 # batches through Raft, deduplicates them inside the idempotency window,
@@ -320,15 +305,10 @@ interfaces = "src/journal/interfaces"
 
 [[exceptions]]
 rule = "B3"
-paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/append_durable_batch.rs", "src/journal/application/apply_retention_expiration.rs", "src/journal/application/checkpoint_identity.rs", "src/journal/application/commit_append_batch.rs", "src/journal/application/dedupe_window.rs", "src/journal/application/query_events.rs", "src/journal/application/recover_journal.rs", "src/journal/application/restore_journal.rs"]
+paths = ["src/journal/application/adopt_archive.rs", "src/journal/application/append_durable_batch.rs", "src/journal/application/apply_retention_expiration.rs", "src/journal/application/checkpoint_identity.rs", "src/journal/application/dedupe_window.rs", "src/journal/application/query_events.rs", "src/journal/application/recover_journal.rs", "src/journal/application/restore_journal.rs"]
 subject = "application->infrastructure"
 reason = "§2 splits durability.rs and lib.rs's DurableJournal so the use cases (recover, append_durable_batch, the dedupe window upkeep and rebuild, adopt_archive_*, retention expiration, checkpoint_identity, restore and query_events) stay impl DurableJournal blocks over the infrastructure facade, reading its RawStorage, SignalWal, DedupeIndex, JournalHead file and CanonicalRecoveryReader, and CommitContext holds the DurableJournal and the SiftStateMachine; §2 wins over layer_deps here. P2: the use cases become application services over domain ports (event store, dedupe index, recovery reader, command committer) that durable_journal, the storage and the Raft state machine implement."
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/journal/infrastructure/raft/command_committer.rs"]
-subject = "infrastructure->application"
-reason = "command_committer is an impl CommitContext block whose commit_command proposes a SiftCommandV1 through Raft or applies it locally; §2 puts CommitContext in application with commit_append_batch and command_committer in infrastructure, and wins over layer_deps here. P2: a command-committer port in the domain that the Raft infrastructure implements and CommitContext holds."
 
 [[exceptions]]
 rule = "B3"
@@ -336,11 +316,6 @@ paths = ["src/journal/interfaces/journal_metrics.rs"]
 subject = "interfaces->infrastructure"
 reason = "metrics_text is an impl DurableJournal block that renders the accepted, duplicate and fsync counters and the resident-event gauge; §2 puts journal_metrics in interfaces, and P1 moves it as-is. P2: the application exposes a journal metrics snapshot, and the interface renders it."
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/journal/application/recover_journal.rs", "src/journal/infrastructure/durable_journal.rs"]
-subject = "ingest.domain"
-reason = "DurableJournal holds the GovernancePolicySet it governs every appended event with (open reads it from the environment and recover validates it), and append_governed_batch reserves local capacity with ingest's storage_reservation; declaring ingest in depends_on would close a journal-ingest cycle, since ingest appends to the journal. P2: ingest governs events before the append, or governance reaches the journal through a domain port, and storage_reservation moves to the journal or node, which breaks the cycle."
 
 [[exceptions]]
 rule = "B4"

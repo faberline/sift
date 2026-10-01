@@ -12,7 +12,7 @@ use crate::shared_kernel::event_query::EventQuery;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 impl DurableJournal {
-    pub(super) fn result_for_at(
+    pub(crate) fn result_for_at(
         &self,
         project: &str,
         event_id: &str,

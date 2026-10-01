@@ -31,3 +31,5 @@ pub(crate) mod single_signal_batch;
 pub(crate) mod storage_reservation;
 pub(crate) mod stored_event;
 pub(crate) mod utf8_truncate;
+
+pub(crate) mod raft_batch_limits;

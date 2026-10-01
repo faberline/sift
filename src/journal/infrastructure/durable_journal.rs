@@ -3,15 +3,13 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{bail, Result};
 use metrics_prometheus::Counter;
 
-use crate::ingest::domain::governance_policy::GovernancePolicySet;
-use crate::journal::domain::journal_limits::DEFAULT_RESIDENT_JOURNAL_EVENTS;
+use crate::journal::domain::command_submission::JournalGovernance;
 use crate::journal::domain::resident_window::ResidentWindow;
-use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::data_layout::DataLayout;
 use crate::shared_kernel::event::EventEnvelope;
 
@@ -27,7 +25,7 @@ pub struct DurableJournal {
     pub(in crate::journal) blob_gate: Mutex<()>,
     pub(in crate::journal) state: RwLock<ResidentWindow>,
     pub(in crate::journal) resident_limit: usize,
-    pub(in crate::journal) governance: GovernancePolicySet,
+    pub(in crate::journal) governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
     pub(in crate::journal) accepted: Counter,
     pub(in crate::journal) duplicates: Counter,
     pub(in crate::journal) fsyncs: Counter,
@@ -70,43 +68,8 @@ impl DurableJournal {
             .retention_generation
     }
 
-    pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_role(data_dir, StorageRole::All)
-    }
-
-    pub fn open_with_role(data_dir: impl AsRef<Path>, role: StorageRole) -> Result<Self> {
-        Self::open_with_governance_and_role(data_dir, GovernancePolicySet::from_env()?, role)
-    }
-
-    pub fn open_with_governance(
-        data_dir: impl AsRef<Path>,
-        governance: GovernancePolicySet,
-    ) -> Result<Self> {
-        Self::open_with_governance_and_role(data_dir, governance, StorageRole::All)
-    }
-
-    pub fn open_with_governance_and_role(
-        data_dir: impl AsRef<Path>,
-        governance: GovernancePolicySet,
-        role: StorageRole,
-    ) -> Result<Self> {
-        Self::open_configured(data_dir, governance, role, DEFAULT_RESIDENT_JOURNAL_EVENTS)
-    }
-
-    pub fn open_with_resident_limit(
-        data_dir: impl AsRef<Path>,
-        resident_limit: usize,
-    ) -> Result<Self> {
-        Self::open_configured(
-            data_dir,
-            GovernancePolicySet::from_env()?,
-            StorageRole::All,
-            resident_limit,
-        )
-    }
-
     pub fn govern_event(&self, event: EventEnvelope) -> Result<EventEnvelope> {
-        Ok(self.governance.govern(event)?)
+        self.governance.govern(event)
     }
 
     pub fn storage(&self) -> &crate::journal::infrastructure::storage::raw_storage::RawStorage {

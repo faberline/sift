@@ -11,7 +11,8 @@ pub(crate) mod event_content_digest;
 pub(crate) mod event_digest;
 pub(crate) mod journal_head;
 pub(crate) mod journal_limits;
-pub(crate) mod raft_batch_limits;
 pub(crate) mod recent_cursor;
 pub(crate) mod resident_window;
 pub(crate) mod storage_config;
+
+pub(crate) mod command_submission;

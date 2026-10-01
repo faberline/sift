@@ -13,3 +13,5 @@ pub(crate) mod interfaces;
 pub(crate) mod otlp_wiring;
 pub(crate) mod service_state;
 pub(crate) mod system_clock;
+
+mod journal_command_wiring;
