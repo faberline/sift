@@ -4,6 +4,7 @@
 
 pub(crate) mod archive_checkpoint;
 pub(crate) mod archive_checkpoint_install;
+pub(crate) mod checkpoint_framing;
 pub(crate) mod command_codec;
 pub(crate) mod command_committer;
 pub(crate) mod control_state_store;

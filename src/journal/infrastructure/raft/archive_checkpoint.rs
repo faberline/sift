@@ -12,17 +12,14 @@ type DurableJournal<'a> = dyn JournalApi<Error = anyhow::Error> + 'a;
 use crate::journal::infrastructure::raft::archive_checkpoint_install::{
     archive_checkpoint_install_mode, ArchiveCheckpointInstallMode, ValidatedArchiveStage,
 };
-use crate::journal::infrastructure::raft::snapshot_format::{read_one_or_eof, SnapshotMetadata};
+use crate::journal::infrastructure::raft::checkpoint_framing::{CheckpointFrame, FrameErrors};
+use crate::journal::infrastructure::raft::snapshot_format::SnapshotMetadata;
 use crate::shared_kernel::retention_fence::RetentionFenceV1;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(super) const ARCHIVE_CHECKPOINT_MAGIC: &[u8; 8] = b"SIFTRCP1";
 
 pub(super) const ARCHIVE_CHECKPOINT_FORMAT_VERSION: u16 = 2;
-
-pub(super) const ARCHIVE_CHECKPOINT_HEADER_BYTES: usize = 16;
-
-pub(super) const MAX_ARCHIVE_CHECKPOINT_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -41,56 +38,35 @@ pub(super) struct ArchiveCheckpointV1 {
     pub(super) archive_gc_authorized: bool,
 }
 
+const FRAME: CheckpointFrame = CheckpointFrame {
+    magic: ARCHIVE_CHECKPOINT_MAGIC,
+    errors: FrameErrors {
+        encode: "encode Sift archive checkpoint",
+        invalid_length: "Sift archive checkpoint payload has an invalid length",
+        length_overflow: "archive checkpoint length exceeds u32",
+        write_magic: "write Sift archive checkpoint magic",
+        write_length: "write Sift archive checkpoint length",
+        write_checksum: "write Sift archive checkpoint checksum",
+        write_payload: "write Sift archive checkpoint payload",
+        read_header: "read Sift archive checkpoint header",
+        invalid_magic: "invalid Sift archive checkpoint magic",
+        read_payload: "read Sift archive checkpoint payload",
+        checksum_mismatch: "Sift archive checkpoint checksum mismatch",
+        trailing_bytes: "Sift archive checkpoint contains trailing bytes",
+        decode: "decode Sift archive checkpoint",
+    },
+};
+
 pub(super) fn write_archive_checkpoint(
     checkpoint: &ArchiveCheckpointV1,
     writer: &mut dyn Write,
 ) -> Result<()> {
     validate_archive_checkpoint(checkpoint)?;
-    let payload = serde_json::to_vec(checkpoint).context("encode Sift archive checkpoint")?;
-    if payload.is_empty() || payload.len() > MAX_ARCHIVE_CHECKPOINT_BYTES {
-        bail!("Sift archive checkpoint payload has an invalid length");
-    }
-    let payload_len =
-        u32::try_from(payload.len()).context("archive checkpoint length exceeds u32")?;
-    writer
-        .write_all(ARCHIVE_CHECKPOINT_MAGIC)
-        .context("write Sift archive checkpoint magic")?;
-    writer
-        .write_all(&payload_len.to_le_bytes())
-        .context("write Sift archive checkpoint length")?;
-    writer
-        .write_all(&crc32fast::hash(&payload).to_le_bytes())
-        .context("write Sift archive checkpoint checksum")?;
-    writer
-        .write_all(&payload)
-        .context("write Sift archive checkpoint payload")
+    FRAME.write(checkpoint, writer)
 }
 
 pub(super) fn read_archive_checkpoint(reader: &mut dyn Read) -> Result<ArchiveCheckpointV1> {
-    let mut header = [0_u8; ARCHIVE_CHECKPOINT_HEADER_BYTES];
-    reader
-        .read_exact(&mut header)
-        .context("read Sift archive checkpoint header")?;
-    if &header[..8] != ARCHIVE_CHECKPOINT_MAGIC {
-        bail!("invalid Sift archive checkpoint magic");
-    }
-    let payload_len = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
-    let expected_checksum = u32::from_le_bytes(header[12..16].try_into().unwrap());
-    if payload_len == 0 || payload_len > MAX_ARCHIVE_CHECKPOINT_BYTES {
-        bail!("Sift archive checkpoint payload has an invalid length");
-    }
-    let mut payload = vec![0_u8; payload_len];
-    reader
-        .read_exact(&mut payload)
-        .context("read Sift archive checkpoint payload")?;
-    if crc32fast::hash(&payload) != expected_checksum {
-        bail!("Sift archive checkpoint checksum mismatch");
-    }
-    if read_one_or_eof(reader)?.is_some() {
-        bail!("Sift archive checkpoint contains trailing bytes");
-    }
-    let checkpoint: ArchiveCheckpointV1 =
-        serde_json::from_slice(&payload).context("decode Sift archive checkpoint")?;
+    let checkpoint = FRAME.read(reader)?;
     validate_archive_checkpoint(&checkpoint)?;
     Ok(checkpoint)
 }

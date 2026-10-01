@@ -9,10 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::journal::domain::append_policy::validate_retention_fence;
 use crate::journal::domain::journal_api::JournalApi;
 type DurableJournal<'a> = dyn JournalApi<Error = anyhow::Error> + 'a;
-use crate::journal::infrastructure::raft::archive_checkpoint::{
-    ARCHIVE_CHECKPOINT_HEADER_BYTES, MAX_ARCHIVE_CHECKPOINT_BYTES,
-};
-use crate::journal::infrastructure::raft::snapshot_format::{read_one_or_eof, SnapshotMetadata};
+use crate::journal::infrastructure::raft::checkpoint_framing::{CheckpointFrame, FrameErrors};
+use crate::journal::infrastructure::raft::snapshot_format::SnapshotMetadata;
 use crate::shared_kernel::retention_fence::RetentionFenceV1;
 
 pub(super) const RESIDENT_CHECKPOINT_MAGIC: &[u8; 8] = b"SIFTRSD1";
@@ -31,56 +29,35 @@ pub(super) struct ResidentCheckpointV1 {
     pub(super) pending_retention: Option<RetentionFenceV1>,
 }
 
+const FRAME: CheckpointFrame = CheckpointFrame {
+    magic: RESIDENT_CHECKPOINT_MAGIC,
+    errors: FrameErrors {
+        encode: "encode Sift resident checkpoint",
+        invalid_length: "Sift resident checkpoint payload has an invalid length",
+        length_overflow: "resident checkpoint length exceeds u32",
+        write_magic: "write Sift resident checkpoint magic",
+        write_length: "write Sift resident checkpoint length",
+        write_checksum: "write Sift resident checkpoint checksum",
+        write_payload: "write Sift resident checkpoint payload",
+        read_header: "read Sift resident checkpoint header",
+        invalid_magic: "invalid Sift resident checkpoint magic",
+        read_payload: "read Sift resident checkpoint payload",
+        checksum_mismatch: "Sift resident checkpoint checksum mismatch",
+        trailing_bytes: "Sift resident checkpoint contains trailing bytes",
+        decode: "decode Sift resident checkpoint",
+    },
+};
+
 pub(super) fn write_resident_checkpoint(
     checkpoint: &ResidentCheckpointV1,
     writer: &mut dyn Write,
 ) -> Result<()> {
     validate_resident_checkpoint(checkpoint)?;
-    let payload = serde_json::to_vec(checkpoint).context("encode Sift resident checkpoint")?;
-    if payload.is_empty() || payload.len() > MAX_ARCHIVE_CHECKPOINT_BYTES {
-        bail!("Sift resident checkpoint payload has an invalid length");
-    }
-    let payload_len =
-        u32::try_from(payload.len()).context("resident checkpoint length exceeds u32")?;
-    writer
-        .write_all(RESIDENT_CHECKPOINT_MAGIC)
-        .context("write Sift resident checkpoint magic")?;
-    writer
-        .write_all(&payload_len.to_le_bytes())
-        .context("write Sift resident checkpoint length")?;
-    writer
-        .write_all(&crc32fast::hash(&payload).to_le_bytes())
-        .context("write Sift resident checkpoint checksum")?;
-    writer
-        .write_all(&payload)
-        .context("write Sift resident checkpoint payload")
+    FRAME.write(checkpoint, writer)
 }
 
 pub(super) fn read_resident_checkpoint(reader: &mut dyn Read) -> Result<ResidentCheckpointV1> {
-    let mut header = [0_u8; ARCHIVE_CHECKPOINT_HEADER_BYTES];
-    reader
-        .read_exact(&mut header)
-        .context("read Sift resident checkpoint header")?;
-    if &header[..8] != RESIDENT_CHECKPOINT_MAGIC {
-        bail!("invalid Sift resident checkpoint magic");
-    }
-    let payload_len = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
-    let expected_checksum = u32::from_le_bytes(header[12..16].try_into().unwrap());
-    if payload_len == 0 || payload_len > MAX_ARCHIVE_CHECKPOINT_BYTES {
-        bail!("Sift resident checkpoint payload has an invalid length");
-    }
-    let mut payload = vec![0_u8; payload_len];
-    reader
-        .read_exact(&mut payload)
-        .context("read Sift resident checkpoint payload")?;
-    if crc32fast::hash(&payload) != expected_checksum {
-        bail!("Sift resident checkpoint checksum mismatch");
-    }
-    if read_one_or_eof(reader)?.is_some() {
-        bail!("Sift resident checkpoint contains trailing bytes");
-    }
-    let checkpoint: ResidentCheckpointV1 =
-        serde_json::from_slice(&payload).context("decode Sift resident checkpoint")?;
+    let checkpoint = FRAME.read(reader)?;
     validate_resident_checkpoint(&checkpoint)?;
     Ok(checkpoint)
 }

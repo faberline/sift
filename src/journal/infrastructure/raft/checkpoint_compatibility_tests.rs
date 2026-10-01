@@ -13,7 +13,7 @@ const FIXTURES: &str = concat!(
     "/tests/fixtures/refactor_compatibility"
 );
 
-fn check<T: serde::Serialize>(
+fn check<T: serde::Serialize + serde::de::DeserializeOwned>(
     name: &str,
     value: T,
     write: impl Fn(&T, &mut dyn std::io::Write) -> anyhow::Result<()>,
@@ -29,6 +29,72 @@ fn check<T: serde::Serialize>(
     let mut encoded = Vec::new();
     write(&decoded, &mut encoded).unwrap();
     assert_eq!(encoded, old);
+
+    // These readers reach the shared end check after a complete payload.
+    read(&mut TerminalReader::new(&old, false)).unwrap();
+    let terminal_error = read(&mut TerminalReader::new(&old, true)).err().unwrap();
+    assert_eq!(terminal_error.to_string(), "check Sift snapshot end");
+    assert_eq!(
+        terminal_error.root_cause().to_string(),
+        "fixed read failure"
+    );
+
+    let mut invalid_json = old.clone();
+    invalid_json[16..].fill(b'?');
+    let checksum = crc32fast::hash(&invalid_json[16..]);
+    invalid_json[12..16].copy_from_slice(&checksum.to_le_bytes());
+    let decode_error = read(&mut invalid_json.as_slice()).err().unwrap();
+    assert_eq!(
+        decode_error.to_string(),
+        format!("decode Sift {label} checkpoint")
+    );
+    assert!(decode_error
+        .root_cause()
+        .downcast_ref::<serde_json::Error>()
+        .is_some());
+    invalid_json.push(0);
+    assert_eq!(
+        read(&mut invalid_json.as_slice())
+            .err()
+            .unwrap()
+            .to_string(),
+        format!("Sift {label} checkpoint contains trailing bytes")
+    );
+    invalid_json[12] ^= 1;
+    assert_eq!(
+        read(&mut invalid_json.as_slice())
+            .err()
+            .unwrap()
+            .to_string(),
+        format!("Sift {label} checkpoint checksum mismatch")
+    );
+
+    // The same valid fence fills the payload limit in each production codec.
+    let mut boundary = serde_json::to_value(&value).unwrap();
+    let padding = 65536 - serde_json::to_vec(&value).unwrap().len();
+    let uri = boundary["pending_retention"]["source_manifest_uri"]
+        .as_str()
+        .unwrap();
+    let extended = format!("{uri}{}", "x".repeat(padding));
+    boundary["pending_retention"]["source_manifest_uri"] = extended.clone().into();
+    let bounded: T = serde_json::from_value(boundary.clone()).unwrap();
+    let mut maximum = Vec::new();
+    write(&bounded, &mut maximum).unwrap();
+    assert_eq!(maximum.len(), 16 + 65536);
+    assert_eq!(&maximum[8..12], &65536u32.to_le_bytes());
+    let decoded = read(&mut maximum.as_slice()).unwrap();
+    let mut maximum_again = Vec::new();
+    write(&decoded, &mut maximum_again).unwrap();
+    assert_eq!(maximum_again, maximum);
+    boundary["pending_retention"]["source_manifest_uri"] = format!("{extended}x").into();
+    let oversized_value: T = serde_json::from_value(boundary).unwrap();
+    let mut untouched = Vec::new();
+    let too_large = write(&oversized_value, &mut untouched).unwrap_err();
+    assert_eq!(
+        too_large.to_string(),
+        format!("Sift {label} checkpoint payload has an invalid length")
+    );
+    assert!(untouched.is_empty());
 
     for (invalid, expected) in [
         (
@@ -94,6 +160,38 @@ fn check<T: serde::Serialize>(
             error.chain().last().unwrap().to_string(),
             "fixed write failure"
         );
+    }
+}
+
+struct TerminalReader<'a> {
+    inner: std::io::Cursor<&'a [u8]>,
+    interrupted: bool,
+    fail: bool,
+}
+
+impl<'a> TerminalReader<'a> {
+    fn new(bytes: &'a [u8], fail: bool) -> Self {
+        Self {
+            inner: std::io::Cursor::new(bytes),
+            interrupted: true,
+            fail,
+        }
+    }
+}
+
+impl std::io::Read for TerminalReader<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        if self.inner.position() < self.inner.get_ref().len() as u64 {
+            return std::io::Read::read(&mut self.inner, bytes);
+        }
+        if self.interrupted {
+            self.interrupted = false;
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
+        if self.fail {
+            return Err(std::io::Error::other("fixed read failure"));
+        }
+        Ok(0)
     }
 }
 
