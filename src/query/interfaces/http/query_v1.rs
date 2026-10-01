@@ -11,7 +11,7 @@ use axum::Json;
 use serde::Deserialize;
 use service_auth::RoleMapPrincipal;
 
-use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::access::application::project_authorization::authorize_project_read;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::query::application::execute_query::execute_query_v1;

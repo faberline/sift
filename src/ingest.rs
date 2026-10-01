@@ -8,6 +8,7 @@ pub(crate) mod domain;
 pub(crate) mod infrastructure;
 pub(crate) mod interfaces;
 
+pub use crate::app::otlp_wiring::serve as serve_otlp_grpc;
 pub use crate::ingest::{
     application::admission_controller::{AdmissionController, AdmissionPermit},
     domain::{
@@ -15,7 +16,6 @@ pub use crate::ingest::{
         ingest_limits::{IngestLimits, IngestLimitsError},
     },
     interfaces::{
-        grpc::otlp_grpc_server::serve as serve_otlp_grpc,
         otlp::otlp_codec::{
             decode as decode_otlp, encode_response as encode_otlp_response,
             normalize_payload as normalize_otlp_payload, DecodedOtlp, EncodedOtlpResponse,

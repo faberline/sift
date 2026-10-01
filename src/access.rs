@@ -7,9 +7,12 @@
 //! probes. Production tokens are read from `SIFT_TOKEN_REGISTRY_FILE`; the
 //! inline `SIFT_TOKENS` variable is retained for local development.
 
+pub(crate) mod application;
 pub(crate) mod domain;
 pub(crate) mod infrastructure;
 pub(crate) mod interfaces;
+
+pub use application::authorization_service::AuthorizationService;
 
 pub use crate::access::{
     infrastructure::{auth_config::SiftAuthConfig, sift_verifier::SiftVerifier},

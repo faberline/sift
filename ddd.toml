@@ -149,11 +149,6 @@ infrastructure = "src/collector/infrastructure"
 # reason says.
 
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/collector/application/runtime.rs"]
-subject = "application->infrastructure"
-reason = "run opens its source with open_source and delivers through CollectorClient, SiftRecordDecoder maps each record with decode_service_log_enriched, and the truncated-file test seeds a CollectorCheckpoint; P1 moves runtime.rs whole. P2: the composition root opens the source and builds the client and passes them to run as service_collector's CollectorSource and BatchSink, the decoder takes the mapper injected, and the test moves with that wiring."
 
 # Projections: the logging, metric and trace read models Sift builds from the
 # journal and answers queries from. Besides the shared kernel they read the
@@ -587,13 +582,13 @@ infrastructure = "src/node/infrastructure"
 # Access: who may call Sift, and for which project. It owns the auth
 # configuration, the verifier that checks a bearer token against a static role
 # map or the Kubernetes API server, the scoped bearer middleware, and the
-# project and admin checks handlers run. It has no application layer, so
-# ingest and query use its interfaces directly.
+# project and admin use cases shared by the HTTP and gRPC adapters.
 [[contexts]]
 name = "access"
 depends_on = []
 
 [contexts.layers]
+application = "src/access/application"
 domain = "src/access/domain"
 infrastructure = "src/access/infrastructure"
 interfaces = "src/access/interfaces"
@@ -603,17 +598,7 @@ interfaces = "src/access/interfaces"
 
 
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/access/interfaces/http/scoped_authorization.rs"]
-subject = "interfaces->domain"
-reason = "SiftVerifier's ScopedAuthorization impl calls http_role to pick the role a route needs before it authenticates the project; P1 moves the impl from auth.rs as-is. P2: access gets an application layer with an authorize_request use case that owns the route-to-role decision, and the middleware adapter calls it."
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/access/interfaces/http/scoped_authorization.rs"]
-subject = "interfaces->infrastructure"
-reason = "service_auth::ScopedAuthorization is implemented directly for SiftVerifier, the infrastructure verifier, and the impl calls its is_kubernetes and authenticate_project; the orphan rule keeps the impl beside a local type, and P1 moves it as-is. P2: the impl moves to a thin interfaces wrapper over an application authorize_request use case that holds the verifier behind a domain port."
 
 # Operations: running Sift as a service. It owns the Sift custom resource and
 # the operator that reconciles it, the deployment artifacts rendered offline
@@ -621,11 +606,10 @@ reason = "service_auth::ScopedAuthorization is implemented directly for SiftVeri
 # gateway's reverse-proxy route policy, the OTLP/gRPC proxy, and the admin
 # backup and integrity endpoints. It reads the journal for snapshots and
 # integrity reports, the archive for its committed state, and the node's
-# layout manifest, runs access's admin checks, and borrows ingest's gRPC
-# project check for the OTLP/gRPC proxy.
+# layout manifest and runs access's shared authorization use cases.
 [[contexts]]
 name = "operations"
-depends_on = ["journal", "archive", "node", "access", "ingest"]
+depends_on = ["journal", "archive", "node", "access"]
 
 [contexts.layers]
 domain = "src/operations/domain"
@@ -636,23 +620,7 @@ interfaces = "src/operations/interfaces"
 # Operations dependencies the P1 split moves as-is; P2 settles each one as the
 # reason says.
 
-[[exceptions]]
-rule = "B3"
-paths = [
-  "src/operations/infrastructure/k8s/agent_workloads.rs",
-  "src/operations/infrastructure/k8s/backup_cron_job.rs",
-  "src/operations/infrastructure/k8s/managed_service.rs",
-  "src/operations/infrastructure/k8s/network_policy.rs",
-  "src/operations/infrastructure/k8s/role_workloads.rs",
-]
-subject = "infrastructure->interfaces"
-reason = "The Kubernetes renderers read the Sift custom resource they reconcile: Sift, SiftSpec, AuthMode and BackupSpec, which kube's CustomResource derive generates in the interfaces' crd module, and the ManagedService impl is for Sift; P1 moves operator.rs's renderers as-is. P2: the renderers take a domain InstanceSpec (roles, auth mode, storage, backup and placement) that the interfaces map the CRD onto, and the ManagedService impl moves to a thin interfaces adapter."
 
-[[exceptions]]
-rule = "B3"
-paths = ["src/operations/interfaces/http/gateway_proxy.rs"]
-subject = "interfaces->domain"
-reason = "SiftRolePolicy's select_upstream calls is_query_path to send query routes to the query role; P1 moves proxy.rs as-is and §2 puts is_query_path in the domain. P2: operations' application gets a route_upstream use case that owns the route-class decision, and the proxy policy calls it."
 
 [[exceptions]]
 rule = "B4"
@@ -663,11 +631,6 @@ paths = [
 subject = "journal.infrastructure"
 reason = "backup_journal and restore_journal take the DurableJournal, and admin_backup labels the snapshot with the journal's SNAPSHOT_CONTENT_TYPE; P1 moves backup.rs and lib.rs's admin endpoint as-is. P2: journal's application publishes snapshot_journal and restore_journal_from_bytes use cases that return and take the snapshot bytes with their content type, and operations calls them."
 
-[[exceptions]]
-rule = "B4"
-paths = ["src/operations/interfaces/grpc/otlp_proxy.rs"]
-subject = "ingest.interfaces"
-reason = "OtlpGrpcProxy runs ingest's gRPC authorize, the bearer-token project check its direct server runs, before it forwards an export to the store role; P1 moves the proxy out of grpc.rs and leaves the check where commit 5 put it. P2: the gRPC project check moves to access's interfaces, both the server and the proxy call it there, and operations drops ingest from depends_on."
 
 # Files P2 moved or split. The ratchet lets each new path take the old path's
 # place in the exceptions above; once main has the new paths these entries

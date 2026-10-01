@@ -4,7 +4,7 @@ use anyhow::Result;
 use axum::extract::Extension;
 use service_auth::RoleMapPrincipal;
 
-use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::access::application::project_authorization::authorize_project_read;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::query::domain::query_job::QueryJobV1;

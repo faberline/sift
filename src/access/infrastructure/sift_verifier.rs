@@ -147,6 +147,25 @@ impl SiftVerifier {
     }
 }
 
+impl crate::access::domain::project_verifier::ProjectVerifier for SiftVerifier {
+    type Credentials = HeaderMap;
+    type Principal = RoleMapPrincipal;
+    type Error = AuthError;
+
+    fn is_kubernetes(&self) -> bool {
+        self.is_kubernetes()
+    }
+
+    fn authenticate_project<'a>(
+        &'a self,
+        headers: &'a HeaderMap,
+        project: &'a str,
+        role: RouteRole,
+    ) -> crate::shared_kernel::port_future::PortFuture<'a, RoleMapPrincipal, AuthError> {
+        Box::pin(self.authenticate_project(headers, project, role.into()))
+    }
+}
+
 impl From<Role> for RouteRole {
     fn from(role: Role) -> Self {
         match role {

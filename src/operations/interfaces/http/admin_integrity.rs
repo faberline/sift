@@ -9,7 +9,7 @@ use axum::Json;
 use service_auth::RoleMapPrincipal;
 use sha2::{Digest, Sha256};
 
-use crate::access::interfaces::http::project_authorization::authorize_global_admin;
+use crate::access::application::project_authorization::authorize_global_admin;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::node::infrastructure::data_layout::LayoutManifest;

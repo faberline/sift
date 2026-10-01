@@ -101,16 +101,22 @@ fn ingest_admission_mechanics_are_owned_by_service_http() {
 
 #[test]
 fn reverse_proxy_runtime_is_owned_by_service_http() {
-    let source = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/operations/interfaces/http/gateway_proxy.rs"
-    ))
-    .expect("read Sift proxy adapter");
+    let source: String = [
+        "/src/operations/interfaces/http/gateway_proxy.rs",
+        "/src/operations/application/gateway_policy.rs",
+    ]
+    .iter()
+    .map(|path| {
+        std::fs::read_to_string(format!("{}{path}", env!("CARGO_MANIFEST_DIR")))
+            .expect("read Sift proxy adapter and upstream use case")
+    })
+    .collect();
 
     assert!(
         source.contains("impl service_http::ReverseProxyPolicy for SiftRolePolicy"),
         "Sift must provide only its upstream selection policy"
     );
+    assert!(source.contains("service_http::reverse_proxy_router"));
     for local_mechanism in ["reqwest::Client", "async fn forward", "fn is_hop_header"] {
         assert!(
             !source.contains(local_mechanism),
@@ -193,7 +199,7 @@ fn scoped_bearer_middleware_is_owned_by_service_auth() {
     .expect("read Sift scoped authorization");
 
     assert!(
-        source.contains("impl service_auth::ScopedAuthorization for SiftVerifier"),
+        source.contains("impl service_auth::ScopedAuthorization for AuthorizationService"),
         "Sift must provide route, project, and role policy through the shared trait"
     );
     assert!(
@@ -256,7 +262,9 @@ fn kubernetes_workloads_are_owned_by_service_k8s() {
     let source: String = [
         "/src/operations/interfaces/crd/sift_spec.rs",
         "/src/operations/interfaces/operator.rs",
-        "/src/operations/infrastructure/k8s/constants.rs",
+        "/src/operations/interfaces/managed_service.rs",
+        "/src/operations/application/instance_service.rs",
+        "/src/operations/domain/instance_names.rs",
         "/src/operations/infrastructure/k8s/managed_service.rs",
         "/src/operations/infrastructure/k8s/api_endpoint_discovery.rs",
         "/src/operations/infrastructure/k8s/role_workloads.rs",

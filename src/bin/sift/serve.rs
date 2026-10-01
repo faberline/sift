@@ -222,7 +222,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
             sift::operations::gateway_router(&store, &query, config.body_limit_bytes)?
                 .merge(sift::query::mcp_http_router(&internal_endpoint)?)
                 .layer(axum::middleware::from_fn_with_state(
-                    verifier,
+                    Arc::new(sift::access::AuthorizationService::from_verifier(verifier)),
                     sift::access::auth_middleware,
                 ))
         }
@@ -230,7 +230,10 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
             let store = std::env::var("SIFT_STORE_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
             sift::query_role_router(state.clone(), &store, config.body_limit_bytes)?.layer(
-                axum::middleware::from_fn_with_state(verifier, sift::access::auth_middleware),
+                axum::middleware::from_fn_with_state(
+                    Arc::new(sift::access::AuthorizationService::from_verifier(verifier)),
+                    sift::access::auth_middleware,
+                ),
             )
         }
         _ => sift::protected_router_with_mcp(state.clone(), verifier, &internal_endpoint)?,

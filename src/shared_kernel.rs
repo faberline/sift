@@ -10,6 +10,8 @@ pub(crate) mod cloud_logging_event_id;
 pub(crate) mod event;
 pub(crate) mod event_content_digest;
 pub(crate) mod event_error;
+pub(crate) mod instance_spec;
+pub(crate) mod port_future;
 pub(crate) mod query_limit;
 pub(crate) mod retention_boundary;
 pub(crate) mod sha256_hex;

@@ -7,7 +7,8 @@ pub(crate) mod application;
 pub(crate) mod domain;
 pub(crate) mod infrastructure;
 
-pub use application::run_collector::{run_collector, CollectorSummary};
+pub use crate::app::collector_wiring::run_collector;
+pub use application::run_collector::CollectorSummary;
 pub use domain::config::{
     CollectorConfig, CollectorConfigError, CriMetadata, CriSourceConfig, SourceSpec,
     DEFAULT_BATCH_SIZE, DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_RETRIES, MAX_BATCH_SIZE,

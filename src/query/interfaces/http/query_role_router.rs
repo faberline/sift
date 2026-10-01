@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use service_auth::RoleMapPrincipal;
 
-use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::access::application::project_authorization::authorize_project_read;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::operations::interfaces::http::gateway_proxy::query_router;

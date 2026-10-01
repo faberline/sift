@@ -8,7 +8,7 @@ use axum::Json;
 use chrono::Utc;
 use service_auth::RoleMapPrincipal;
 
-use crate::access::interfaces::http::project_authorization::authorize_project_read;
+use crate::access::application::project_authorization::authorize_project_read;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::projection;

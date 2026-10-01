@@ -10,7 +10,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use service_auth::RoleMapPrincipal;
 
-use crate::access::interfaces::http::project_authorization::authorize_project;
+use crate::access::application::project_authorization::authorize_project;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::ingest::application::retention_admission::retention_rejection;
