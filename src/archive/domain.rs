@@ -11,3 +11,5 @@ pub(crate) mod lifecycle_settings;
 pub(crate) mod manifest_validation_policy;
 pub(crate) mod portable_manifest;
 pub(crate) mod retention_policy;
+
+pub(crate) mod lifecycle_capacity;

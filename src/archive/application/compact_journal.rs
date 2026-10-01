@@ -9,10 +9,10 @@ use crate::journal::application::journal_service::JournalService as DurableJourn
 
 pub(in crate::archive) async fn compact_remote_quorum_without_gc(
     journal: &Arc<DurableJournal<'static>>,
-    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
+    state_machine: &Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
     destination: &Option<String>,
-    raft: &Arc<raft_runtime::RaftHost>,
-) -> Result<raft_runtime::SnapshotCompactionOutcome> {
+    raft: &Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>,
+) -> Result<crate::shared_kernel::checkpoint_data::SnapshotCompactionOutcome> {
     let checkpoint_journal = journal.clone();
     let checkpoint_state_machine = state_machine.clone();
     let checkpoint_destination = destination.clone();
@@ -31,9 +31,9 @@ pub(in crate::archive) async fn compact_remote_quorum_without_gc(
 }
 
 pub(in crate::archive) async fn compact_resident_all_voters(
-    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
-    raft: &Arc<raft_runtime::RaftHost>,
-) -> Result<raft_runtime::SnapshotCompactionOutcome> {
+    state_machine: &Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
+    raft: &Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>,
+) -> Result<crate::shared_kernel::checkpoint_data::SnapshotCompactionOutcome> {
     let checkpoint_state_machine = state_machine.clone();
     let up_to = tokio::task::spawn_blocking(move || {
         let (applied_index, raw_cursor, _) = checkpoint_state_machine.capture_archive_prefix()?;

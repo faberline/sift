@@ -23,3 +23,5 @@ mod projection_wiring;
 mod query_error_wiring;
 
 pub(crate) mod query_wiring;
+
+pub(crate) mod checkpoint_wiring;

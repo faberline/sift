@@ -36,3 +36,7 @@ pub(crate) mod snapshot_codec;
 pub(crate) mod journal_dependencies;
 
 pub(crate) mod journal_service_port;
+
+pub(crate) mod checkpoint_service;
+
+pub(crate) mod raft_checkpoint_service;

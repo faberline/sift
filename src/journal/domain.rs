@@ -32,3 +32,7 @@ pub(crate) mod recovery_store;
 pub(crate) mod snapshot_ports;
 
 pub(crate) mod projection_reader;
+
+pub(crate) mod checkpoint_port;
+
+pub(crate) mod raft_checkpoint_port;

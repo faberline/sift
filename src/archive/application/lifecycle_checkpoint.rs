@@ -20,7 +20,7 @@ use crate::archive::domain::lifecycle_settings::{
 /// Without every voter's snapshot capability, propose a checkpoint barrier
 /// for a quorum-only checkpoint that retains every prior archive object.
 pub(super) async fn propose_no_gc_quorum_barrier(
-    raft: &Arc<raft_runtime::RaftHost>,
+    raft: &Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>,
     outcome: &mut LifecycleOutcome,
     quorum_only_checkpoint: &mut bool,
 ) {
@@ -29,13 +29,13 @@ pub(super) async fn propose_no_gc_quorum_barrier(
         outcome.manifest_uri.clone(),
         outcome.manifest_sha256.clone(),
     ) {
-        match (crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
-            retention_generation,
-            manifest_uri,
-            manifest_sha256,
-        })
-        .encoded()
-        {
+        match raft.encode(
+            &crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
+                retention_generation,
+                manifest_uri,
+                manifest_sha256,
+            },
+        ) {
             Ok(command) => match raft.propose(command).await {
                 Ok(index) => {
                     outcome.captured_applied_index = index;
@@ -60,7 +60,7 @@ pub(super) async fn propose_no_gc_quorum_barrier(
 /// proposal, or an outcome without a retention generation, disallows the
 /// checkpoint.
 pub(super) async fn propose_retention_barrier(
-    raft: &Arc<raft_runtime::RaftHost>,
+    raft: &Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>,
     outcome: &mut LifecycleOutcome,
     checkpoint_allowed: &mut bool,
 ) {
@@ -69,13 +69,13 @@ pub(super) async fn propose_retention_barrier(
         outcome.manifest_uri.clone(),
         outcome.manifest_sha256.clone(),
     ) {
-        match (crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
-            retention_generation,
-            manifest_uri,
-            manifest_sha256,
-        })
-        .encoded()
-        {
+        match raft.encode(
+            &crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
+                retention_generation,
+                manifest_uri,
+                manifest_sha256,
+            },
+        ) {
             Ok(command) => match raft.propose(command).await {
                 Ok(index) => {
                     outcome.captured_applied_index = index;
@@ -107,7 +107,7 @@ pub(super) async fn propose_retention_barrier(
 /// fails, fall back to a resident checkpoint on every voter.
 pub(super) async fn run_all_voter_checkpoint(
     ctx: &LifecycleContext,
-    raft: &Arc<raft_runtime::RaftHost>,
+    raft: &Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>,
     outcome: &LifecycleOutcome,
     remote_archive: bool,
     flags: &mut TickFlags,
@@ -235,7 +235,7 @@ pub(super) async fn run_all_voter_checkpoint(
 /// Install the no-GC checkpoint the quorum-only barrier proposed.
 pub(super) async fn run_no_gc_quorum_checkpoint(
     ctx: &LifecycleContext,
-    raft: &Arc<raft_runtime::RaftHost>,
+    raft: &Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>,
     outcome: &LifecycleOutcome,
     flags: &mut TickFlags,
 ) {

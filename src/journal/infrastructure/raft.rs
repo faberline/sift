@@ -20,3 +20,7 @@ pub(crate) mod snapshot_writer;
 
 #[cfg(test)]
 mod checkpoint_compatibility_tests;
+
+pub(crate) mod checkpoint_port_adapter;
+
+pub(crate) mod raft_checkpoint_adapter;

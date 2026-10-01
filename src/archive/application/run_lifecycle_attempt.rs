@@ -6,8 +6,8 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
+use crate::archive::application::lifecycle_capacity::LifecycleCapacityService;
 use crate::journal::application::journal_service::JournalService as DurableJournal;
-use crate::node::infrastructure::local_capacity::LocalCapacity;
 
 pub(in crate::archive) struct LifecycleCommit {
     pub(in crate::archive) manifest_uri: Option<String>,
@@ -29,18 +29,19 @@ pub(in crate::archive) struct LifecycleOutcome {
 /// What every lifecycle tick runs against: the journal and its Raft state
 /// machine, the Raft host of a replicated store, the local capacity guard,
 /// and the remote archive destination, if there is one.
-pub(in crate::archive) struct LifecycleContext {
-    pub(in crate::archive) journal: Arc<DurableJournal<'static>>,
-    pub(in crate::archive) raft: Option<Arc<raft_runtime::RaftHost>>,
-    pub(in crate::archive) state_machine:
-        Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
-    pub(in crate::archive) local_capacity: Arc<LocalCapacity>,
-    pub(in crate::archive) destination: Option<String>,
+pub(crate) struct LifecycleContext {
+    pub(crate) journal: Arc<DurableJournal<'static>>,
+    pub(crate) raft:
+        Option<Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>>,
+    pub(crate) state_machine:
+        Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
+    pub(crate) local_capacity: Arc<LifecycleCapacityService>,
+    pub(crate) destination: Option<String>,
 }
 
 pub(in crate::archive) fn run_lifecycle_attempt(
     journal: &DurableJournal<'_>,
-    state_machine: &crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine,
+    state_machine: &crate::journal::application::checkpoint_service::JournalCheckpointService,
     destination: Option<&str>,
     retention_fence: Option<crate::shared_kernel::retention_fence::RetentionFenceV1>,
 ) -> Result<LifecycleOutcome> {
@@ -162,7 +163,7 @@ pub(in crate::archive) fn run_lifecycle_attempt(
 
 pub(in crate::archive) fn prepare_lifecycle_checkpoint(
     journal: &DurableJournal<'_>,
-    state_machine: &crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine,
+    state_machine: &crate::journal::application::checkpoint_service::JournalCheckpointService,
     destination: Option<&str>,
     archive_gc_authorized: bool,
 ) -> Result<u64> {

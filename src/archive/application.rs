@@ -30,3 +30,5 @@ pub(crate) mod retention_pass;
 pub(crate) mod rewrite_retained_segment;
 pub(crate) mod run_lifecycle_attempt;
 pub(crate) mod upload_archive_snapshot;
+
+pub(crate) mod lifecycle_capacity;

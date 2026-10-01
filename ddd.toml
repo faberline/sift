@@ -283,7 +283,7 @@ reason = "§2 splits storage/archive.rs into use cases over the archive's contro
 
 [[exceptions]]
 rule = "B4"
-paths = ["src/archive/application/compact_journal.rs", "src/archive/application/prepare_retention_fence.rs", "src/archive/application/restore_into_empty.rs", "src/archive/application/run_lifecycle_attempt.rs"]
+paths = ["src/archive/application/restore_into_empty.rs"]
 subject = "journal.infrastructure"
 reason = "The archive use cases act on the journal's live stores: they take DurableJournal to capture, evict, expire, compact, reconcile and restore sealed segments, read segments and blobs through RawStorage and BlobStore, restore writes the epoch maps with write_epoch_maps, and the lifecycle, retention fence and compaction propose and apply through SiftStateMachine; P1 moves them as-is. P2: the journal's application exposes the snapshot, eviction, expiration, compaction and restore operations the archive needs, and the archive holds that port instead of DurableJournal, RawStorage and SiftStateMachine."
 

@@ -32,6 +32,10 @@ pub struct ServiceState {
     pub(crate) state_machine:
         Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
     pub(crate) local_command: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) checkpoints:
+        Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
+    pub(crate) checkpoint_raft:
+        Option<Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>>,
     pub(crate) projections: Arc<ProjectionRuntime>,
     pub(crate) admission: Arc<AdmissionController>,
     pub(crate) local_capacity: Arc<LocalCapacity>,
@@ -105,6 +109,8 @@ impl ServiceState {
         } else {
             (None, None, None)
         };
+        let (checkpoints, checkpoint_raft) =
+            super::checkpoint_wiring::checkpoint_services(state_machine.clone(), raft.as_ref());
         let draining = Arc::new(AtomicBool::new(false));
         let local_command = Arc::new(tokio::sync::Mutex::new(()));
         let context = super::journal_command_wiring::commit_context(
@@ -128,6 +134,8 @@ impl ServiceState {
             peer_port,
             state_machine,
             local_command,
+            checkpoints,
+            checkpoint_raft,
             admission: Arc::new(AdmissionController::new(limits)?),
             local_capacity,
             query_jobs: Arc::new(QueryJobService::open(data_dir.join("query-jobs"))?),

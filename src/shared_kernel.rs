@@ -55,3 +55,5 @@ pub(crate) mod query_job;
 pub(crate) mod prom_query_params;
 
 pub(crate) mod forward_data;
+
+pub(crate) mod checkpoint_data;

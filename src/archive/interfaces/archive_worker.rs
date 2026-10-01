@@ -3,7 +3,6 @@
 
 use crate::app::service_state::ServiceState;
 use crate::archive::application::lifecycle_tick::run_lifecycle_tick;
-use crate::archive::application::run_lifecycle_attempt::LifecycleContext;
 
 impl ServiceState {
     /// Start the store lifecycle worker. A replicated follower stays idle.
@@ -28,13 +27,7 @@ impl ServiceState {
         destination: Option<String>,
         interval: std::time::Duration,
     ) -> ArchiveWorker {
-        let ctx = LifecycleContext {
-            journal: self.journal.clone(),
-            raft: self.raft.clone(),
-            state_machine: self.state_machine.clone(),
-            local_capacity: self.local_capacity.clone(),
-            destination,
-        };
+        let ctx = self.lifecycle_context(destination);
         let (shutdown, mut shutdown_rx) = tokio::sync::watch::channel(false);
         let task = tokio::spawn(async move {
             loop {

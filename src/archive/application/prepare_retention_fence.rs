@@ -10,8 +10,8 @@ use crate::journal::application::journal_service::JournalService as DurableJourn
 
 pub(in crate::archive) async fn prepare_retention_fence(
     journal: &Arc<DurableJournal<'static>>,
-    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
-    raft: Option<&Arc<raft_runtime::RaftHost>>,
+    state_machine: &Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
+    raft: Option<&Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>>,
     remote_archive: bool,
     retention_capable: bool,
 ) -> Result<Option<crate::shared_kernel::retention_fence::RetentionFenceV1>> {
@@ -34,11 +34,11 @@ pub(in crate::archive) async fn prepare_retention_fence(
                     evaluate_at: fence.evaluate_at,
                 };
                 if let Some(raft) = raft {
-                    let command =
-                        crate::shared_kernel::sift_command::SiftCommandV1::RetentionFence {
+                    let command = raft.encode(
+                        &crate::shared_kernel::sift_command::SiftCommandV1::RetentionFence {
                             fence: next.clone(),
-                        }
-                        .encoded()?;
+                        },
+                    )?;
                     let fence_index = raft
                         .propose(command)
                         .await
@@ -79,10 +79,11 @@ pub(in crate::archive) async fn prepare_retention_fence(
         evaluate_at: evaluate_at.to_rfc3339(),
     };
     if let Some(raft) = raft {
-        let command = crate::shared_kernel::sift_command::SiftCommandV1::RetentionFence {
-            fence: fence.clone(),
-        }
-        .encoded()?;
+        let command = raft.encode(
+            &crate::shared_kernel::sift_command::SiftCommandV1::RetentionFence {
+                fence: fence.clone(),
+            },
+        )?;
         let fence_index = raft
             .propose(command)
             .await
@@ -99,8 +100,8 @@ pub(in crate::archive) async fn prepare_retention_fence(
 }
 
 pub(in crate::archive) async fn clear_completed_retention_fence(
-    raft: &Arc<raft_runtime::RaftHost>,
-    state_machine: &Arc<crate::journal::infrastructure::raft::sift_state_machine::SiftStateMachine>,
+    raft: &Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>,
+    state_machine: &Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
     retention_generation: u64,
 ) -> Result<()> {
     let Some((fence, _)) = state_machine.pending_retention_fence() else {
@@ -109,12 +110,11 @@ pub(in crate::archive) async fn clear_completed_retention_fence(
     if fence.target_generation > retention_generation {
         return Ok(());
     }
-    raft.propose(
-        crate::shared_kernel::sift_command::SiftCommandV1::clear_retention_fence(
+    raft.propose(raft.encode(
+        &crate::shared_kernel::sift_command::SiftCommandV1::clear_retention_fence(
             retention_generation,
-        )
-        .encoded()?,
-    )
+        ),
+    )?)
     .await
     .context("commit Sift retention fence clear to quorum")?;
     Ok(())

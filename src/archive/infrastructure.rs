@@ -24,3 +24,5 @@ pub(crate) mod private_fs_mode;
 pub(crate) mod restore_state;
 pub(crate) mod spill_catalog;
 pub(crate) mod verified_manifest_fetcher;
+
+pub(crate) mod lifecycle_capacity_adapter;
