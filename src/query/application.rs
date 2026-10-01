@@ -8,3 +8,19 @@ pub(crate) mod get_query_job;
 pub(crate) mod prom_query;
 pub(crate) mod query_cursor;
 pub(crate) mod replay_cold_query;
+
+pub(crate) mod query_validation;
+
+pub(crate) mod phase_one_validation;
+
+pub(crate) mod prom_query_params;
+
+pub(crate) mod correlation;
+
+pub(crate) mod service_listing;
+
+pub(crate) mod trace_lookup;
+
+pub(crate) mod prometheus_queries;
+
+pub(crate) mod query_run;

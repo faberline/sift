@@ -19,3 +19,5 @@ mod journal_command_wiring;
 mod journal_storage_wiring;
 
 mod projection_wiring;
+
+mod query_error_wiring;

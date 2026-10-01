@@ -11,9 +11,9 @@ use serde::Serialize;
 use serde_json::Value;
 use url::Url;
 
-use crate::query::interfaces::http::phase_one::{CorrelationRequestV1, LogTailRequestV1};
-use crate::query::interfaces::http::query_request_v1::{QueryModeV1, QueryRequestV1};
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::query_phase_one::{CorrelationRequestV1, LogTailRequestV1};
+use crate::shared_kernel::query_request::{QueryModeV1, QueryRequestV1};
+use crate::shared_kernel::query_response::QueryResponseV1;
 use crate::shared_kernel::utf8_truncate::truncate_utf8;
 
 const SIFT_API_MAX_RETRIES: usize = 2;

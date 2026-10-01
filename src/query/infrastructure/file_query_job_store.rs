@@ -10,8 +10,8 @@ use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
 
 use crate::query::domain::query_job::{validate_id, QueryJobStatusV1, QueryJobV1};
-use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::query_request::QueryRequestV1;
+use crate::shared_kernel::query_response::QueryResponseV1;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);

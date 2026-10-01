@@ -1,57 +1,13 @@
 //! The filter expression a query carries, its depth, argument and regex bounds,
 //! and the fields it may name.
 
+pub use crate::shared_kernel::query_expression::QueryExpressionV1;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const MAX_FILTER_DEPTH: usize = 32;
 pub(in crate::query) const MAX_FILTER_ARGUMENTS: usize = 64;
 const MAX_REGEX_BYTES: usize = 1_024;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
-pub enum QueryExpressionV1 {
-    And {
-        args: Vec<QueryExpressionV1>,
-    },
-    Or {
-        args: Vec<QueryExpressionV1>,
-    },
-    Not {
-        arg: Box<QueryExpressionV1>,
-    },
-    Eq {
-        field: String,
-        value: serde_json::Value,
-    },
-    In {
-        field: String,
-        values: Vec<serde_json::Value>,
-    },
-    Exists {
-        field: String,
-    },
-    Range {
-        field: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        gt: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        gte: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        lt: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        lte: Option<serde_json::Value>,
-    },
-    Text {
-        field: String,
-        value: String,
-    },
-    Regex {
-        field: String,
-        pattern: String,
-    },
-}
 
 #[derive(Debug, Error)]
 pub enum FilterError {

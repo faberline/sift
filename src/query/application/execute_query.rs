@@ -16,11 +16,9 @@ use crate::query::application::query_cursor::{decode_query_cursor, encode_query_
 use crate::query::application::replay_cold_query::{replay_cold_query, ColdQueryScope};
 use crate::query::domain::filter_evaluator::evaluate_filter;
 use crate::query::domain::query_time::{cold_query_requested_at, parse_query_time_nanos};
-use crate::query::interfaces::http::query_request_v1::{
-    MetricFunctionV1, QueryRequestV1, QuerySignalV1,
-};
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
 use crate::shared_kernel::event::SignalKind;
+use crate::shared_kernel::query_request::{MetricFunctionV1, QueryRequestV1, QuerySignalV1};
+use crate::shared_kernel::query_response::QueryResponseV1;
 
 pub(in crate::query) fn execute_query_v1(
     state: &ServiceState,

@@ -3,20 +3,20 @@
 
 use std::collections::BTreeMap;
 
-use crate::app::interfaces::http::api_error::ApiError;
-use crate::projection;
+use crate::query::domain::prom_models::{PromMetricPage, PromPoint, PromSeries, PROM_MAX_SERIES};
 use crate::query::domain::promql::PromFunction;
+use crate::query::domain::query_failure::QueryFailure;
 use crate::shared_kernel::event::AttributeValue;
 
 pub(in crate::query) fn ensure_complete_prom_metric_page(
-    page: &projection::MetricPage,
-) -> Result<(), ApiError> {
+    page: &PromMetricPage,
+) -> Result<(), QueryFailure> {
     if page.has_more {
-        return Err(ApiError::bad_request(
+        return Err(QueryFailure::bad_request(
             "bad_data",
             format!(
                 "Prometheus selector matches more than {} series; narrow the selector",
-                projection::MAX_METRIC_QUERY_LIMIT
+                PROM_MAX_SERIES
             ),
         ));
     }
@@ -26,12 +26,12 @@ pub(in crate::query) fn ensure_complete_prom_metric_page(
 pub(in crate::query) fn ensure_prom_range_work_budget(
     series_count: usize,
     evaluation_count: usize,
-) -> Result<(), ApiError> {
-    let work_samples = series_count
-        .checked_mul(evaluation_count)
-        .ok_or_else(|| ApiError::bad_request("bad_data", "query_range sample budget overflowed"))?;
+) -> Result<(), QueryFailure> {
+    let work_samples = series_count.checked_mul(evaluation_count).ok_or_else(|| {
+        QueryFailure::bad_request("bad_data", "query_range sample budget overflowed")
+    })?;
     if work_samples > PROM_MAX_RANGE_WORK_SAMPLES {
-        return Err(ApiError::bad_request(
+        return Err(QueryFailure::bad_request(
             "bad_data",
             format!(
                 "query_range would evaluate {work_samples} series samples; the limit is {PROM_MAX_RANGE_WORK_SAMPLES}"
@@ -41,9 +41,7 @@ pub(in crate::query) fn ensure_prom_range_work_budget(
     Ok(())
 }
 
-pub(in crate::query) fn prom_series_labels(
-    series: &projection::MetricSeriesResultV1,
-) -> BTreeMap<String, String> {
+pub(in crate::query) fn prom_series_labels(series: &PromSeries) -> BTreeMap<String, String> {
     let mut labels = BTreeMap::from([("__name__".into(), series.name.clone())]);
     labels.extend(
         series
@@ -99,7 +97,7 @@ pub(in crate::query) fn prom_nanos_to_seconds(nanos: i64) -> f64 {
 }
 
 pub(in crate::query) fn prom_latest_values(
-    points: &[projection::MetricPointV1],
+    points: &[PromPoint],
     evaluation_times: &[i64],
 ) -> Vec<Option<f64>> {
     let mut next_point = 0usize;
@@ -121,7 +119,7 @@ pub(in crate::query) fn prom_latest_values(
 }
 
 pub(in crate::query) fn prom_rate_values(
-    points: &[projection::MetricPointV1],
+    points: &[PromPoint],
     evaluation_times: &[i64],
 ) -> Vec<Option<f64>> {
     let mut counter_prefix = Vec::with_capacity(points.len());
@@ -217,18 +215,12 @@ impl PromStepAggregate {
 #[cfg(test)]
 mod prometheus_evaluator_tests {
     use super::*;
-    use crate::query::interfaces::http::prom_query_params::nanos_rfc3339;
 
-    fn point(time_unix_nano: i64, value: f64) -> projection::MetricPointV1 {
-        projection::MetricPointV1 {
-            cursor: 1,
-            event_id: format!("point-{time_unix_nano}"),
-            occurred_at: nanos_rfc3339(time_unix_nano).unwrap(),
+    fn point(time_unix_nano: i64, value: f64) -> PromPoint {
+        PromPoint {
             time_unix_nano,
             value,
             stale: false,
-            histogram: None,
-            exemplars: Vec::new(),
         }
     }
 

@@ -1,6 +1,6 @@
 //! Whether a query read the archive, and the stats and warnings that follow.
 
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::query_response::QueryResponseV1;
 
 #[derive(Debug)]
 pub(crate) enum ArchiveQueryStatus {

@@ -1,7 +1,6 @@
 //! Reading an async query job back for the project that asked for it.
 
 use anyhow::Result;
-use axum::extract::Extension;
 use service_auth::RoleMapPrincipal;
 
 use crate::access::application::project_authorization::authorize_project_read;
@@ -11,11 +10,11 @@ use crate::query::domain::query_job::QueryJobV1;
 
 pub(in crate::query) fn query_job_for_project(
     state: &ServiceState,
-    principal: Option<&Extension<RoleMapPrincipal>>,
+    principal: Option<&RoleMapPrincipal>,
     id: &str,
     project: &str,
 ) -> Result<QueryJobV1, ApiError> {
-    authorize_project_read(principal.map(|principal| &principal.0), project)?;
+    authorize_project_read(principal, project)?;
     let job = state
         .query_jobs
         .get(id)

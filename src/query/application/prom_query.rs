@@ -34,7 +34,7 @@ pub(in crate::query) fn prom_metric_query(
 }
 
 pub(in crate::query) fn prom_range_result(
-    series: &[projection::MetricSeriesResultV1],
+    series: &[crate::query::domain::prom_models::PromSeries],
     function: PromFunction,
     start: i64,
     end: i64,
@@ -103,5 +103,32 @@ pub(in crate::query) fn prom_range_result(
         Vec::new()
     } else {
         vec![serde_json::json!({"metric": {}, "values": values})]
+    }
+}
+
+pub(in crate::query) fn prom_page(
+    page: projection::MetricPage,
+) -> crate::query::domain::prom_models::PromMetricPage {
+    use crate::query::domain::prom_models::{PromMetricPage, PromPoint, PromSeries};
+    PromMetricPage {
+        has_more: page.has_more,
+        series: page
+            .series
+            .into_iter()
+            .map(|series| PromSeries {
+                name: series.name,
+                resource: series.resource,
+                attributes: series.attributes,
+                points: series
+                    .points
+                    .into_iter()
+                    .map(|point| PromPoint {
+                        time_unix_nano: point.time_unix_nano,
+                        value: point.value,
+                        stale: point.stale,
+                    })
+                    .collect(),
+            })
+            .collect(),
     }
 }

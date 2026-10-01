@@ -21,9 +21,9 @@ use crate::query::domain::query_job::QueryJobV1;
 use crate::query::infrastructure::store_query_client::{
     decode_store_query_response, forward_query_to_store,
 };
-use crate::query::interfaces::http::query_request_v1::{QueryModeV1, QueryRequestV1};
-use crate::query::interfaces::http::query_response_v1::{QueryResponseV1, QueryStatsV1};
 use crate::query::interfaces::http::query_v1::QueryJobHttpQuery;
+use crate::shared_kernel::query_request::{QueryModeV1, QueryRequestV1};
+use crate::shared_kernel::query_response::{QueryResponseV1, QueryStatsV1};
 
 #[derive(Clone)]
 struct QueryRoleState {
@@ -134,5 +134,11 @@ async fn get_query_role_job_v1(
     AxumPath(id): AxumPath<String>,
     Query(query): Query<QueryJobHttpQuery>,
 ) -> Result<Json<QueryJobV1>, ApiError> {
-    query_job_for_project(&state.service, principal.as_ref(), &id, &query.project).map(Json)
+    query_job_for_project(
+        &state.service,
+        principal.as_ref().map(|value| &value.0),
+        &id,
+        &query.project,
+    )
+    .map(Json)
 }

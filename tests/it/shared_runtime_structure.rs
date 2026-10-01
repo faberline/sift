@@ -144,7 +144,7 @@ fn persistent_query_job_transitions_use_service_executor() {
     .collect();
     let query_v1 = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/query/interfaces/http/query_v1.rs"
+        "/src/query/application/query_run.rs"
     ))
     .expect("read Sift query handlers");
     let query_role = std::fs::read_to_string(concat!(

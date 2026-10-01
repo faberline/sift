@@ -6,8 +6,8 @@ use axum::response::Response;
 use axum::Router;
 use tower::ServiceExt as _;
 
-use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::query_request::QueryRequestV1;
+use crate::shared_kernel::query_response::QueryResponseV1;
 
 pub(in crate::query) async fn forward_query_to_store(
     store: Router,

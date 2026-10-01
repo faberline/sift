@@ -35,3 +35,21 @@ pub(crate) mod utf8_truncate;
 pub(crate) mod raft_batch_limits;
 
 pub(crate) mod snapshot_metadata;
+
+pub(crate) mod projection_log;
+
+pub(crate) mod projection_metric;
+
+pub(crate) mod projection_trace;
+
+pub(crate) mod query_expression;
+
+pub(crate) mod query_request;
+
+pub(crate) mod query_response;
+
+pub(crate) mod query_phase_one;
+
+pub(crate) mod query_job;
+
+pub(crate) mod prom_query_params;
