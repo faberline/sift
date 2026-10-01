@@ -135,3 +135,14 @@ mapping's numbers:
   and archive-checkpoint ports, `ServiceState` accessors, removing the
   compatibility facades, renaming `JournalState` to `ResidentWindow`, and the
   X1–X10 deletions and merges.
+
+## P2 completion, 2026-10-01
+
+The later approved plan removes all 46 exceptions present at `5ae45b9`.
+It uses domain ports and shared data to remove the actual dependencies.
+Service state is private and archive services have no journal ownership cycle.
+X7, X8 and X9 are complete. Domain still receives time explicitly.
+The architecture checker and its policy remain unchanged.
+The historical P1 exceptions above are no longer active.
+See [ADR 0002](0002-ddd-p2.md) and the
+[completion report](../refactor-completion.md) for local validation and limits.

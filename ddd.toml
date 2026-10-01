@@ -4,9 +4,8 @@
 # Sift's own.
 schema = 1
 
-# Enforced since the DDD split's first phase (P1) finished: the check fails on
-# any error that no [[exceptions]] entry below records. The ratchet never lets
-# this go back to false.
+# Enforced since the first DDD phase. Every architecture error fails the check.
+# P2 has removed all exceptions. Enforcement stays enabled.
 [migration]
 enforce = true
 
@@ -121,10 +120,6 @@ mod_module_files = "deny"
 [shared_kernel]
 path = "src/shared_kernel"
 
-# Kernel dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
-
-
 
 # The assembly root: the service state every context's handlers share, the
 # readiness and metrics hooks, and the HTTP router, API error and OpenAPI
@@ -145,10 +140,6 @@ domain = "src/collector/domain"
 application = "src/collector/application"
 infrastructure = "src/collector/infrastructure"
 
-# Collector dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
-
-
 
 # Projections: the logging, metric and trace read models Sift builds from the
 # journal and answers queries from. Besides the shared kernel they read the
@@ -163,19 +154,12 @@ application = "src/projection/application"
 infrastructure = "src/projection/infrastructure"
 interfaces = "src/projection/interfaces"
 
-# Projection dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
-
-
-
-
 
 # Queries: the versioned query API over logs, metrics and traces, its async
 # jobs, the Prometheus-compatible endpoints, the query role and the
 # read-only MCP tools. It reads the projections it answers from, the journal
 # for the services it lists, the archive for cold queries, access for the
-# project checks its handlers run, and operations for the router that forwards
-# the query role's other routes to the store role.
+# project checks. Assembly injects the query role's store fallback router.
 [[contexts]]
 name = "query"
 depends_on = ["projection", "journal", "archive", "access"]
@@ -186,26 +170,11 @@ application = "src/query/application"
 infrastructure = "src/query/infrastructure"
 interfaces = "src/query/interfaces"
 
-# Query dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
 
-
-
-
-
-
-
-
-
-
-
-
-# Ingest: telemetry admitted within bounded limits, decoded from OTLP, Cloud
-# Logging structured JSON and Prometheus remote write into operational
-# events, governed, and appended through the group-commit queue to the
-# journal. Besides the shared kernel it appends to the journal, runs access's
-# project checks, and runs on the app's ServiceState and ApiError, which are
-# assembly code the context rules do not cover.
+# Ingest: telemetry admitted within bounded limits, decoded from OTLP and
+# Prometheus remote write, governed and appended through a batch submission
+# port. It uses journal and access application services. Assembly injects the
+# queue, command services and original shared capacity guard.
 [[contexts]]
 name = "ingest"
 depends_on = ["journal", "access"]
@@ -216,19 +185,13 @@ application = "src/ingest/application"
 infrastructure = "src/ingest/infrastructure"
 interfaces = "src/ingest/interfaces"
 
-# Ingest dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
-
-
-
-
 
 # The journal: Sift's durable, replicated event log. It accepts governed
 # batches through Raft, deduplicates them inside the idempotency window,
 # recovers from the WAL and sealed segments, adopts archive checkpoints and
 # retention, and serves reads to the projections and queries. It opens its
-# data root through the node. Besides the shared kernel and the node it
-# reaches the archive and ingest's governance, as the exceptions below say.
+# data root through the node. Archive reads, maintenance and governance use
+# journal-owned ports supplied by assembly.
 [[contexts]]
 name = "journal"
 depends_on = ["node"]
@@ -238,16 +201,6 @@ domain = "src/journal/domain"
 application = "src/journal/application"
 infrastructure = "src/journal/infrastructure"
 interfaces = "src/journal/interfaces"
-
-# Journal dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
-
-
-
-
-
-
-
 
 
 # The archive: Sift's cold tier. It uploads the journal's sealed segments,
@@ -266,14 +219,6 @@ domain = "src/archive/domain"
 application = "src/archive/application"
 infrastructure = "src/archive/infrastructure"
 interfaces = "src/archive/interfaces"
-
-# Archive dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
-
-
-
-
-
 
 
 # The node: one Sift process's own data root. It owns the private, versioned
@@ -302,12 +247,6 @@ domain = "src/access/domain"
 infrastructure = "src/access/infrastructure"
 interfaces = "src/access/interfaces"
 
-# Access dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
-
-
-
-
 
 # Operations: running Sift as a service. It owns the Sift custom resource and
 # the operator that reconciles it, the deployment artifacts rendered offline
@@ -326,16 +265,9 @@ application = "src/operations/application"
 infrastructure = "src/operations/infrastructure"
 interfaces = "src/operations/interfaces"
 
-# Operations dependencies the P1 split moves as-is; P2 settles each one as the
-# reason says.
 
-
-
-
-
-# Files P2 moved or split. The ratchet lets each new path take the old path's
-# place in the exceptions above; once main has the new paths these entries
-# can go.
+# Earlier P2 moves and splits remain recorded against main for the ratchet.
+# These entries do not suppress a finding.
 
 [[renames]]
 from = "src/archive/application/replay_cold_query.rs"
