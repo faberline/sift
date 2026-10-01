@@ -17,3 +17,6 @@ pub(crate) mod sift_state_machine_checkpoints;
 pub(crate) mod snapshot_format;
 pub(crate) mod snapshot_restore;
 pub(crate) mod snapshot_writer;
+
+#[cfg(test)]
+mod checkpoint_compatibility_tests;
