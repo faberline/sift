@@ -10,6 +10,12 @@ pub(crate) struct RaftCheckpointService {
     port: Arc<dyn RaftCheckpointPort<Error = anyhow::Error>>,
 }
 
+#[derive(Debug)]
+pub(crate) enum CheckpointBarrierError {
+    Encode(anyhow::Error),
+    Propose(anyhow::Error),
+}
+
 impl RaftCheckpointService {
     pub(crate) fn new(port: Arc<dyn RaftCheckpointPort<Error = anyhow::Error>>) -> Self {
         Self { port }
@@ -19,6 +25,23 @@ impl RaftCheckpointService {
     }
     pub(crate) async fn propose(&self, command: Vec<u8>) -> Result<u64> {
         self.port.propose(command).await
+    }
+    pub(crate) async fn propose_archive_checkpoint_barrier(
+        &self,
+        retention_generation: u64,
+        manifest_uri: String,
+        manifest_sha256: String,
+    ) -> Result<u64, CheckpointBarrierError> {
+        let command = self
+            .encode(&SiftCommandV1::ArchiveCheckpointBarrier {
+                retention_generation,
+                manifest_uri,
+                manifest_sha256,
+            })
+            .map_err(CheckpointBarrierError::Encode)?;
+        self.propose(command)
+            .await
+            .map_err(CheckpointBarrierError::Propose)
     }
     pub(crate) async fn is_leader(&self) -> bool {
         self.port.is_leader().await

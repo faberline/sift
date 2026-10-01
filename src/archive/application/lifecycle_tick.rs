@@ -18,6 +18,21 @@ pub(super) struct TickFlags {
     pub(super) replicated_checkpoint_installed: bool,
 }
 
+impl TickFlags {
+    pub(super) fn allows_archive_gc(
+        &self,
+        still_leader: bool,
+        remote_archive: bool,
+        retention_scan_pending: bool,
+        replicated: bool,
+    ) -> bool {
+        still_leader
+            && remote_archive
+            && !retention_scan_pending
+            && (!replicated || self.replicated_checkpoint_installed)
+    }
+}
+
 /// Run one lifecycle tick. The worker calls it only while this node leads.
 pub(in crate::archive) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
     let services = ctx.services.as_ref();
@@ -122,10 +137,12 @@ pub(in crate::archive) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
                     run_no_gc_quorum_checkpoint(ctx, raft, &outcome, &mut flags).await;
                 }
             }
-            let archive_gc_is_safe = still_leader
-                && remote_archive
-                && !outcome.retention_scan_pending
-                && (!replicated || flags.replicated_checkpoint_installed);
+            let archive_gc_is_safe = flags.allows_archive_gc(
+                still_leader,
+                remote_archive,
+                outcome.retention_scan_pending,
+                replicated,
+            );
             if archive_gc_is_safe {
                 run_archive_gc_after_checkpoint(ctx).await;
             }

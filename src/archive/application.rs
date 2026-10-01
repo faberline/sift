@@ -59,3 +59,6 @@ pub(crate) mod lifecycle_service;
 pub(crate) mod read_service;
 
 pub(crate) mod restore_layout_service;
+
+#[cfg(test)]
+mod lifecycle_checkpoint_tests;

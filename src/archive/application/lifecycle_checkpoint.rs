@@ -16,6 +16,7 @@ use crate::archive::application::run_lifecycle_attempt::{
 use crate::archive::domain::lifecycle_settings::{
     ALL_VOTER_CHECKPOINT_ATTEMPT, ARCHIVE_GC_BATCH_OBJECTS,
 };
+use crate::journal::application::raft_checkpoint_service::CheckpointBarrierError;
 
 /// Without every voter's snapshot capability, propose a checkpoint barrier
 /// for a quorum-only checkpoint that retains every prior archive object.
@@ -29,24 +30,19 @@ pub(super) async fn propose_no_gc_quorum_barrier(
         outcome.manifest_uri.clone(),
         outcome.manifest_sha256.clone(),
     ) {
-        match raft.encode(
-            &crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
-                retention_generation,
-                manifest_uri,
-                manifest_sha256,
-            },
-        ) {
-            Ok(command) => match raft.propose(command).await {
-                Ok(index) => {
-                    outcome.captured_applied_index = index;
-                    *quorum_only_checkpoint = true;
-                }
-                Err(error) => tracing::warn!(
-                    %error,
-                    "Sift no-GC quorum checkpoint barrier proposal failed"
-                ),
-            },
-            Err(error) => tracing::warn!(
+        match raft
+            .propose_archive_checkpoint_barrier(retention_generation, manifest_uri, manifest_sha256)
+            .await
+        {
+            Ok(index) => {
+                outcome.captured_applied_index = index;
+                *quorum_only_checkpoint = true;
+            }
+            Err(CheckpointBarrierError::Propose(error)) => tracing::warn!(
+                %error,
+                "Sift no-GC quorum checkpoint barrier proposal failed"
+            ),
+            Err(CheckpointBarrierError::Encode(error)) => tracing::warn!(
                 %error,
                 "Sift no-GC quorum checkpoint barrier encoding failed"
             ),
@@ -69,26 +65,21 @@ pub(super) async fn propose_retention_barrier(
         outcome.manifest_uri.clone(),
         outcome.manifest_sha256.clone(),
     ) {
-        match raft.encode(
-            &crate::shared_kernel::sift_command::SiftCommandV1::ArchiveCheckpointBarrier {
-                retention_generation,
-                manifest_uri,
-                manifest_sha256,
-            },
-        ) {
-            Ok(command) => match raft.propose(command).await {
-                Ok(index) => {
-                    outcome.captured_applied_index = index;
-                }
-                Err(error) => {
-                    *checkpoint_allowed = false;
-                    tracing::warn!(
-                        %error,
-                        "Sift retention barrier proposal failed"
-                    );
-                }
-            },
-            Err(error) => {
+        match raft
+            .propose_archive_checkpoint_barrier(retention_generation, manifest_uri, manifest_sha256)
+            .await
+        {
+            Ok(index) => {
+                outcome.captured_applied_index = index;
+            }
+            Err(CheckpointBarrierError::Propose(error)) => {
+                *checkpoint_allowed = false;
+                tracing::warn!(
+                    %error,
+                    "Sift retention barrier proposal failed"
+                );
+            }
+            Err(CheckpointBarrierError::Encode(error)) => {
                 *checkpoint_allowed = false;
                 tracing::warn!(
                     %error,
