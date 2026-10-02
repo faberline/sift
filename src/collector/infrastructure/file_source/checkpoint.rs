@@ -1,5 +1,9 @@
 //! Persisted file identities and offsets.
 use super::super::checkpoint::CollectorCheckpoint;
+use crate::collector::domain::{
+    quarantine::QuarantineEntry,
+    record::{FileAnchor, SourceCursor, SourceRejection},
+};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File};
@@ -12,6 +16,8 @@ pub(super) struct Position {
     pub(super) retired: bool,
     #[serde(default)]
     pub(super) generation: u64,
+    #[serde(default)]
+    pub(super) anchor: Option<FileAnchor>,
 }
 #[derive(Deserialize, Serialize)]
 pub(super) struct FileCheckpoint {
@@ -43,5 +49,28 @@ pub(super) fn identity(file: &File) -> Result<String> {
     {
         let _ = file;
         bail!("rotation-aware file capture requires Unix file identity")
+    }
+}
+
+pub(super) fn loss(
+    source_id: &str,
+    id: &str,
+    position: &Position,
+    message: &str,
+) -> SourceRejection {
+    SourceRejection {
+        entry: QuarantineEntry::invalid_line(
+            source_id,
+            position.line,
+            position.offset,
+            "source_lost",
+            message,
+            &[],
+        ),
+        cursor: SourceCursor::CriLoss {
+            identity: id.into(),
+            lost_bytes: position.observed_len.saturating_sub(position.offset),
+            generation: Some(position.generation),
+        },
     }
 }

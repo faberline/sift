@@ -49,11 +49,15 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
         require(type(service) is dict and set(service)=={'project','namespace','container'}, 'service source fields differ')
         require(all(type(value) is str and value for value in service.values()),'service identity is required')
         require(not service['namespace'].startswith(('kube-','gmp-','gke-')),'system logs cannot size application storage')
+        require(service['project']==config['project'],'application source project must match the prepared cluster')
+        require(service['namespace']==config['namespace'],
+            'current agents collect the instance namespace; application sources must use that namespace')
     selected=[]
     require(type(entries) is list,'Cloud Logging sample must be a JSON array')
     for entry in entries:
         resource=entry.get('resource',{});labels=resource.get('labels',{})
         if resource.get('type')!='k8s_container':continue
+        if labels.get('cluster_name')!=config['cluster'] or labels.get('location')!=config['location']:continue
         if any(labels.get('project_id')==s['project'] and labels.get('namespace_name')==s['namespace']
             and labels.get('container_name')==s['container'] for s in services):
             selected.append(entry)

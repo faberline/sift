@@ -197,6 +197,7 @@ impl service_collector::CollectorSource for LinearSource {
 pub(crate) struct BoundedLine {
     pub(crate) bytes_read: u64,
     pub(crate) preview: Vec<u8>,
+    pub(crate) tail: Vec<u8>,
     pub(crate) oversized: bool,
 }
 
@@ -206,6 +207,7 @@ pub(crate) fn read_bounded_line(
 ) -> Result<BoundedLine> {
     let mut bytes_read = 0_u64;
     let mut preview = Vec::with_capacity(max_bytes.min(8192));
+    let mut tail = Vec::with_capacity(256);
     let mut terminated = false;
 
     while !terminated {
@@ -220,6 +222,7 @@ pub(crate) fn read_bounded_line(
             .unwrap_or(available.len());
         let remaining = max_bytes.saturating_add(1).saturating_sub(preview.len());
         preview.extend_from_slice(&available[..consumed.min(remaining)]);
+        super::file_anchor::keep_tail(&mut tail, &available[..consumed]);
         bytes_read = bytes_read
             .checked_add(consumed as u64)
             .context("collector line byte count overflow")?;
@@ -231,6 +234,7 @@ pub(crate) fn read_bounded_line(
         bytes_read,
         oversized: bytes_read > max_bytes as u64,
         preview,
+        tail,
     })
 }
 

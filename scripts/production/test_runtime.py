@@ -13,7 +13,7 @@ class Runtime(unittest.TestCase):
         self.pods={'items':[]}
         for role in ['store','control']:
             for i in range(3):
-                self.pods['items'].append({'metadata':{'namespace':'sift-acceptance','labels':{
+                self.pods['items'].append({'metadata':{'namespace':self.resource['metadata']['namespace'],'labels':{
                     'app.kubernetes.io/name':'sift','app.kubernetes.io/instance':'sift','sift.axiom.dev/role':role}},
                     'spec':{'nodeName':'node-'+str(i),'containers':[{'name':'sift','image':self.resource['spec']['image']}],
                         'volumes':[{'secret':{'secretName':name}} for name in ['sift-peer-tls','sift-webhooks']]},

@@ -234,6 +234,155 @@ async fn wait_for_count(client: &reqwest::Client, base: &str, count: usize) -> V
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cri_rewrite_detects_fast_regrowth_and_shortening_across_collector_restarts() {
+    let _lock = PROCESS_TEST_LOCK.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("pods");
+    let log = pod_log(&root);
+    let checkpoint = dir.path().join("checkpoint.json");
+    let quarantine = dir.path().join("quarantine.jsonl");
+    let port = reserve_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut process = SiftProcess::spawn(port, &dir.path().join("server"));
+    let client = reqwest::Client::new();
+    wait_ready(&mut process, &client, &base).await;
+    let messages = [
+        "first record".repeat(40),
+        "replacement record".repeat(80),
+        "short".into(),
+    ];
+    for (index, message) in messages.iter().enumerate() {
+        let event = service_event("same-position", message, None, "00f067aa0ba902b7");
+        let mut input = cri_line("stdout", "F", &event.to_string());
+        if index == 0 {
+            input.insert_str(0, "invalid-cri-envelope\n");
+        }
+        std::fs::write(&log, input).unwrap();
+        let summary = successful_summary(run_collector(&root, &checkpoint, &quarantine, &base));
+        assert_eq!(summary["accepted"], 1, "replacement {index}: {summary}");
+        assert_eq!(summary["rejected"], 1);
+        assert_eq!(summary["lost_sources"], index as u64);
+        assert_eq!(
+            summary["lost_bytes"], 0,
+            "the previous record was already acknowledged"
+        );
+    }
+    let page = wait_for_count(&client, &base, 3).await;
+    let records = page["records"].as_array().unwrap();
+    for message in messages {
+        assert!(records.iter().any(|record| record["body_text"] == message));
+    }
+    let resumed = successful_summary(run_collector(&root, &checkpoint, &quarantine, &base));
+    assert_eq!(resumed["accepted"], 0);
+    assert_eq!(resumed["duplicates"], 0);
+    assert_eq!(resumed["lost_sources"], 2);
+    assert_eq!(
+        std::fs::read_to_string(quarantine)
+            .unwrap()
+            .matches("source_lost")
+            .count(),
+        2
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cri_file_reused_by_another_pod_keeps_both_resource_identities() {
+    let _lock = PROCESS_TEST_LOCK.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("pods");
+    let log = pod_log(&root);
+    let checkpoint = dir.path().join("checkpoint.json");
+    let quarantine = dir.path().join("quarantine.jsonl");
+    let event = service_event(
+        "same-source-bytes",
+        "same source body",
+        None,
+        "00f067aa0ba902b7",
+    );
+    std::fs::write(&log, cri_line("stdout", "F", &event.to_string())).unwrap();
+    let port = reserve_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut process = SiftProcess::spawn(port, &dir.path().join("server"));
+    let client = reqwest::Client::new();
+    wait_ready(&mut process, &client, &base).await;
+    assert_eq!(
+        successful_summary(run_collector(&root, &checkpoint, &quarantine, &base))["accepted"],
+        1
+    );
+    let replacement = root.join("prod_lumen-1_abcd-5678/lumen/0.log");
+    std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
+    // Reuse the exact file, inode, content, timestamp, and source position.
+    std::fs::rename(&log, replacement).unwrap();
+    let summary = successful_summary(run_collector(&root, &checkpoint, &quarantine, &base));
+    assert_eq!(summary["accepted"], 1);
+    assert_eq!(summary["lost_sources"], 0);
+    let page = wait_for_count(&client, &base, 2).await;
+    let records = page["records"].as_array().unwrap();
+    assert!(records
+        .iter()
+        .any(|row| row["resource"]["k8s.pod.uid"] == "1234-abcd"));
+    assert!(records
+        .iter()
+        .any(|row| row["resource"]["k8s.pod.uid"] == "abcd-5678"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_cri_checkpoint_preserves_its_offset_and_event_identity() {
+    let _lock = PROCESS_TEST_LOCK.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("pods");
+    let log = pod_log(&root);
+    let checkpoint = dir.path().join("checkpoint.json");
+    let quarantine = dir.path().join("quarantine.jsonl");
+    let event = service_event("first", "before upgrade", None, "00f067aa0ba902b7");
+    std::fs::write(&log, cri_line("stdout", "F", &event.to_string())).unwrap();
+    let port = reserve_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut process = SiftProcess::spawn(port, &dir.path().join("server"));
+    let client = reqwest::Client::new();
+    wait_ready(&mut process, &client, &base).await;
+    assert_eq!(
+        successful_summary(run_collector(&root, &checkpoint, &quarantine, &base))["accepted"],
+        1
+    );
+    let mut value: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    let files = value["files"].as_object_mut().unwrap();
+    let scoped = files.keys().next().unwrap().clone();
+    let legacy = scoped.split(':').take(2).collect::<Vec<_>>().join(":");
+    let mut position = files.remove(&scoped).unwrap();
+    for field in ["anchor", "generation", "birth_nanos"] {
+        position.as_object_mut().unwrap().remove(field);
+    }
+    files.insert(legacy.clone(), position);
+    std::fs::write(&checkpoint, serde_json::to_vec(&value).unwrap()).unwrap();
+    let event = service_event("second", "after upgrade", None, "00f067aa0ba902b7");
+    OpenOptions::new()
+        .append(true)
+        .open(&log)
+        .unwrap()
+        .write_all(cri_line("stdout", "F", &event.to_string()).as_bytes())
+        .unwrap();
+    let summary = successful_summary(run_collector(&root, &checkpoint, &quarantine, &base));
+    assert_eq!(summary["accepted"], 1);
+    assert_eq!(summary["duplicates"], 0);
+    assert_eq!(summary["lost_sources"], 0);
+    let page = wait_for_count(&client, &base, 2).await;
+    assert_eq!(page["records"].as_array().unwrap().len(), 2);
+    let after = page["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["body_text"] == "after upgrade")
+        .unwrap();
+    assert_eq!(
+        after["resource"]["collector.source_id"],
+        format!("cri:{legacy}")
+    );
+    let updated: Value = serde_json::from_slice(&std::fs::read(checkpoint).unwrap()).unwrap();
+    assert!(updated["files"].get(legacy).is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn namespace_scoped_agent_does_not_collect_another_project_namespace() {
     let _lock = PROCESS_TEST_LOCK.lock().await;
     let dir = tempfile::tempdir().unwrap();

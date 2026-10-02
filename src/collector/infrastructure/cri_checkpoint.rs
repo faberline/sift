@@ -8,6 +8,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::collector::domain::cri::WorkloadIdentity;
+use crate::collector::domain::record::FileAnchor;
 
 const CRI_CHECKPOINT_SCHEMA: &str = "collector.cri.checkpoint.v1";
 
@@ -32,6 +33,12 @@ pub(super) struct CriFileCheckpoint {
     pub(super) workload: WorkloadIdentity,
     pub(super) retired: bool,
     pub(super) loss_reported: bool,
+    #[serde(default)]
+    pub(super) generation: u64,
+    #[serde(default)]
+    pub(super) anchor: Option<FileAnchor>,
+    #[serde(default)]
+    pub(super) birth_nanos: u64,
 }
 
 impl CriCheckpoint {

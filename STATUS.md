@@ -15,6 +15,12 @@ No candidate image, remote CI run, release tag, or release is published.
 | P3 | Error groups, alert states and durable outbox, Secret-based Webhooks, APIs, CLI, and read-only MCP | Local public API and restart flows passed; live HTTPS delivery and GKE operation flows remain required |
 | P4 | Preparation, live runtime checks, 30-minute and 24-hour load drivers, complete-export comparison, strict release gates | Live load, fault, delivery, capacity, and seven-day comparison have not run |
 
+File sources now check a saved content digest before reusing their position.
+Observed rewrites record source loss and start a new source generation.
+New CRI identities include file creation time and Kubernetes workload identity.
+Preparation refuses application sources outside the current agent scope.
+The current agents collect only the Sift instance namespace.
+
 The earlier full test run passed 295 Rust tests. It left 24 environment tests
 ignored. A separate run passed all 24 with the pinned service environment.
 Those runs predate the last transport and collection fixes.

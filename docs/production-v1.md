@@ -12,6 +12,11 @@ Allow a configured multiline start pattern. Keep each record's original text,
 source position, and Kubernetes identity. Persist pending deliveries before
 advancing the source position. Keep rotation and restart positions.
 Expose rejected records and missing source data.
+Keep a content digest near each saved file position.
+Check it before reading more data or reusing a saved position.
+Record an observed rewrite as source loss. Start a new source generation.
+Keep old checkpoint formats readable. Bind new CRI file identities to their
+creation time and Kubernetes workload identity.
 
 Agents discover annotated Kubernetes metric targets. An agent scrapes only
 Pods assigned to its own node. The default interval is 30 seconds.
@@ -127,6 +132,10 @@ Save `gcloud container clusters describe` JSON to `cluster.json`.
 Save at least 100 matching application log entries to `samples.json`.
 Use the container names and namespaces in the configuration. System logs do
 not qualify. Do not commit raw logs, credentials, or Secret contents.
+The current agents collect the instance namespace.
+Set the instance namespace to the selected application namespace.
+Preparation refuses sources outside that namespace or the cluster project.
+Sample entries must also match the exact cluster name and location.
 
 ```sh
 python3 -B scripts/production/prepare.py \

@@ -8,7 +8,7 @@ class Preparation(unittest.TestCase):
         self.candidate=prepare.candidate_module.fixture_candidate('sift','0.2.0','a'*40)
         self.raw=json.dumps(self.candidate).encode()
         self.config={'project':'project-one','cluster':'acceptance','location':'asia-east1-a',
-            'namespace':'sift-acceptance','name':'sift','archive_uri':'gs://project-one-backups/sift',
+            'namespace':'app','name':'sift','archive_uri':'gs://project-one-backups/sift',
             'peer_tls_secret':'sift-peer-tls','webhook_secret':'sift-webhooks','webhook_hosts':['alerts.example.com'],
             'services':[{'project':'project-one','namespace':'app','container':'checkout'}],
             'cost_cap_usd':1000,'estimated_hourly_cost_usd':1,'estimated_fixed_cost_usd':10,
@@ -18,7 +18,8 @@ class Preparation(unittest.TestCase):
             'networkConfig':{'datapathProvider':'ADVANCED_DATAPATH'},'enableFqdnNetworkPolicy':True,
             'workloadIdentityConfig':{'workloadPool':'project-one.svc.id.goog'}}
         self.samples=[{'resource':{'type':'k8s_container','labels':{'project_id':'project-one',
-            'namespace_name':'app','container_name':'checkout'}},'textPayload':'a real input shape'}]*100
+            'namespace_name':'app','container_name':'checkout','cluster_name':'acceptance',
+            'location':'asia-east1-a'}},'textPayload':'a real input shape'}]*100
     def run_prepare(self):
         return prepare.prepare(self.raw,self.candidate,self.config,self.cluster,self.samples)
     def test_fixed_topology_and_immutable_image_never_claim_live_acceptance(self):
@@ -39,7 +40,8 @@ class Preparation(unittest.TestCase):
                 self.config=copy.deepcopy(original);self.config[key]=value
                 with self.assertRaises(ValueError):self.run_prepare()
     def test_system_or_other_project_samples_cannot_size_applications(self):
-        for key,value in [('namespace_name','kube-system'),('project_id','another-project'),('container_name','other')]:
+        for key,value in [('namespace_name','kube-system'),('project_id','another-project'),('container_name','other'),
+                          ('cluster_name','another-cluster'),('location','another-location')]:
             with self.subTest(key=key):
                 sample=copy.deepcopy(self.samples[0]);sample['resource']['labels'][key]=value
                 self.samples=[sample]*100
@@ -47,6 +49,13 @@ class Preparation(unittest.TestCase):
         self.config['services'][0]['namespace']='gke-managed-cim'
         self.samples[0]['resource']['labels']['namespace_name']='gke-managed-cim'
         with self.assertRaises(ValueError):self.run_prepare()
+    def test_source_outside_the_agent_scope_is_refused(self):
+        for field,value in [('project','another-project'),('namespace','another-namespace')]:
+            original=copy.deepcopy(self.config)
+            with self.subTest(field=field):
+                self.config['services'][0][field]=value
+                with self.assertRaises(ValueError):self.run_prepare()
+            self.config=original
     def test_wrong_cluster_and_autopilot_are_refused(self):
         for key,value in [('name','other'),('autopilot',{'enabled':True}),('enableFqdnNetworkPolicy',False)]:
             original=copy.deepcopy(self.cluster)

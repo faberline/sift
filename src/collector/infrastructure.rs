@@ -8,6 +8,7 @@ pub(crate) mod cri_checkpoint;
 pub(crate) mod cri_discovery;
 pub(crate) mod cri_source;
 pub(crate) mod durable_delivery;
+pub(crate) mod file_anchor;
 pub(crate) mod file_source;
 pub(crate) mod generic_log_decoder;
 pub(crate) mod metric_queue;

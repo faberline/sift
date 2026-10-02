@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::collector::application::run_collector::CollectorSummary;
 use crate::collector::domain::config::CollectorConfig;
@@ -40,29 +40,58 @@ where
 {
     let mut quarantine =
         service_collector::JsonlQuarantine::<QuarantineEntry>::new(&config.quarantine_path);
-    let report = service_collector::run_collector_with_delivery_mode(
-        source,
-        &SiftRecordDecoder(decoder),
-        sink,
-        &mut quarantine,
-        service_collector::RuntimeConfig {
-            batch_size: config.batch_size,
-            max_record_bytes: config.max_line_bytes,
-            retry: service_collector::RetryPolicy::new(
-                config.max_retries,
-                config.initial_backoff,
-                Duration::from_secs(5),
-            )?,
-            follow: config.follow,
-            follow_poll_interval: config.follow_poll_interval,
-        },
-        if config.follow {
-            service_collector::DeliveryRetryMode::UntilCancelled
-        } else {
-            service_collector::DeliveryRetryMode::Bounded
-        },
-    )
-    .await?;
+    let mut report = service_collector::RunReport {
+        progress: source.progress(),
+        ..service_collector::RunReport::default()
+    };
+    loop {
+        let next = service_collector::run_collector_with_delivery_mode(
+            source,
+            &SiftRecordDecoder(decoder),
+            sink,
+            &mut quarantine,
+            service_collector::RuntimeConfig {
+                batch_size: config.batch_size,
+                max_record_bytes: config.max_line_bytes,
+                retry: service_collector::RetryPolicy::new(
+                    config.max_retries,
+                    config.initial_backoff,
+                    Duration::from_secs(5),
+                )?,
+                follow: config.follow,
+                follow_poll_interval: config.follow_poll_interval,
+            },
+            if config.follow {
+                service_collector::DeliveryRetryMode::UntilCancelled
+            } else {
+                service_collector::DeliveryRetryMode::Bounded
+            },
+        )
+        .await?;
+        report.lines = report
+            .lines
+            .checked_add(next.lines)
+            .context("collector line counter overflow")?;
+        report.accepted = report
+            .accepted
+            .checked_add(next.accepted)
+            .context("collector accepted counter overflow")?;
+        report.duplicates = report
+            .duplicates
+            .checked_add(next.duplicates)
+            .context("collector duplicate counter overflow")?;
+        report.rejected = report
+            .rejected
+            .checked_add(next.rejected)
+            .context("collector rejected counter overflow")?;
+        report.progress = next.progress;
+        if config.follow || next.rejected == 0 {
+            break;
+        }
+        // A source rejection flushes the framing queue before its position changes.
+        // A one-shot run must resume after that commit and read the remaining data.
+        source.refresh()?;
+    }
 
     Ok(CollectorSummary {
         source_id: config.source_id.clone(),

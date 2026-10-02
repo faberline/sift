@@ -2,7 +2,7 @@
   "project": "REPLACE_WITH_GCP_PROJECT",
   "cluster": "REPLACE_WITH_STANDARD_GKE_CLUSTER",
   "location": "REPLACE_WITH_GKE_LOCATION",
-  "namespace": "sift-acceptance",
+  "namespace": "REPLACE_WITH_APP_NAMESPACE",
   "name": "sift",
   "archive_uri": "gs://REPLACE_WITH_BUCKET/production-020",
   "peer_tls_secret": "sift-peer-tls",

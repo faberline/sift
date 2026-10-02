@@ -32,6 +32,12 @@ pub(crate) struct SourceRejection {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct FileAnchor {
+    pub(crate) width: u16,
+    pub(crate) sha256: [u8; 32],
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) enum SourceCursor {
     Linear {
         next_offset: u64,
@@ -42,9 +48,15 @@ pub(crate) enum SourceCursor {
         next_offset: u64,
         next_line: u64,
         observed_len: u64,
+        #[serde(default)]
+        anchor: Option<FileAnchor>,
+        #[serde(default)]
+        generation: Option<u64>,
     },
     CriLoss {
         identity: String,
         lost_bytes: u64,
+        #[serde(default)]
+        generation: Option<u64>,
     },
 }

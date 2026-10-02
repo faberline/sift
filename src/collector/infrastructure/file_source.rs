@@ -2,6 +2,7 @@
 mod checkpoint;
 use super::{
     checkpoint::CollectorCheckpoint,
+    file_anchor,
     source::{read_bounded_line, CommitStats, ReadOutcome},
 };
 use crate::collector::domain::{
@@ -133,6 +134,7 @@ impl FileSource {
                         observed_len: len,
                         retired: false,
                         generation: 0,
+                        anchor: None,
                     },
                 );
             }
@@ -140,7 +142,12 @@ impl FileSource {
             if position.retired {
                 continue;
             }
-            position.observed_len = position.observed_len.max(len);
+            let read_position = self.open.get(&id).map_or(&*position, |file| &file.position);
+            if len >= read_position.offset
+                && file_anchor::matches(&file, read_position.offset, read_position.anchor.as_ref())?
+            {
+                position.observed_len = position.observed_len.max(len);
+            }
             if let std::collections::btree_map::Entry::Vacant(entry) = self.open.entry(id) {
                 let mut reader = BufReader::new(file);
                 reader.seek(SeekFrom::Start(position.offset))?;
@@ -152,22 +159,6 @@ impl FileSource {
         }
         self.save()?;
         Ok(())
-    }
-    fn loss(source_id: &str, id: &str, position: &Position, message: &str) -> SourceRejection {
-        SourceRejection {
-            entry: QuarantineEntry::invalid_line(
-                source_id,
-                position.line,
-                position.offset,
-                "source_lost",
-                message,
-                &[],
-            ),
-            cursor: SourceCursor::CriLoss {
-                identity: id.into(),
-                lost_bytes: position.observed_len.saturating_sub(position.offset),
-            },
-        }
     }
 }
 impl service_collector::CollectorSource for FileSource {
@@ -181,13 +172,19 @@ impl service_collector::CollectorSource for FileSource {
         }
         for (id, file) in &mut self.open {
             let len = file.reader.get_ref().metadata()?.len();
-            if len < file.position.offset {
+            if len < file.position.offset
+                || !file_anchor::matches(
+                    file.reader.get_ref(),
+                    file.position.offset,
+                    file.position.anchor.as_ref(),
+                )?
+            {
                 let position = self.state.files.get(id).expect("checkpoint file");
-                let loss = Self::loss(
+                let loss = checkpoint::loss(
                     &self.state.legacy.source_id,
                     id,
                     position,
-                    "file was truncated; observed uncommitted bytes were lost",
+                    "file was truncated or overwritten; observed uncommitted bytes were lost",
                 );
                 self.lost = Some(loss.clone());
                 return Ok(ReadOutcome::Rejection(loss));
@@ -220,11 +217,14 @@ impl service_collector::CollectorSource for FileSource {
                 .line
                 .checked_add(1)
                 .context("file line overflow")?;
+            file.position.anchor = file_anchor::from_tail(&read.tail);
             let cursor = SourceCursor::Cri {
                 identity: id.clone(),
                 next_offset: file.position.offset,
                 next_line: file.position.line,
                 observed_len: len,
+                anchor: file.position.anchor.clone(),
+                generation: Some(file.position.generation),
             };
             let source_id = format!(
                 "{}:{id}:{}",
@@ -254,7 +254,7 @@ impl service_collector::CollectorSource for FileSource {
         }
         for (id, p) in &self.state.files {
             if !p.retired && !self.open.contains_key(id) && p.observed_len > p.offset {
-                let loss = Self::loss(
+                let loss = checkpoint::loss(
                     &self.state.legacy.source_id,
                     id,
                     p,
@@ -273,6 +273,8 @@ impl service_collector::CollectorSource for FileSource {
                     identity,
                     next_offset,
                     next_line,
+                    anchor,
+                    generation,
                     ..
                 } => {
                     let p = self
@@ -280,8 +282,10 @@ impl service_collector::CollectorSource for FileSource {
                         .files
                         .get_mut(identity)
                         .context("unknown file cursor")?;
-                    if *next_offset < p.offset {
-                        bail!("file checkpoint moves backwards");
+                    if !file_anchor::current_generation(*generation, p.generation)?
+                        || *next_offset <= p.offset
+                    {
+                        continue;
                     }
                     self.state.legacy.offset = self
                         .state
@@ -297,16 +301,21 @@ impl service_collector::CollectorSource for FileSource {
                         .context("file progress line overflow")?;
                     p.offset = *next_offset;
                     p.line = *next_line;
+                    p.anchor = anchor.clone();
                 }
                 SourceCursor::CriLoss {
                     identity,
                     lost_bytes,
+                    generation,
                 } => {
                     let p = self
                         .state
                         .files
                         .get_mut(identity)
                         .context("unknown lost file")?;
+                    if !file_anchor::current_generation(*generation, p.generation)? || p.retired {
+                        continue;
+                    }
                     // Framed records committed before this loss already cover
                     // part of the observed suffix. Count only the uncovered part.
                     let lost = (*lost_bytes).min(p.observed_len.saturating_sub(p.offset));
@@ -328,6 +337,7 @@ impl service_collector::CollectorSource for FileSource {
                             .context("file generation overflow")?;
                         p.offset = 0;
                         p.line = 0;
+                        p.anchor = None;
                         p.observed_len = len;
                         file.reader.seek(SeekFrom::Start(0))?;
                         file.position = p.clone();

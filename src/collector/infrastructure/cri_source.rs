@@ -1,6 +1,7 @@
 //! The CRI source: every pod log under the root, read in discovery order, with
 //! partial frames joined, rotation followed by device and inode, and lost bytes
 //! reported as rejections.
+mod state;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
@@ -13,9 +14,10 @@ use service_collector::CollectorSource as _;
 use crate::collector::domain::config::CriSourceConfig;
 use crate::collector::domain::cri::{enrichment, parse_cri_frame, CriTag, DiscoveredFile};
 use crate::collector::domain::quarantine::QuarantineEntry;
-use crate::collector::domain::record::{RawRecord, SourceCursor, SourceRejection};
+use crate::collector::domain::record::{FileAnchor, RawRecord, SourceCursor, SourceRejection};
 use crate::collector::infrastructure::cri_checkpoint::{CriCheckpoint, CriFileCheckpoint};
-use crate::collector::infrastructure::cri_discovery::discover;
+use crate::collector::infrastructure::cri_discovery::{discover, file_identity};
+use crate::collector::infrastructure::file_anchor;
 use crate::collector::infrastructure::source::{read_bounded_line, CommitStats, ReadOutcome};
 
 pub(crate) struct CriSource {
@@ -24,10 +26,26 @@ pub(crate) struct CriSource {
     checkpoint_path: PathBuf,
     checkpoint: CriCheckpoint,
     discovered: Vec<DiscoveredFile>,
-    read_positions: HashMap<String, (u64, u64)>,
+    read_positions: HashMap<String, ReadPosition>,
     pending_losses: VecDeque<SourceRejection>,
     staged_losses: HashSet<String>,
     start_offset: u64,
+}
+
+#[derive(Clone, Default)]
+struct ReadPosition {
+    offset: u64,
+    line: u64,
+    anchor: Option<FileAnchor>,
+    generation: u64,
+}
+
+fn source_identity(identity: &str, generation: u64) -> String {
+    if generation == 0 {
+        format!("cri:{identity}")
+    } else {
+        format!("cri:{identity}:{generation}")
+    }
 }
 
 impl CriSource {
@@ -43,7 +61,17 @@ impl CriSource {
         let read_positions = checkpoint
             .files
             .iter()
-            .map(|(identity, file)| (identity.clone(), (file.offset, file.line)))
+            .map(|(identity, file)| {
+                (
+                    identity.clone(),
+                    ReadPosition {
+                        offset: file.offset,
+                        line: file.line,
+                        anchor: file.anchor.clone(),
+                        generation: file.generation,
+                    },
+                )
+            })
             .collect();
         let mut source = Self {
             config,
@@ -61,17 +89,62 @@ impl CriSource {
     }
 
     fn read_file(&mut self, discovered: &DiscoveredFile, max_bytes: usize) -> Result<ReadOutcome> {
-        let (start_offset, start_line) = self
+        if self.staged_losses.contains(&discovered.identity) {
+            return Ok(ReadOutcome::Pending);
+        }
+        let position = self
             .read_positions
             .get(&discovered.identity)
-            .copied()
-            .unwrap_or((0, 0));
+            .cloned()
+            .unwrap_or_default();
+        let (start_offset, start_line) = (position.offset, position.line);
+        let mut file = match File::open(&discovered.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ReadOutcome::Pending);
+            }
+            Err(error) => return Err(error).context("open CRI source"),
+        };
+        let metadata = file.metadata()?;
+        if file_identity(&metadata)? != discovered.physical_identity {
+            return Ok(ReadOutcome::Pending);
+        }
+        if metadata.len() < start_offset
+            || !file_anchor::matches(&file, start_offset, position.anchor.as_ref())?
+        {
+            self.staged_losses.insert(discovered.identity.clone());
+            let saved = &self.checkpoint.files[&discovered.identity];
+            return Ok(ReadOutcome::Rejection(SourceRejection {
+                entry: QuarantineEntry::invalid_line(
+                    &source_identity(&discovered.identity, position.generation),
+                    saved.line,
+                    saved.offset,
+                    "source_lost",
+                    "CRI file was truncated or overwritten; observed uncommitted bytes were lost",
+                    &[],
+                ),
+                cursor: SourceCursor::CriLoss {
+                    identity: discovered.identity.clone(),
+                    lost_bytes: saved.observed_len.saturating_sub(saved.offset),
+                    generation: Some(position.generation),
+                },
+            }));
+        }
+        let mut observed = discovered.clone();
+        observed.len = metadata.len();
+        let discovered = &observed;
+        let saved = self
+            .checkpoint
+            .files
+            .get_mut(&discovered.identity)
+            .context("missing CRI source checkpoint")?;
+        if discovered.len > saved.observed_len {
+            saved.observed_len = discovered.len;
+            self.checkpoint.save(&self.checkpoint_path)?;
+        }
         if start_offset >= discovered.len {
             return Ok(ReadOutcome::Exhausted);
         }
-
-        let mut file = File::open(&discovered.path)
-            .with_context(|| format!("open CRI source {}", discovered.path.display()))?;
         file.seek(SeekFrom::Start(start_offset))
             .with_context(|| format!("seek CRI source {}", discovered.path.display()))?;
         let mut reader = BufReader::new(file);
@@ -93,6 +166,7 @@ impl CriSource {
                 "cri_line_too_large",
                 format!("CRI physical record exceeds {max_bytes} bytes"),
                 &first.preview,
+                file_anchor::from_tail(&first.tail),
             ));
         }
         let first_frame = match parse_cri_frame(&first.preview) {
@@ -106,6 +180,7 @@ impl CriSource {
                     "invalid_cri_envelope",
                     error.to_string(),
                     &first.preview,
+                    file_anchor::from_tail(&first.tail),
                 ));
             }
         };
@@ -113,6 +188,7 @@ impl CriSource {
         let stream = first_frame.stream;
         let mut content = first_frame.content;
         let mut preview = first.preview;
+        let mut tail = first.tail;
         let mut tag = first_frame.tag;
         let mut oversized = content.len() > max_bytes;
 
@@ -125,6 +201,7 @@ impl CriSource {
                 .checked_add(fragment.bytes_read)
                 .context("CRI byte offset overflow")?;
             next_line = next_line.checked_add(1).context("CRI line overflow")?;
+            file_anchor::keep_tail(&mut tail, &fragment.tail);
             if preview.len() < 1024 {
                 preview.extend_from_slice(
                     &fragment.preview[..fragment.preview.len().min(1024 - preview.len())],
@@ -144,6 +221,7 @@ impl CriSource {
                         "invalid_cri_partial",
                         error.to_string(),
                         &preview,
+                        file_anchor::from_tail(&tail),
                     ));
                 }
             };
@@ -156,6 +234,7 @@ impl CriSource {
                     "interleaved_cri_partial",
                     "CRI partial fragments must remain on one stream",
                     &preview,
+                    file_anchor::from_tail(&tail),
                 ));
             }
             if content.len().saturating_add(frame.content.len()) > max_bytes {
@@ -175,18 +254,27 @@ impl CriSource {
                 "cri_record_too_large",
                 format!("assembled CRI record exceeds {max_bytes} bytes"),
                 &preview,
+                file_anchor::from_tail(&tail),
             ));
         }
 
-        self.read_positions
-            .insert(discovered.identity.clone(), (next_offset, next_line));
+        let anchor = file_anchor::from_tail(&tail);
+        self.read_positions.insert(
+            discovered.identity.clone(),
+            ReadPosition {
+                offset: next_offset,
+                line: next_line,
+                anchor: anchor.clone(),
+                generation: position.generation,
+            },
+        );
         let mut metadata = enrichment(&self.config, discovered, stream);
         metadata.attributes.insert(
             "collector.cri.timestamp".into(),
             crate::AttributeValue::String(first_frame.timestamp),
         );
         Ok(ReadOutcome::Record(RawRecord {
-            source_id: format!("cri:{}", discovered.identity),
+            source_id: source_identity(&discovered.identity, position.generation),
             line: start_line + 1,
             offset: start_offset,
             bytes: content,
@@ -195,6 +283,8 @@ impl CriSource {
                 next_offset,
                 next_line,
                 observed_len: discovered.len,
+                anchor,
+                generation: Some(position.generation),
             },
             enrichment: metadata,
         }))
@@ -209,12 +299,21 @@ impl CriSource {
         code: &str,
         message: impl AsRef<str>,
         preview: &[u8],
+        anchor: Option<FileAnchor>,
     ) -> ReadOutcome {
-        self.read_positions
-            .insert(discovered.identity.clone(), (next_offset, next_line));
+        let generation = self.checkpoint.files[&discovered.identity].generation;
+        self.read_positions.insert(
+            discovered.identity.clone(),
+            ReadPosition {
+                offset: next_offset,
+                line: next_line,
+                anchor: anchor.clone(),
+                generation,
+            },
+        );
         ReadOutcome::Rejection(SourceRejection {
             entry: QuarantineEntry::invalid_line(
-                &format!("cri:{}", discovered.identity),
+                &source_identity(&discovered.identity, generation),
                 next_line,
                 start_offset,
                 code,
@@ -226,6 +325,8 @@ impl CriSource {
                 next_offset,
                 next_line,
                 observed_len: discovered.len,
+                anchor,
+                generation: Some(generation),
             },
         })
     }
@@ -260,127 +361,11 @@ impl service_collector::CollectorSource for CriSource {
     }
 
     fn commit(&mut self, cursors: &[SourceCursor], stats: CommitStats) -> Result<()> {
-        for cursor in cursors {
-            match cursor {
-                SourceCursor::Cri {
-                    identity,
-                    next_offset,
-                    next_line,
-                    observed_len,
-                } => {
-                    let file =
-                        self.checkpoint.files.get_mut(identity).with_context(|| {
-                            format!("missing CRI checkpoint identity {identity}")
-                        })?;
-                    file.offset = *next_offset;
-                    file.line = *next_line;
-                    file.observed_len = file.observed_len.max(*observed_len);
-                }
-                SourceCursor::CriLoss {
-                    identity,
-                    lost_bytes,
-                } => {
-                    let file = self
-                        .checkpoint
-                        .files
-                        .get_mut(identity)
-                        .with_context(|| format!("missing lost CRI identity {identity}"))?;
-                    if !file.loss_reported {
-                        file.retired = true;
-                        file.loss_reported = true;
-                        self.checkpoint.lost_bytes = self
-                            .checkpoint
-                            .lost_bytes
-                            .checked_add(*lost_bytes)
-                            .context("CRI lost byte counter overflow")?;
-                        self.checkpoint.lost_sources = self
-                            .checkpoint
-                            .lost_sources
-                            .checked_add(1)
-                            .context("CRI lost source counter overflow")?;
-                    }
-                    self.staged_losses.remove(identity);
-                }
-                SourceCursor::Linear { .. } => bail!("linear cursor committed to CRI source"),
-            }
-        }
-        self.checkpoint.accepted = self.checkpoint.accepted.saturating_add(stats.accepted);
-        self.checkpoint.duplicates = self.checkpoint.duplicates.saturating_add(stats.duplicates);
-        self.checkpoint.rejected = self.checkpoint.rejected.saturating_add(stats.rejected);
-        self.checkpoint.save(&self.checkpoint_path)
+        self.commit_cursors(cursors, stats)
     }
 
     fn refresh(&mut self) -> Result<()> {
-        let mut discovered = discover(&self.root, &self.checkpoint.files)?;
-        discovered.retain(|file| file.workload.in_namespace(self.config.namespace.as_deref()));
-        let present: HashSet<_> = discovered
-            .iter()
-            .map(|file| file.identity.clone())
-            .collect();
-
-        for file in &discovered {
-            let entry = self
-                .checkpoint
-                .files
-                .entry(file.identity.clone())
-                .or_insert_with(|| CriFileCheckpoint {
-                    offset: 0,
-                    line: 0,
-                    observed_len: file.len,
-                    relative_path: file.relative_path.clone(),
-                    workload: file.workload.clone(),
-                    retired: false,
-                    loss_reported: false,
-                });
-            entry.observed_len = entry.observed_len.max(file.len);
-            entry.relative_path = file.relative_path.clone();
-            entry.workload = file.workload.clone();
-            entry.retired = false;
-            self.read_positions
-                .entry(file.identity.clone())
-                .or_insert((entry.offset, entry.line));
-        }
-
-        for (identity, file) in &mut self.checkpoint.files {
-            if !file.workload.in_namespace(self.config.namespace.as_deref()) {
-                continue;
-            }
-            if present.contains(identity) || file.retired || self.staged_losses.contains(identity) {
-                continue;
-            }
-            let lost_bytes = file.observed_len.saturating_sub(file.offset);
-            if lost_bytes == 0 {
-                file.retired = true;
-                continue;
-            }
-            self.pending_losses.push_back(SourceRejection {
-                entry: QuarantineEntry::invalid_line(
-                    &format!("cri:{identity}"),
-                    file.line,
-                    file.offset,
-                    "source_lost",
-                    format!(
-                        "CRI source disappeared with {lost_bytes} observed uncommitted bytes at {}",
-                        file.relative_path
-                    ),
-                    &[],
-                ),
-                cursor: SourceCursor::CriLoss {
-                    identity: identity.clone(),
-                    lost_bytes,
-                },
-            });
-        }
-
-        discovered.sort_by(|left, right| {
-            (!left.known_before, &left.relative_path, &left.identity).cmp(&(
-                !right.known_before,
-                &right.relative_path,
-                &right.identity,
-            ))
-        });
-        self.discovered = discovered;
-        self.checkpoint.save(&self.checkpoint_path)
+        self.refresh_files()
     }
 
     fn progress(&self) -> service_collector::SourceProgress {
