@@ -69,7 +69,33 @@ async fn durable_multiline_replay_keeps_original_identity_after_source_deletion(
     let pending: Vec<crate::OperationalEventV2> =
         serde_json::from_slice(&std::fs::read(checkpoint.with_extension("pending.json")).unwrap())
             .unwrap();
-    assert_eq!(pending.len(), 2);
+    assert_eq!(pending.len(), 1);
+    let frames: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(checkpoint.with_extension("framing.json")).unwrap())
+            .unwrap();
+    let decoder = crate::collector::infrastructure::generic_log_decoder::GenericLogDecoder {
+        project: "p",
+        environment: "prod",
+        format: LogFormat::Text,
+    };
+    use crate::collector::domain::record_decoder::RecordDecoder;
+    let originals: Vec<crate::OperationalEventV2> = frames["ready"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(frames.get("pending").filter(|value| !value.is_null()))
+        .map(|raw| {
+            decoder
+                .decode(serde_json::from_value(raw.clone()).unwrap())
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        originals.len(),
+        2,
+        "both complete records must be durable before delivery"
+    );
+    assert_eq!(pending[0].event_id, originals[0].event_id);
     std::fs::remove_file(source).unwrap();
     available.store(true, Ordering::SeqCst);
     config.max_retries = 1;
@@ -92,7 +118,8 @@ async fn durable_multiline_replay_keeps_original_identity_after_source_deletion(
         page.records[0].body_text,
         "ERROR failed request\n  at handler:42"
     );
-    for (record, original) in page.records.iter().zip(&pending) {
+    assert_eq!(page.records.len(), originals.len());
+    for (record, original) in page.records.iter().zip(&originals) {
         assert_eq!(record.event_id, original.event_id);
         assert_eq!(
             chrono::DateTime::parse_from_rfc3339(&record.observed_at).unwrap(),
