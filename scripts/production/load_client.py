@@ -48,10 +48,11 @@ class Api:
             response = connection.getresponse()
             raw = response.read(16 * 1024 * 1024 + 1)
             if response.status != 200 or len(raw) > 16 * 1024 * 1024:
-                raise ValueError('API refused request with HTTP ' + str(response.status) + ' or exceeded its limit')
+                raise ValueError('API refused ' + method + ' ' + urllib.parse.urlsplit(path).path +
+                    ' with HTTP ' + str(response.status) + ' or exceeded its limit')
             result = json.loads(raw)
             if result.get('partial') or result.get('query_id') or result.get('warnings'):
-                raise ValueError('API returned an incomplete or queued query')
+                raise ValueError('API returned an incomplete or queued query for ' + method + ' ' + urllib.parse.urlsplit(path).path)
         except BaseException:
             connection.close(); self.local.connection = None
             raise
@@ -70,6 +71,8 @@ class Api:
         return count
 
     def query(self, signal, start, end, name=None, run=None):
+        if signal == 'logs':
+            return [record for page in self.log_pages(start, end, run) for record in page]
         request = {'version': 1, 'project': self.project, 'time_range': {'start': timestamp(start), 'end': timestamp(end)},
                    'signal': {'kind': signal}, 'mode': 'sync', 'limit': 1000}
         if name: request['signal'].update({'name': name, 'function': 'raw'})
@@ -84,6 +87,20 @@ class Api:
             if cursor in cursors: raise ValueError('query cursor did not advance')
             cursors.add(cursor); request['cursor'] = cursor
         raise ValueError('query exceeded its page limit')
+
+    def log_pages(self, start, end, run):
+        request = {'version': 1, 'project': self.project, 'time_range': {'start': timestamp(start), 'end': timestamp(end)},
+            'signal': {'kind': 'logs', 'filter': {'op': 'eq', 'field': 'attributes.run_id.value', 'value': run}},
+            'mode': 'sync', 'limit': 1000}
+        cursors = set()
+        for _ in range(1000):
+            response = self.request('POST', '/api/v1/query', request, 'logs')
+            yield response['data']['records']
+            cursor = response.get('next_cursor')
+            if cursor is None: return
+            if cursor in cursors: raise ValueError('log query cursor did not advance')
+            cursors.add(cursor); request['cursor'] = cursor
+        raise ValueError('log query exceeded its page limit')
 
     def verify(self, block, run):
         expected = block['expected']; start, end = block['start_nanos'], block['end_nanos']

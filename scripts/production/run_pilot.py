@@ -5,6 +5,7 @@ from pathlib import Path
 from load_client import Api
 from load_data import build, digest, encoded
 from pilot_runtime import LocalSift, Receiver
+from pilot_readback import readback
 from pilot_workflow import setup, restart, metric, records
 from run_load import require, write, percentile
 
@@ -64,14 +65,17 @@ def stream(api, service, receiver, context, root, run, seconds, rate):
         target = begin + seconds
         if time.monotonic() < target: time.sleep(target - time.monotonic())
     # Verify every item again after the full run, including all pre-restart inputs.
-    verified = 0
-    for second in range(seconds):
-        block = json.loads((inputs / f'{second:06d}.json').read_bytes())
-        require(block == input_block(run, second, base, rate, api.project), 'final producer input changed')
-        api.verify(block, run); verified += block['offered']
+    def blocks():
+        for second in range(seconds):
+            block = json.loads((inputs / f'{second:06d}.json').read_bytes())
+            require(block == input_block(run, second, base, rate, api.project), 'final producer input changed')
+            yield block
+    complete = readback(api, blocks(), run, root / 'readback.sqlite')
+    verified = complete['verified_items']
     require(count == verified == seconds * rate, 'pilot complete read-back count differs')
     return {'offered_items': count, 'acknowledged_items': count, 'verified_items': verified,
         'seconds_written': seconds, 'offered_items_per_second': rate, 'largest_producer_delay_seconds': largest_delay,
+        'complete_readback': complete,
         'control_metric_refreshes': gauge, 'restart': recovery,
         'query_p95_seconds': {name: percentile(values) for name, values in api.timings.items()}}
 

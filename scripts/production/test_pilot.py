@@ -3,9 +3,10 @@ import json, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 from load_client import Api
-from load_data import encoded
+from load_data import encoded, timestamp
 from pilot_runtime import Receiver
 from pilot_workflow import collected
+from pilot_readback import readback
 from run_pilot import input_block, limits
 
 
@@ -69,6 +70,67 @@ class Pilot(unittest.TestCase):
                 return {'data': {'records': []}, 'next_cursor': 'repeated'}
         with self.assertRaisesRegex(ValueError, 'cursor did not advance'):
             collected(Pages(), 'source', [])
+
+
+class ReadbackApi:
+    project = 'pilot-project'
+
+    def __init__(self, blocks):
+        self.rows = {signal: [] for signal in ('logs', 'metrics', 'traces')}
+        for block in blocks:
+            for signal, values in block['expected'].items():
+                for key, value in values.items():
+                    record = json.loads(encoded(value))
+                    record['event_id'] = key if signal == 'logs' else signal + ':' + key
+                    for field in ('occurred_at', 'observed_at'):
+                        if field in record: record[field] = timestamp(record[field])
+                    self.rows[signal].append(record)
+
+    def log_pages(self, *_):
+        yield []
+        yield self.rows['logs'][:10]
+        yield []
+        yield self.rows['logs'][10:]
+
+    def query(self, _signal, _start, _end, name):
+        return [dict(record, points=[record]) for record in self.rows['metrics'] if record['name'] == name]
+
+    def request(self, _method, path, *_args, **_kwargs):
+        if path == '/api/v2/query': return {'data': {'result': [{}]}}
+        trace_id = path.split('/')[4].split('?')[0]
+        return {'spans': [row for row in self.rows['traces'] if row['trace_id'] == trace_id]}
+
+
+class CompleteReadback(unittest.TestCase):
+    def blocks(self):
+        return [input_block('a' * 32, second, 1_800_000_000_000_000_000, 100, 'pilot-project') for second in range(2)]
+
+    def check(self, api, blocks):
+        with tempfile.TemporaryDirectory() as temp:
+            return readback(api, iter(blocks), 'a' * 32, Path(temp) / 'expected.sqlite')
+
+    def test_complete_readback_checks_every_signal_across_empty_log_pages(self):
+        blocks = self.blocks()
+        result = self.check(ReadbackApi(blocks), blocks)
+        self.assertEqual(result, {'verified_items': 200, 'signal_counts': {'logs': 160, 'metrics': 20, 'traces': 20}, 'input_blocks': 2})
+
+    def test_missing_duplicate_and_changed_records_cannot_pass(self):
+        blocks = self.blocks()
+        for fault in ('missing', 'duplicate', 'histogram', 'physical_identity'):
+            with self.subTest(fault=fault):
+                api = ReadbackApi(blocks)
+                if fault == 'missing': api.rows['logs'].pop()
+                elif fault == 'duplicate': api.rows['logs'].append(api.rows['logs'][0])
+                elif fault == 'histogram':
+                    next(row for row in api.rows['metrics'] if 'histogram' in row)['histogram']['bucket_counts'][0] += 1
+                else: api.rows['metrics'][1]['event_id'] = api.rows['metrics'][0]['event_id']
+                with self.assertRaises(ValueError): self.check(api, blocks)
+
+    def test_log_page_reader_rejects_a_repeated_cursor(self):
+        api = Api('http://127.0.0.1:1', 'p')
+        api.request = lambda *_args: {'data': {'records': []}, 'next_cursor': 'repeated'}
+        with self.assertRaisesRegex(ValueError, 'cursor did not advance'):
+            list(api.log_pages(0, 1_000_000_000, 'run'))
 
 
 if __name__ == '__main__': unittest.main()

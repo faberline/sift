@@ -14,6 +14,8 @@ The receiver refuses the first delivery. The retry must keep the notification
 ID and payload. The trial saves a query, a rule, and an alert mute.
 It restarts Sift twice. It checks collector replay and stored data after each
 restart. It reads every generated record again after the full run.
+The final read scans the whole run, page by page. A private local database
+tracks each expected ID. Each returned record must match its saved input.
 
 ## Local run
 
@@ -49,8 +51,8 @@ python3 -B scripts/production/run_pilot.py \
   --receiver-image sha256:REPLACE_WITH_LOCAL_PYTHON_IMAGE_ID
 ```
 
-Keep `plan.json`, `inputs/`, `verified.jsonl`, the receiver delivery record,
-and `result.json`. The result binds the exact binary hash and its embedded
+Keep `plan.json`, `inputs/`, `verified.jsonl`, `readback.sqlite`, the receiver
+delivery record, and `result.json`. The result binds the exact binary hash and its embedded
 source commit. Short diagnostic runs use the same checks with a smaller
 `--seconds` value. Their measured duration stays in the result.
 An interrupted or failed run writes `failure.json` and stops its processes.

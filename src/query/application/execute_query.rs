@@ -92,11 +92,7 @@ fn execute_query_inner(
                 (page, archive_status)
             };
             let scanned = page.records.len();
-            let scanned_cursor = page
-                .records
-                .last()
-                .map(|record| record.cursor)
-                .unwrap_or(page.next_cursor);
+            let scanned_cursor = page.next_cursor;
             let mut records = Vec::new();
             for record in page.records {
                 if filter
