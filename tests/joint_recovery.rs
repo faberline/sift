@@ -38,7 +38,7 @@ async fn latest(store: &Arc<storage_object::GcsObjectStore>) -> Value {
     .unwrap()
 }
 
-#[path = "joint_recovery/http_reads.rs"]
+#[path = "it/joint_recovery_http.rs"]
 mod http_reads;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
