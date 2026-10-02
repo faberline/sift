@@ -22,7 +22,8 @@ tracks each expected ID. Each returned record must match its saved input.
 Build Sift from the source you want to test:
 
 ```sh
-cargo build --locked -p sift --bin sift
+SIFT_SOURCE_REVISION="$(git rev-parse HEAD)" \
+  cargo build --locked -p sift --bin sift
 python3 -B scripts/production/run_pilot.py \
   --binary /Users/chrischeng/faberlines/sift/target/debug/sift \
   --output-dir /private/tmp/sift-pilot-run \

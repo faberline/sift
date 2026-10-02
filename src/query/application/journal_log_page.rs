@@ -58,14 +58,14 @@ pub(crate) fn read_with_budget(
             after = stored.cursor;
             if stored.event.signal == crate::SignalKind::Log
                 && stored.event.project == query.project
-                && !query
+                && query
                     .environment
                     .as_ref()
-                    .is_some_and(|env| &stored.event.environment != env)
+                    .is_none_or(|env| &stored.event.environment == env)
             {
                 let occurred = DateTime::parse_from_rfc3339(&stored.event.occurred_at)?;
-                if !start.is_some_and(|start| occurred < start)
-                    && !end.is_some_and(|end| occurred >= end)
+                if start.is_none_or(|start| occurred >= start)
+                    && end.is_none_or(|end| occurred < end)
                 {
                     records.push(ProjectionRuntime::log_record(&stored));
                 }
