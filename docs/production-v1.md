@@ -11,6 +11,7 @@ Save its input records before sending. Compare complete Sift reads with these
 records. Start with low traffic to check collection, queries, and notifications.
 This trial does not establish the 10,000-item-per-second capacity rating.
 Both rated load gates and fault tests below remain required for that rating.
+Use [the small local trial](pilot.md) before preparing a paid GKE run.
 
 ## Inputs and identity
 

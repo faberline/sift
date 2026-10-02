@@ -20,6 +20,7 @@ Start with a small controlled test workload. Check inputs against complete
 Sift reads. Run a source comparison for at least 30 minutes before acceptance.
 Seven-day dual-write is optional when an existing service moves from GCP.
 The 10,000-item-per-second rating still needs both load gates and fault tests.
+Use [the small trial](docs/pilot.md) to check generated data before paid GKE tests.
 
 Later work includes a web UI, GCP managed-service inputs, full PromQL, and
 100,000 items per second. The first release has fixed membership and shards.

@@ -67,6 +67,7 @@ if [[ "${1:-}" == "--candidate" ]]; then
   python3 -B scripts/production/test_exports.py
   SIFT_PRODUCTION_TEST_BIN="${CARGO_TARGET_DIR:-$repo_root/target}/debug/sift" \
     python3 -B scripts/production/test_load.py
+  python3 -B scripts/production/test_pilot.py
   python3 -B scripts/release/make-gke-release-receipt.py --self-test
   source scripts/prepare-prometheus-oracle.sh
   verify_official_promql_oracle
@@ -90,7 +91,7 @@ report={'schema':'sift.local-candidate-check/v1','result':'passed','production_a
     'checks':{name:'passed' for name in ['format','locked_build','pinned_core_build_stamp','full_rust_suite',
         'required_environment_tests','clippy','strict_architecture','release_contract',
         'production_receipt_controls','production_preparation_controls','production_runtime_controls',
-        'production_comparison_controls','production_load_driver','official_prometheus_oracle',
+        'production_comparison_controls','production_load_driver','production_pilot_controls','official_prometheus_oracle',
         'remote_write_compliance','docker_named_volume']}}
 path=Path(output)
 fd,temporary=tempfile.mkstemp(prefix='.sift-candidate-check-',dir=path.parent)

@@ -22,6 +22,9 @@ class Api:
         with self.lock:
             for connection in self.connections: connection.close()
             self.connections.clear()
+            # A trial reuses the API after restarting its Sift process.
+            # Do not retain a closed connection outside the tracked pool.
+            self.local = threading.local()
 
     def request(self, method, path, value=None, latency=None):
         connection = getattr(self.local, 'connection', None)

@@ -48,6 +48,9 @@ A new installation can use a controlled test workload. It needs a complete
 The comparison tool accepts generated inputs as the independent reference.
 Seven-day dual-write is optional. It is not a release gate.
 Use GCP source exports and keep rollback settings when migrating an existing service.
+The [small trial](docs/pilot.md) has a bounded local runner.
+It checks generated data, real HTTPS retry, error recurrence, and process restart.
+A trial result stays separate from a production acceptance receipt.
 
 Remaining production work needs a test namespace, generated source records,
 measured store size, and a total USD cost cap. Measure samples from the actual
