@@ -2,7 +2,7 @@
 use serde_json::{json, Value};
 use std::time::Duration;
 
-pub(super) async fn verify_restored_process(root: &std::path::Path) {
+pub async fn verify_restored_process(root: &std::path::Path) {
     let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = reserved.local_addr().unwrap().port();
     drop(reserved);

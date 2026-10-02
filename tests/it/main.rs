@@ -14,6 +14,8 @@ mod event_v2_governance;
 mod gke_operation_scope;
 mod ha_backup_e2e;
 mod integrity_api;
+mod joint_recovery_http;
+pub use joint_recovery_http::verify_restored_process;
 mod kind_mvp_contract;
 mod kubernetes_auth;
 mod live_backup;

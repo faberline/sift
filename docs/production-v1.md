@@ -17,6 +17,9 @@ Check it before reading more data or reusing a saved position.
 Record an observed rewrite as source loss. Start a new source generation.
 Keep old checkpoint formats readable. Bind new CRI file identities to their
 creation time and Kubernetes workload identity.
+One-shot log collection confirms each record on its own.
+Continuous collection uses the selected batch limit.
+This lets a rejected source record be saved before the collector reads more data.
 
 Agents discover annotated Kubernetes metric targets. An agent scrapes only
 Pods assigned to its own node. The default interval is 30 seconds.
