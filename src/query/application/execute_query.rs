@@ -20,7 +20,10 @@ use crate::shared_kernel::event::SignalKind;
 use crate::shared_kernel::query_request::{MetricFunctionV1, QueryRequestV1, QuerySignalV1};
 use crate::shared_kernel::query_response::QueryResponseV1;
 
-pub(in crate::query) fn execute_query_v1(
+mod entry;
+pub(in crate::query) use entry::execute_query_v1;
+
+fn execute_query_inner(
     state: &ServiceState,
     request: &QueryRequestV1,
 ) -> Result<QueryResponseV1, ApiError> {
@@ -80,12 +83,20 @@ pub(in crate::query) fn execute_query_v1(
                     ArchiveQueryStatus::NotRequired,
                 )
             };
+            let (page, archive_status) = if page.incomplete {
+                match super::journal_log_page::read(state, &query, watermark) {
+                    Ok(page) => (page, ArchiveQueryStatus::NotRequired),
+                    Err(error) => (page, ArchiveQueryStatus::Unavailable(error.to_string())),
+                }
+            } else {
+                (page, archive_status)
+            };
             let scanned = page.records.len();
             let scanned_cursor = page
                 .records
                 .last()
                 .map(|record| record.cursor)
-                .unwrap_or(after_cursor);
+                .unwrap_or(page.next_cursor);
             let mut records = Vec::new();
             for record in page.records {
                 if filter
@@ -109,6 +120,13 @@ pub(in crate::query) fn execute_query_v1(
             }
             let filtered_more = records.len() > request.limit;
             records.truncate(request.limit);
+            // A page can contain more matches than the public limit. Resume
+            // after the last returned match, so no matching record is skipped.
+            let scanned_cursor = if filtered_more {
+                records.last().map_or(after_cursor, |record| record.cursor)
+            } else {
+                scanned_cursor
+            };
             let has_more = filtered_more || page.has_more;
             let next_cursor =
                 has_more.then(|| encode_query_cursor("logs", &scanned_cursor.to_string()));
@@ -179,6 +197,13 @@ pub(in crate::query) fn execute_query_v1(
                     ArchiveQueryStatus::NotRequired,
                 )
             };
+            let archive_status = if page.incomplete || page.overflowed_points > 0 {
+                ArchiveQueryStatus::Unavailable(
+                    "metric retention or cardinality makes the source incomplete".into(),
+                )
+            } else {
+                archive_status
+            };
             let scanned = page.series.len();
             let scanned_cursor = page.series.last().map(|series| series.series_id.clone());
             let mut series = Vec::new();
@@ -204,6 +229,11 @@ pub(in crate::query) fn execute_query_v1(
             }
             let filtered_more = series.len() > request.limit;
             series.truncate(request.limit);
+            let scanned_cursor = if filtered_more {
+                series.last().map(|series| series.series_id.clone())
+            } else {
+                scanned_cursor
+            };
             let has_more = filtered_more || page.has_more;
             let next_cursor = has_more
                 .then(|| {

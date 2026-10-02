@@ -31,8 +31,12 @@ pub(super) struct Cli {
 pub(super) enum Command {
     /// Run the unified h2c/HTTP1 operational-event service.
     Serve(ServeArgs),
-    /// Collect axiom.service.log.v1 JSONL from a file, stdin, or Kubernetes CRI logs.
-    Collect(CollectArgs),
+    /// Collect structured logs, JSON, or text from a file, stdin, or Kubernetes CRI logs.
+    Collect(Box<CollectArgs>),
+    /// Collect Prometheus text metrics from Pods on this node.
+    Scrape(crate::scrape::ScrapeArgs),
+    /// Manage rules, saved queries, error status, and alert mutes.
+    Control(crate::control::ControlArgs),
     /// Run one versioned logs, metrics, or traces query through the Sift API.
     Query(QueryArgs),
     /// Serve the read-only Sift MCP tools.
@@ -41,6 +45,8 @@ pub(super) enum Command {
     Snapshot(SnapshotArgs),
     /// Restore a journal snapshot from a shared backup object URI.
     Restore(RestoreArgs),
+    /// Restore data and control state from one complete recovery record.
+    RestoreComplete(crate::restore_complete::RestoreCompleteArgs),
     /// Ship a live or explicitly offline journal snapshot through the shared backup contract.
     Backup(BackupArgs),
     /// Render source or release image Dockerfiles independently of Kubernetes.

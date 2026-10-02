@@ -36,7 +36,11 @@ fn object<'a>(objects: &'a [Value], kind: &str, name: &str) -> &'a Value {
 fn every_runtime_image_prepares_a_private_nonroot_volume() {
     for (name, dockerfile, stage) in [
         ("source", include_str!("../../Dockerfile"), "build"),
-        ("release", include_str!("../../Dockerfile.release"), "binary-source"),
+        (
+            "release",
+            include_str!("../../Dockerfile.release"),
+            "binary-source",
+        ),
         ("test", include_str!("../../Dockerfile.test"), "data-root"),
     ] {
         assert!(

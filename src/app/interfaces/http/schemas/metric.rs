@@ -20,6 +20,10 @@ pub struct MetricHistogramV1 {
     pub kind: HistogramKind,
     pub count: u64,
     pub sum: f64,
+    #[serde(default)]
+    pub sum_present: bool,
+    #[serde(default)]
+    pub zero_threshold: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub explicit_bounds: Vec<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -49,6 +53,8 @@ pub struct MetricPointV1 {
     pub event_id: String,
     pub occurred_at: String,
     pub time_unix_nano: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time_unix_nano: Option<u64>,
     pub value: f64,
     #[serde(default, skip_serializing_if = "is_false")]
     pub stale: bool,
@@ -158,6 +164,9 @@ pub struct MetricPage {
     pub has_more: bool,
     pub overflowed_series: u64,
     pub overflowed_points: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[schema(required = false)]
+    pub incomplete: bool,
 }
 
 schema_adapter!(

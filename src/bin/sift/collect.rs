@@ -26,6 +26,9 @@ pub(super) struct CollectArgs {
     /// Kubernetes node CRI pod-log root, normally /var/log/pods.
     #[arg(long, conflicts_with = "source", required_unless_present = "source")]
     cri_root: Option<PathBuf>,
+    /// Collect CRI logs only from this Kubernetes namespace.
+    #[arg(long, requires = "cri_root")]
+    namespace: Option<String>,
     /// Stable identity used with byte offsets to derive idempotency keys.
     #[arg(long)]
     source_id: Option<String>,
@@ -76,6 +79,17 @@ pub(super) struct CollectArgs {
     follow: bool,
     #[arg(long, default_value_t = 250)]
     follow_poll_ms: u64,
+    /// Input format: auto, structured, json, or text.
+    #[arg(long, default_value = "auto", value_parser = ["auto", "structured", "json", "text"])]
+    format: String,
+    /// Regex that starts a new log record. Other lines join that record.
+    #[arg(long)]
+    multiline_start: Option<String>,
+    /// Expose collection lag, pending count, rejection count, and source loss.
+    #[arg(long)]
+    metrics_port: Option<u16>,
+    #[arg(long, default_value = "127.0.0.1")]
+    metrics_host: std::net::IpAddr,
 }
 
 pub(super) async fn collect(args: CollectArgs) -> Result<()> {
@@ -90,6 +104,10 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
             .as_deref()
             .map(|node| format!("cri-node:{node}"))
             .unwrap_or_else(|| format!("cri-root:{}", canonical.display()));
+        let source_id = match &args.namespace {
+            Some(namespace) => format!("{source_id}:namespace:{namespace}"),
+            None => source_id,
+        };
         (
             SourceSpec::Cri(CriSourceConfig {
                 root: canonical,
@@ -99,6 +117,7 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
                     location: args.location,
                     node: args.node,
                 },
+                namespace: args.namespace,
             }),
             source_id,
         )
@@ -107,8 +126,21 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
     } else {
         let source_arg = args.source.context("--source or --cri-root is required")?;
         let path = PathBuf::from(&source_arg);
-        let canonical = std::fs::canonicalize(&path)
-            .with_context(|| format!("resolve collector source {}", path.display()))?;
+        let canonical = match std::fs::canonicalize(&path) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let parent = path
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or(std::path::Path::new("."));
+                std::fs::canonicalize(parent)?
+                    .join(path.file_name().context("source file name is required")?)
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("resolve collector source {}", path.display()))
+            }
+        };
         let source_id = format!("file:{}", canonical.display());
         (SourceSpec::File(path), source_id)
     };
@@ -119,26 +151,51 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
     let quarantine_path = args
         .quarantine
         .unwrap_or_else(|| PathBuf::from(format!("{}.rejected.jsonl", checkpoint_path.display())));
-    let summary = sift::collector::run_collector(CollectorConfig {
-        source,
-        source_id,
-        endpoint: args.endpoint,
-        token: args.token,
-        token_file: args.token_file,
-        token_audience: args.token_audience,
-        project: args.project,
-        environment: args.environment,
-        checkpoint_path,
-        quarantine_path,
-        batch_size: args.batch_size,
-        max_line_bytes: args.max_line_bytes,
-        max_retries: args.max_retries,
-        request_timeout: Duration::from_secs(args.request_timeout_secs),
-        initial_backoff: Duration::from_millis(50),
-        follow: args.follow,
-        follow_poll_interval: Duration::from_millis(args.follow_poll_ms),
-    })
-    .await?;
+    let options = sift::collector::LogOptions {
+        format: match args.format.as_str() {
+            "structured" => sift::collector::LogFormat::Structured,
+            "json" => sift::collector::LogFormat::Json,
+            "text" => sift::collector::LogFormat::Text,
+            _ => sift::collector::LogFormat::Auto,
+        },
+        multiline_start: args.multiline_start,
+    };
+    let metrics_task = if let Some(port) = args.metrics_port {
+        let listener = tokio::net::TcpListener::bind((args.metrics_host, port)).await?;
+        let router = sift::collector::collector_metrics_router(checkpoint_path.clone());
+        Some(tokio::spawn(
+            async move { axum::serve(listener, router).await },
+        ))
+    } else {
+        None
+    };
+    let summary = sift::collector::run_collector_with_options(
+        CollectorConfig {
+            source,
+            source_id,
+            endpoint: args.endpoint,
+            token: args.token,
+            token_file: args.token_file,
+            token_audience: args.token_audience,
+            project: args.project,
+            environment: args.environment,
+            checkpoint_path,
+            quarantine_path,
+            batch_size: args.batch_size,
+            max_line_bytes: args.max_line_bytes,
+            max_retries: args.max_retries,
+            request_timeout: Duration::from_secs(args.request_timeout_secs),
+            initial_backoff: Duration::from_millis(50),
+            follow: args.follow,
+            follow_poll_interval: Duration::from_millis(args.follow_poll_ms),
+        },
+        options,
+    )
+    .await;
+    if let Some(task) = metrics_task {
+        task.abort();
+    }
+    let summary = summary?;
     print_json_terminal(summary)
 }
 

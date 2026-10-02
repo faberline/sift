@@ -82,7 +82,14 @@ pub(crate) fn decode_service_log_enriched(
         Utc::now(),
     );
     event.occurred_at = log.timestamp.clone();
-    event.observed_at = Utc::now().to_rfc3339();
+    event.observed_at = enrichment
+        .attributes
+        .get("collector.observed_at")
+        .and_then(AttributeValue::as_str)
+        .map(chrono::DateTime::parse_from_rfc3339)
+        .transpose()?
+        .map(|time| time.to_rfc3339())
+        .unwrap_or_else(|| event.observed_at.clone());
     event
         .resource
         .insert("service.name".to_string(), log.service.name.clone());

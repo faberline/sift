@@ -6,6 +6,7 @@ and [`llms.txt`](../llms.txt).
 
 | Document | What it answers |
 |----------|-----------------|
+| [production-v1.md](production-v1.md) | The 0.2.0 inputs, control state, query, load, recovery, and cutover contract. |
 | [architecture.md](architecture.md) | How the source is cut into bounded contexts and layers, ports, shared service ownership and the dependency rules. |
 | [public-api.md](public-api.md) | Public Rust paths and the unchanged CLI, API and persisted byte contracts. |
 | [refactor-completion.md](refactor-completion.md) | Local P2 commits, checks, added cases and the existing test and document limits. |

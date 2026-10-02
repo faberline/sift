@@ -14,6 +14,7 @@ use url::Url;
 use crate::shared_kernel::query_phase_one::{CorrelationRequestV1, LogTailRequestV1};
 use crate::shared_kernel::query_request::{QueryModeV1, QueryRequestV1};
 use crate::shared_kernel::query_response::QueryResponseV1;
+use crate::shared_kernel::query_v2::{QueryRequestV2, QueryResponseV2};
 use crate::shared_kernel::utf8_truncate::truncate_utf8;
 
 const SIFT_API_MAX_RETRIES: usize = 2;
@@ -66,6 +67,28 @@ impl NativeApiClient {
 
     pub async fn query(&self, request: &QueryRequestV1) -> Result<QueryResponseV1> {
         self.query_response(request).await
+    }
+    pub async fn query_v2(&self, request: &QueryRequestV2) -> Result<QueryResponseV2> {
+        self.post_json("api/v2/query", &request.project, request, true)
+            .await
+    }
+    pub async fn control_records(
+        &self,
+        project: &str,
+        collection: &str,
+        after: Option<&str>,
+    ) -> Result<Value> {
+        if !["alert-rules", "alerts", "error-groups", "saved-queries"].contains(&collection) {
+            bail!("unknown read-only control collection");
+        }
+        let url = self.endpoint.join(&format!("api/v1/{collection}"))?;
+        let mut query = vec![("project", project.to_string())];
+        if let Some(after) = after {
+            query.push(("after", after.to_string()));
+        }
+        let request =
+            self.authorize_project(self.http.request(Method::GET, url).query(&query), project);
+        self.send(request, true).await
     }
 
     pub(in crate::query) async fn query_value(&self, request: &QueryRequestV1) -> Result<Value> {

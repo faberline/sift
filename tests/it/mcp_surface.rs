@@ -28,6 +28,10 @@ fn mcp_exposes_only_the_phase_one_read_tools() {
         [
             "sift_correlate",
             "sift_get_trace",
+            "sift_list_alert_rules",
+            "sift_list_alerts",
+            "sift_list_error_groups",
+            "sift_list_saved_queries",
             "sift_list_services",
             "sift_query",
             "sift_tail_logs",
@@ -383,21 +387,23 @@ async fn stdio_query_retries_a_detailed_retryable_response() {
     let query: serde_json::Value = serde_json::from_str(text).expect("query JSON");
     assert_eq!(query["data"]["records"][0]["event_id"], "retried-log");
     assert_eq!(state.attempts.load(Ordering::SeqCst), 2);
-    let requests = state.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].body, requests[1].body);
-    let request: serde_json::Value =
-        serde_json::from_slice(&requests[0].body).expect("retried query request JSON");
-    assert_eq!(request["project"], "sift-mvp");
-    assert_eq!(request["signal"]["kind"], "logs");
-    for request in requests.iter() {
-        assert_eq!(request.project.as_deref(), Some("sift-mvp"));
-        assert_eq!(
-            request.authorization.as_deref(),
-            Some("Bearer mcp-retry-token")
-        );
+    {
+        let requests = state.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].body, requests[1].body);
+        let request: serde_json::Value =
+            serde_json::from_slice(&requests[0].body).expect("retried query request JSON");
+        assert_eq!(request["project"], "sift-mvp");
+        assert_eq!(request["signal"]["kind"], "logs");
+        for request in requests.iter() {
+            assert_eq!(request.project.as_deref(), Some("sift-mvp"));
+            assert_eq!(
+                request.authorization.as_deref(),
+                Some("Bearer mcp-retry-token")
+            );
+        }
     }
-    drop(requests);
+
     assert!(
         query_started.elapsed() >= Duration::from_millis(900),
         "sift_query did not honor Retry-After"
@@ -462,8 +468,7 @@ async fn api_client_stops_after_three_retryable_responses() {
     let error = client
         .query(&retry_test_query())
         .await
-        .err()
-        .expect("bounded retry failure");
+        .expect_err("bounded retry failure");
     assert!(error.to_string().contains("503 Service Unavailable"));
     assert_eq!(attempts.load(Ordering::SeqCst), 3);
     api.abort();
@@ -506,8 +511,7 @@ async fn api_client_does_not_replay_queries_that_can_create_jobs() {
     let error = client
         .query(&asynchronous)
         .await
-        .err()
-        .expect("async query proxy failure");
+        .expect_err("async query proxy failure");
     assert!(error.to_string().contains("502 Bad Gateway"));
 
     let mut automatic = retry_test_query();
@@ -516,8 +520,7 @@ async fn api_client_does_not_replay_queries_that_can_create_jobs() {
     let error = client
         .query(&automatic)
         .await
-        .err()
-        .expect("auto query proxy failure");
+        .expect_err("auto query proxy failure");
     assert!(error.to_string().contains("502 Bad Gateway"));
 
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
@@ -602,8 +605,7 @@ async fn api_client_retries_share_one_total_timeout() {
     let error = client
         .query(&retry_test_query())
         .await
-        .err()
-        .expect("total retry timeout");
+        .expect_err("total retry timeout");
     assert!(error.to_string().contains("send Sift API request"));
     assert!(started.elapsed() < Duration::from_millis(350));
     assert_eq!(attempts.load(Ordering::SeqCst), 2);

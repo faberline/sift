@@ -4,13 +4,25 @@ use crate::collector::application::run_collector::CollectorSummary;
 use crate::collector::application::runtime;
 use crate::collector::domain::config::CollectorConfig;
 use crate::collector::infrastructure::client::CollectorClient;
-use crate::collector::infrastructure::service_log_decoder::ServiceLogDecoder;
 use crate::collector::infrastructure::source::open_source;
 use anyhow::Result;
 
 pub async fn run_collector(config: CollectorConfig) -> Result<CollectorSummary> {
+    run_collector_with_options(
+        config,
+        crate::collector::domain::log_format::LogOptions {
+            format: crate::collector::domain::log_format::LogFormat::Structured,
+            multiline_start: None,
+        },
+    )
+    .await
+}
+
+pub async fn run_collector_with_options(
+    config: CollectorConfig,
+    options: crate::collector::domain::log_format::LogOptions,
+) -> Result<CollectorSummary> {
     config.validate()?;
-    let mut source = open_source(&config)?;
     let mut client = CollectorClient::new(
         &config.endpoint,
         &config.project,
@@ -20,14 +32,30 @@ pub async fn run_collector(config: CollectorConfig) -> Result<CollectorSummary> 
     if let Some(path) = &config.token_file {
         client = client.with_projected_token_file(path.clone(), config.token_audience.clone());
     }
+    let sink = crate::collector::infrastructure::durable_delivery::DurableDelivery {
+        client,
+        path: config.checkpoint_path.with_extension("pending.json"),
+        namespace: match &config.source {
+            crate::collector::domain::config::SourceSpec::Cri(cri) => cri.namespace.clone(),
+            _ => None,
+        },
+    };
+    sink.replay(&config).await?;
+    let mut source = crate::collector::infrastructure::multiline_source::MultilineSource::open(
+        open_source(&config)?,
+        config.checkpoint_path.with_extension("framing.json"),
+        options.multiline_start.as_deref(),
+        config.follow,
+    )?;
     runtime::run(
         &config,
-        &mut *source,
-        &ServiceLogDecoder {
+        &mut source,
+        &crate::collector::infrastructure::generic_log_decoder::GenericLogDecoder {
             project: &config.project,
             environment: &config.environment,
+            format: options.format,
         },
-        &client,
+        &sink,
     )
     .await
 }

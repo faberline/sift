@@ -24,6 +24,12 @@ pub(in crate::collector) struct WorkloadIdentity {
     restart: u32,
 }
 
+impl WorkloadIdentity {
+    pub(in crate::collector) fn in_namespace(&self, namespace: Option<&str>) -> bool {
+        namespace.is_none_or(|namespace| self.namespace == namespace)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(in crate::collector) struct DiscoveredFile {
     pub(in crate::collector) identity: String,
@@ -47,6 +53,7 @@ pub(in crate::collector) enum CriTag {
 }
 
 pub(in crate::collector) struct CriFrame {
+    pub(in crate::collector) timestamp: String,
     pub(in crate::collector) stream: CriStream,
     pub(in crate::collector) tag: CriTag,
     pub(in crate::collector) content: Vec<u8>,
@@ -96,6 +103,7 @@ pub(in crate::collector) fn parse_cri_frame(line: &[u8]) -> Result<CriFrame, Cri
         _ => return Err(CriError::InvalidTag),
     };
     Ok(CriFrame {
+        timestamp: timestamp.into(),
         stream,
         tag,
         content: line[third + 1..].to_vec(),

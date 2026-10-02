@@ -7,10 +7,17 @@ use crate::AttributeValue;
 pub(in crate::projection) fn normalize(stored: &StoredEvent) -> LogRecordV1 {
     let event = &stored.event;
     let json_payload = event
-        .payload
-        .get("jsonPayload")
-        .cloned()
-        .unwrap_or_else(|| event.payload.clone());
+        .attributes
+        .get("sift.log.original")
+        .and_then(AttributeValue::as_str)
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_else(|| {
+            event
+                .payload
+                .get("jsonPayload")
+                .cloned()
+                .unwrap_or_else(|| event.payload.clone())
+        });
     let body_text = event
         .attributes
         .get("otel.log.body")

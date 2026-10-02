@@ -15,7 +15,6 @@ use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
 pub(in crate::archive) use crate::archive::domain::control_values::LocalSegmentCommitState;
 
-
 pub(in crate::archive) fn read_local_commit_state(
     root: &Path,
 ) -> Result<Option<LocalSegmentCommitState>> {

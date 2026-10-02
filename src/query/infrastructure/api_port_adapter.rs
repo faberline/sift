@@ -6,6 +6,7 @@ use crate::shared_kernel::port_future::PortFuture;
 use crate::shared_kernel::query_phase_one::{CorrelationRequestV1, LogTailRequestV1};
 use crate::shared_kernel::query_request::QueryRequestV1;
 use crate::shared_kernel::query_response::QueryResponseV1;
+use crate::shared_kernel::query_v2::{QueryRequestV2, QueryResponseV2};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -16,6 +17,22 @@ impl SiftApiPort for NativeApiClient {
     }
     fn endpoint_origin(&self) -> String {
         self.endpoint.origin().ascii_serialization()
+    }
+    fn query_v2<'a>(
+        &'a self,
+        request: &'a QueryRequestV2,
+    ) -> PortFuture<'a, QueryResponseV2, Self::Error> {
+        Box::pin(NativeApiClient::query_v2(self, request))
+    }
+    fn control_records<'a>(
+        &'a self,
+        project: &'a str,
+        collection: &'a str,
+        after: Option<&'a str>,
+    ) -> PortFuture<'a, Value, Self::Error> {
+        Box::pin(NativeApiClient::control_records(
+            self, project, collection, after,
+        ))
     }
     fn query<'a>(
         &'a self,

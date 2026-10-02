@@ -38,6 +38,7 @@ impl CollectorClient {
         endpoint.set_fragment(None);
         let http = reqwest::Client::builder()
             .timeout(request_timeout)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("build collector HTTP client")?;
         Ok(Self {
@@ -116,7 +117,7 @@ impl CollectorClient {
         })?;
         let rejected = response
             .pointer("/partialSuccess/rejectedLogRecords")
-            .and_then(Value::as_u64)
+            .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
             .unwrap_or(0);
         if rejected != 0 {
             let message = response
@@ -161,6 +162,10 @@ fn otlp_logs_request(events: &[OperationalEventV2]) -> Result<Value> {
                 .collect::<Vec<_>>();
 
             let mut attributes = event.attributes.clone();
+            attributes.insert(
+                "sift.log.original".into(),
+                AttributeValue::String(serde_json::to_string(&event.payload)?),
+            );
             attributes.insert(
                 "sift.event_id".into(),
                 AttributeValue::String(event.event_id.clone()),

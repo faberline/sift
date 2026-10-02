@@ -29,6 +29,7 @@ use crate::SignalKind;
 use crate::journal::infrastructure::raft::control_state_store::set_directory_mode;
 
 const APPEND_OUTCOME_WINDOW: u64 = 64;
+pub type ArchivePrefix = (u64, u64, Vec<(SignalKind, SegmentManifest)>);
 
 /// Applies one committed Raft batch to the canonical per-signal WAL.
 pub struct SiftStateMachine {
@@ -177,7 +178,7 @@ impl SiftStateMachine {
     /// Upload can continue after this method returns while newer Raft entries
     /// append to the journal.
     #[doc(hidden)]
-    pub fn capture_archive_prefix(&self) -> Result<(u64, u64, Vec<(SignalKind, SegmentManifest)>)> {
+    pub fn capture_archive_prefix(&self) -> Result<ArchivePrefix> {
         let _gate = self
             .commit_gate
             .lock()

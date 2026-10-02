@@ -72,8 +72,16 @@ pub async fn backup_live_journal(
     destination_uri: &str,
     retention_secs: Option<u64>,
 ) -> Result<BackupRunResult> {
-    let snapshot = fetch_live_snapshot(base_url, token).await?;
-    upload_snapshot(&snapshot, destination_uri, retention_secs)
+    backup_live_journal_authenticated(
+        base_url,
+        token,
+        None,
+        "sift.axiom.dev",
+        "*",
+        destination_uri,
+        retention_secs,
+    )
+    .await
 }
 
 pub async fn backup_live_journal_authenticated(
@@ -88,7 +96,9 @@ pub async fn backup_live_journal_authenticated(
     let snapshot =
         fetch_live_snapshot_authenticated(base_url, token, token_file, token_audience, project)
             .await?;
-    upload_snapshot(&snapshot, destination_uri, retention_secs)
+    let destination = destination_uri.to_owned();
+    tokio::task::spawn_blocking(move || upload_snapshot(&snapshot, &destination, retention_secs))
+        .await?
 }
 
 fn upload_snapshot(

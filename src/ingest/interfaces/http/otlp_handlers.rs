@@ -138,13 +138,9 @@ async fn ingest_otlp(
         }
         accepted.push(event);
     }
-    let accepted_count = accepted.len();
-    if let Err(error) = state.append_events(accepted).await {
-        rejected += accepted_count;
-        if messages.len() < 8 {
-            messages.push(format!("durable batch append failed: {error}"));
-        }
-    }
+    state.append_events(accepted).await.map_err(|error| {
+        ApiError::temporarily_unavailable(format!("durable batch append failed: {error}"))
+    })?;
     let encoded = crate::ingest::interfaces::otlp::otlp_codec::encode_response(
         signal, media, rejected, &messages,
     )

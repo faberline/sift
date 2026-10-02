@@ -177,7 +177,8 @@ APPS: Dict[str, App] = {
     "relay": shared_app("relay", ".", TWO_TARGETS, "gke-acceptance", HARNESS_FIELDS, onboarded=True),
     "defer": shared_app("defer", ".", TWO_TARGETS, "gke-acceptance", HARNESS_FIELDS, onboarded=True),
 }
-FIXTURE_APPS = ("keep", "sift")  # one per receipt backend
+APPS = {"sift": APPS["sift"]}
+FIXTURE_APPS = ("sift",)
 FIXTURE_VERSION = {"keep": "0.4.13", "sift": "0.1.2"}
 
 
@@ -706,12 +707,30 @@ def check_tables(maker) -> None:
         if getattr(maker, attribute, None) != expected:
             fail(f"receipt maker {attribute} = {getattr(maker, attribute, None)!r}, expected {expected!r}")
 
-    release_sh = read(BUILD_RELEASE_SH)
-    for variable, expected in (("ACCEPTANCE_JOB", ACCEPTANCE_JOB), ("PARK_STEP", PARK_STEP)):
-        if f"{variable}='{expected}'" not in release_sh:
-            fail(f"scripts/build/release.sh must pin {variable}='{expected}'")
-    if '-f image="$image"' not in release_sh:
-        fail("scripts/build/release.sh must forward --image to the workflow's image input")
+    check_standalone_gates()
+
+
+def check_standalone_gates() -> None:
+    candidate = read(APPS["sift"].candidate_workflow)
+    if "./test.sh --candidate" not in job_block(candidate, "sift-release-gates"):
+        fail("candidate must run the complete standalone candidate gate")
+    script = read(ROOT / "test.sh")
+    for required in (
+        "cargo build --locked -p sift --bins",
+        "cargo test --locked -p sift --test it -- --ignored",
+        "cargo clippy --locked -p sift --all-targets -- -D warnings",
+        "bash scripts/check-architecture.sh",
+        "prepare_sift_test_environment",
+    ):
+        if required not in script:
+            fail(f"standalone test gate is missing {required!r}")
+    if re.search(r"cargo (?:build|test).* -p (?:vat|lumen|tape|relay|defer)", script):
+        fail("standalone gate cannot build sibling packages in this workspace")
+    pins = json.loads(read(ROOT / "tests" / "environment.lock.json"))
+    if set(pins) != {"workspace", "vat", "lumen", "tape", "relay", "defer"}:
+        fail("test environment must pin the harness and every external binary")
+    if any(not re.fullmatch(r"[0-9a-f]{40}", pin) for pin in pins.values()):
+        fail("external test dependencies need immutable source revisions")
 
 
 # --- build-release skill -----------------------------------------------------
@@ -989,7 +1008,7 @@ def run_fixture(app: App, maker) -> Tuple[int, int]:
 
 
 def watched_files() -> List[Path]:
-    paths = [GKE_ACCEPTANCE, APPS_SH, RECEIPT_MAKER, SHARED_CANDIDATE_VERIFIER, SHARED_ARTIFACT_VERIFIER, BUILD_RELEASE_SH, AGENTS_SKILL, CLAUDE_SKILL]
+    paths = [APPS_SH, RECEIPT_MAKER, SHARED_CANDIDATE_VERIFIER, SHARED_ARTIFACT_VERIFIER, ROOT / "test.sh", ROOT / "tests/environment.lock.json"]
     for app in APPS.values():
         if app.onboarded:
             paths.extend([app.candidate_workflow, app.promotion_workflow])
@@ -1003,10 +1022,8 @@ def check_everything() -> str:
             check_app(app)
         else:
             check_not_onboarded(app)
-    check_gke_acceptance(read(GKE_ACCEPTANCE))
     check_tables(load_receipt_maker())
-    check_release_skill()
-    return f"release contract passed: {' '.join(app.name for app in onboarded)} ({len(onboarded)} apps), gke-acceptance, shared tables, build-release skill"
+    return "release contract passed: standalone sift, candidate identity, no-rebuild promotion, pinned test dependencies"
 
 
 def candidate_controls(app: App, text: str) -> List[Tuple[str, Callable[[], str]]]:
@@ -1084,13 +1101,8 @@ def self_test() -> str:
     for app in onboarded:
         check_app(app)
         positives += 1
-    gke_text = read(GKE_ACCEPTANCE)
-    check_gke_acceptance(gke_text)
-    positives += 1
     maker = load_receipt_maker()
     check_tables(maker)
-    positives += 1
-    check_release_skill()
     positives += 1
     for app in APPS.values():
         if not app.onboarded:
@@ -1105,14 +1117,8 @@ def self_test() -> str:
         for label, mutate in promotion_controls(app, promotion):
             expect_static_failure(label, lambda mutate=mutate, app=app: check_promotion(app, mutate()))
             negatives += 1
-    for label, mutate in gke_controls(gke_text):
-        expect_static_failure(label, lambda mutate=mutate: check_gke_acceptance(mutate()))
-        negatives += 1
-    expect_static_failure("table: a non-onboarded app is checked as onboarded", lambda: check_app(replace(APPS["keep"], onboarded=False)))
+    expect_static_failure("table: a non-onboarded app is checked as onboarded", lambda: check_app(replace(APPS["sift"], onboarded=False)))
     negatives += 1
-    for label, control in skill_controls(read(AGENTS_SKILL)):
-        expect_static_failure(label, control)
-        negatives += 1
 
     fixture_names = []
     for name in FIXTURE_APPS:
@@ -1145,9 +1151,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             app = APPS[args.app]
             check_app(app)
             check_tables(load_receipt_maker())
-            check_release_skill()
-            if app.gke_backend == "gke-acceptance":
-                check_gke_acceptance(read(GKE_ACCEPTANCE))
             summary = f"release contract passed: {app.name}"
         else:
             summary = check_everything()

@@ -132,6 +132,8 @@ fn collector_command(root: &Path, checkpoint: &Path, quarantine: &Path, endpoint
     let mut command = Command::new(env!("CARGO_BIN_EXE_sift"));
     command.args([
         "collect",
+        "--format",
+        "structured",
         "--cri-root",
         root.to_str().unwrap(),
         "--endpoint",
@@ -229,6 +231,44 @@ async fn wait_for_count(client: &reqwest::Client, base: &str, count: usize) -> V
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn namespace_scoped_agent_does_not_collect_another_project_namespace() {
+    let _lock = PROCESS_TEST_LOCK.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("pods");
+    let allowed = pod_log(&root);
+    let other = root.join("other_checkout-0_abcd-1234/checkout");
+    std::fs::create_dir_all(&other).unwrap();
+    let log = service_event("same", "same body", None, "00f067aa0ba902b7");
+    std::fs::write(&allowed, cri_line("stdout", "F", &log.to_string())).unwrap();
+    std::fs::write(
+        other.join("0.log"),
+        cri_line("stdout", "F", &log.to_string()),
+    )
+    .unwrap();
+    let port = reserve_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut process = SiftProcess::spawn(port, &dir.path().join("server"));
+    let client = reqwest::Client::new();
+    wait_ready(&mut process, &client, &base).await;
+    let summary = successful_summary(
+        collector_command(
+            &root,
+            &dir.path().join("checkpoint.json"),
+            &dir.path().join("quarantine.jsonl"),
+            &base,
+        )
+        .args(["--namespace", "prod"])
+        .output()
+        .unwrap(),
+    );
+    assert_eq!(summary["accepted"], 1);
+    let response = query_logs(&client, &base, None).await;
+    let records = response["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["resource"]["k8s.namespace.name"], "prod");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -412,11 +452,12 @@ fn missing_observed_unread_source_is_durably_accounted() {
         "07ad6b7169203336",
     ))
     .unwrap();
-    std::fs::write(&log, cri_line("stdout", "F", &event)).unwrap();
+    // An unfinished CRI frame is observed, but cannot enter the durable
+    // delivery queue. Removing it must remain visible as source loss.
+    std::fs::write(&log, cri_line("stdout", "P", &event)).unwrap();
     let unused = format!("http://127.0.0.1:{}", reserve_port());
-    assert!(!run_collector(&root, &checkpoint, &quarantine, &unused)
-        .status
-        .success());
+    let first = successful_summary(run_collector(&root, &checkpoint, &quarantine, &unused));
+    assert_eq!(first["accepted"], 0);
     let observed_len = std::fs::metadata(&log).unwrap().len();
     std::fs::remove_file(&log).unwrap();
 

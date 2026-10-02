@@ -26,9 +26,11 @@ pub use crate::operations::{
             ArchiveSpec, AuthMode, BackupSpec, BootstrapSpec, IngestSpec, PlacementSpec, Sift,
             SiftSpec, SiftStatus, StorageSpec,
         },
-        http::gateway_proxy::{gateway_router, query_router},
+        http::gateway_proxy::{gateway_router, gateway_router_with_control, query_router},
         operator::run as run_operator,
     },
 };
 
 pub use crate::app::otlp_wiring::serve_proxy as serve_otlp_grpc_proxy;
+pub use crate::app::recovery_wiring::restore_complete_recovery;
+pub use crate::app::recovery_wiring::restore_complete_recovery_pinned;

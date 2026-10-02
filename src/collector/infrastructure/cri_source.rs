@@ -180,6 +180,11 @@ impl CriSource {
 
         self.read_positions
             .insert(discovered.identity.clone(), (next_offset, next_line));
+        let mut metadata = enrichment(&self.config, discovered, stream);
+        metadata.attributes.insert(
+            "collector.cri.timestamp".into(),
+            crate::AttributeValue::String(first_frame.timestamp),
+        );
         Ok(ReadOutcome::Record(RawRecord {
             source_id: format!("cri:{}", discovered.identity),
             line: start_line + 1,
@@ -191,7 +196,7 @@ impl CriSource {
                 next_line,
                 observed_len: discovered.len,
             },
-            enrichment: enrichment(&self.config, discovered, stream),
+            enrichment: metadata,
         }))
     }
 
@@ -307,6 +312,7 @@ impl service_collector::CollectorSource for CriSource {
 
     fn refresh(&mut self) -> Result<()> {
         let mut discovered = discover(&self.root, &self.checkpoint.files)?;
+        discovered.retain(|file| file.workload.in_namespace(self.config.namespace.as_deref()));
         let present: HashSet<_> = discovered
             .iter()
             .map(|file| file.identity.clone())
@@ -336,6 +342,9 @@ impl service_collector::CollectorSource for CriSource {
         }
 
         for (identity, file) in &mut self.checkpoint.files {
+            if !file.workload.in_namespace(self.config.namespace.as_deref()) {
+                continue;
+            }
             if present.contains(identity) || file.retired || self.staged_losses.contains(identity) {
                 continue;
             }

@@ -33,19 +33,18 @@ pub(super) fn cached_segment_path(root: &Path, segment: &ArchiveSegment) -> Resu
     let cache_path = root
         .join("archive-cache")
         .join(format!("{}.parquet", segment.parquet_sha256));
-    if cache_path.exists() {
-        if verify_file(
+    if cache_path.exists()
+        && verify_file(
             &cache_path,
             &segment.parquet_sha256,
             segment.parquet_bytes,
             "cached Parquet segment",
         )
         .is_ok()
-        {
-            set_private_file(&cache_path)?;
-            prune_archive_cache(root, &cache_path)?;
-            return Ok(cache_path);
-        }
+    {
+        set_private_file(&cache_path)?;
+        prune_archive_cache(root, &cache_path)?;
+        return Ok(cache_path);
     }
 
     let bytes = service_backup::fetch_backup_object(&segment.object_uri)

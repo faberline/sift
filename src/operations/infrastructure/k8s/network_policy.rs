@@ -41,7 +41,7 @@ fn kubernetes_api_egress(cidrs: &[String], ports: &[u16]) -> render::NetworkRule
     render::NetworkRulePlan::new(
         cidrs
             .iter()
-            .map(|cidr| render::NetworkPeerPlan::ip_block(cidr))
+            .map(render::NetworkPeerPlan::ip_block)
             .collect(),
         ports
             .iter()
@@ -145,10 +145,53 @@ pub(super) fn network_policy_plans(
             vec![role_peer(cx, CONTROL_COMPONENT)],
             vec![render::NetworkPortPlan::tcp(PEER_MTLS_PORT)],
         ));
-    let agent = role_network_policy(cx, AGENT_COMPONENT).with_egress(render::NetworkRulePlan::new(
-        vec![role_peer(cx, GATEWAY_COMPONENT)],
+    gateway = gateway.with_egress(render::NetworkRulePlan::new(
+        vec![role_peer(cx, CONTROL_COMPONENT)],
         vec![render::NetworkPortPlan::tcp(HTTP_PORT)],
     ));
+    query = query.with_ingress(render::NetworkRulePlan::new(
+        vec![role_peer(cx, CONTROL_COMPONENT)],
+        vec![render::NetworkPortPlan::tcp(HTTP_PORT)],
+    ));
+    control = control.with_egress(render::NetworkRulePlan::new(
+        vec![role_peer(cx, QUERY_COMPONENT)],
+        vec![render::NetworkPortPlan::tcp(HTTP_PORT)],
+    ));
+    control = control.with_egress(render::NetworkRulePlan::new(
+        vec![role_peer(cx, STORE_COMPONENT)],
+        vec![render::NetworkPortPlan::tcp(HTTP_PORT)],
+    ));
+    store = store.with_ingress(render::NetworkRulePlan::new(
+        vec![role_peer(cx, CONTROL_COMPONENT)],
+        vec![render::NetworkPortPlan::tcp(HTTP_PORT)],
+    ));
+    let mut agent =
+        role_network_policy(cx, AGENT_COMPONENT).with_egress(render::NetworkRulePlan::new(
+            vec![role_peer(cx, GATEWAY_COMPONENT)],
+            vec![render::NetworkPortPlan::tcp(HTTP_PORT)],
+        ));
+    agent = agent.with_egress(render::NetworkRulePlan::new(
+        vec![render::NetworkPeerPlan::same_namespace_pods(
+            BTreeMap::from([("sift.axiom.dev/scrape".into(), "true".into())]),
+        )],
+        vec![],
+    ));
+    agent = agent.with_ingress(render::NetworkRulePlan::new(
+        vec![render::NetworkPeerPlan::same_namespace_pods(
+            BTreeMap::from([
+                ("app.kubernetes.io/name".into(), APP.into()),
+                ("app.kubernetes.io/instance".into(), cx.name.into()),
+                ("sift.axiom.dev/role".into(), AGENT_COMPONENT.into()),
+            ]),
+        )],
+        vec![render::NetworkPortPlan::tcp(9318)],
+    ));
+    if !kubernetes_api_cidrs.is_empty() {
+        agent = agent.with_egress(kubernetes_api_egress(
+            kubernetes_api_cidrs,
+            kubernetes_api_ports,
+        ));
+    }
     let mut backup =
         role_network_policy(cx, BACKUP_COMPONENT).with_egress(render::NetworkRulePlan::new(
             vec![role_peer(cx, GATEWAY_COMPONENT)],
@@ -184,6 +227,7 @@ pub(super) fn network_policy_plans(
             .is_some_and(|uri| uri.starts_with("gs://"));
     if store_uses_gcs {
         store = store.with_egress(metadata_server_egress());
+        control = control.with_egress(metadata_server_egress());
     }
     if spec
         .backup
@@ -201,6 +245,18 @@ pub(super) fn fqdn_network_policy_plans(
     spec: &SiftSpec,
 ) -> Vec<render::FqdnNetworkPolicyPlan> {
     let mut policies = Vec::new();
+    if !spec.alerting.allowed_hosts.is_empty() {
+        let mut policy = render::FqdnNetworkPolicyPlan::new(
+            format!("{}-control-webhooks", cx.name),
+            CONTROL_COMPONENT,
+            full_role_selector(cx, CONTROL_COMPONENT),
+        )
+        .with_port(render::NetworkPortPlan::tcp(443));
+        for host in &spec.alerting.allowed_hosts {
+            policy = policy.with_match(render::FqdnMatchPlan::name(host));
+        }
+        policies.push(policy);
+    }
     let store_uses_gcs = spec
         .archive
         .as_ref()
@@ -212,6 +268,7 @@ pub(super) fn fqdn_network_policy_plans(
             .is_some_and(|uri| uri.starts_with("gs://"));
     if store_uses_gcs {
         policies.push(google_apis_policy(cx, STORE_COMPONENT));
+        policies.push(google_apis_policy(cx, CONTROL_COMPONENT));
     }
     if spec
         .backup

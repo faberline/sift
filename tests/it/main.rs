@@ -31,6 +31,7 @@ mod persistent_data_dir;
 mod persistent_deployment;
 mod phase_one_api;
 mod phase_one_surface;
+mod production_workflow;
 mod projection_runtime;
 mod prometheus_api;
 mod raft_batch;

@@ -236,7 +236,8 @@ fn kubernetes_auth_renders_the_runtime_auth_delegator_binding() {
                 "kind": "ServiceAccount",
                 "name": "events-store",
                 "namespace": "observability"
-            }
+            },
+            {"kind":"ServiceAccount","name":"events-control","namespace":"observability"}
         ])
     );
 
@@ -371,14 +372,11 @@ async fn reconcile_limits_kubernetes_reviews_to_the_discovered_api_endpoint() {
                     })
             }));
     }
-    for role in ["agent", "backup"] {
-        let policy = object(
-            &plan.children,
-            "NetworkPolicy",
-            &format!("events-{role}-network"),
-        );
-        assert!(!policy.to_string().contains("10.20.30.40/32"));
-    }
+    let agent_policy = object(&plan.children, "NetworkPolicy", "events-agent-network");
+    assert!(agent_policy.to_string().contains("10.20.30.40/32"));
+    assert!(!agent_policy.to_string().contains("0.0.0.0/0"));
+    let backup_policy = object(&plan.children, "NetworkPolicy", "events-backup-network");
+    assert!(!backup_policy.to_string().contains("10.20.30.40/32"));
 }
 
 #[tokio::test]
@@ -572,6 +570,8 @@ fn role_topology_owns_children_and_wires_protected_live_backup() {
             workload["spec"]["template"]["spec"]["serviceAccountName"],
             if role == "store" {
                 "events-store"
+            } else if role == "control" {
+                "events-control"
             } else {
                 "events"
             }
@@ -596,15 +596,31 @@ fn role_topology_owns_children_and_wires_protected_live_backup() {
             "apiGroups":["sift.axiom.dev"],
             "resources":["projects"],
             "resourceNames":["events"],
-            "verbs":["get", "create", "update"]
+            "verbs":["get", "create"]
         })
     );
     let project_binding = object(&objects, "RoleBinding", "events-agent-project");
     assert_eq!(project_binding["subjects"][0]["name"], "events");
     assert_eq!(project_binding["subjects"][0]["namespace"], "observability");
-    assert_eq!(project_binding["subjects"][1]["name"], "events-backup");
-    assert_eq!(project_binding["subjects"][1]["namespace"], "observability");
+    assert_eq!(project_binding["subjects"].as_array().unwrap().len(), 1);
+    let backup_binding = object(&objects, "RoleBinding", "events-backup-project");
+    assert_eq!(backup_binding["subjects"][0]["name"], "events-backup");
+    assert_eq!(backup_binding["subjects"][0]["namespace"], "observability");
+    assert_eq!(
+        object(&objects, "Role", "events-backup-project")["rules"][0],
+        json!({
+            "apiGroups":["sift.axiom.dev"],"resources":["projects"],"verbs":["update"]
+        })
+    );
     let agent_pod = &object(&objects, "DaemonSet", "events-agent")["spec"]["template"]["spec"];
+    assert!(agent_pod["volumes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|volume| {
+            volume["name"] == "data"
+                && volume["hostPath"]["path"] == "/var/lib/sift/agents/observability/events"
+        }));
     assert!(agent_pod["volumes"]
         .as_array()
         .expect("agent volumes")

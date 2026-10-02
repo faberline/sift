@@ -5,3 +5,4 @@
 pub(crate) mod k8s;
 pub(crate) mod live_snapshot_client;
 pub(crate) mod manifest_bundle;
+pub(crate) mod recovery_store;

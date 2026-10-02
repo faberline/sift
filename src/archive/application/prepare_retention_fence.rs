@@ -11,7 +11,7 @@ use chrono::Utc;
 use crate::journal::application::journal_service::JournalService as DurableJournal;
 
 pub(in crate::archive) async fn prepare_retention_fence(
-    services: &ArchiveServices,
+    services: &Arc<ArchiveServices>,
     journal: &Arc<DurableJournal<'static>>,
     state_machine: &Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
     raft: Option<&Arc<crate::journal::application::raft_checkpoint_service::RaftCheckpointService>>,
@@ -66,11 +66,17 @@ pub(in crate::archive) async fn prepare_retention_fence(
         return Ok(None);
     }
     let evaluate_at = Utc::now();
-    if !crate::archive::application::retention_due::retention_due_at(
-        services,
-        journal.storage().root(),
-        evaluate_at,
-    )? {
+    let check_services = services.clone();
+    let check_root = journal.storage().root().to_owned();
+    let due = tokio::task::spawn_blocking(move || {
+        crate::archive::application::retention_due::retention_due_at(
+            &check_services,
+            &check_root,
+            evaluate_at,
+        )
+    })
+    .await??;
+    if !due {
         return Ok(None);
     }
     let status = crate::archive::application::archive_status_queries::committed_status(

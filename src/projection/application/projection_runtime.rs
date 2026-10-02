@@ -23,6 +23,11 @@ pub struct ProjectionRuntime {
 }
 
 impl ProjectionRuntime {
+    pub(crate) fn log_record(
+        stored: &crate::shared_kernel::stored_event::StoredEvent,
+    ) -> crate::shared_kernel::projection_log::LogRecordV1 {
+        crate::projection::domain::log_record_normalizer::normalize(stored)
+    }
     pub(crate) fn new(
         port: Arc<dyn ProjectionRuntimePort<Error = anyhow::Error>>,
         replay: Arc<dyn ReplayFactory<Error = anyhow::Error>>,

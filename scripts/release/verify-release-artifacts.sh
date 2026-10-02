@@ -245,6 +245,10 @@ validate_gke_receipt() {
   root="$(jq -er '.image.root_digest' "$manifest")"
   amd64="$(jq -er '.image.amd64_digest' "$manifest")"
   arm64="$(jq -er '.image.arm64_digest' "$manifest")"
+  if [[ "$APP" == sift && "${TAG#sift@}" != 0.1.* ]]; then
+    python3 "$SCRIPT_DIR/verify-production-receipt.py" --receipt "$receipt" --candidate-manifest "$manifest" || fail "production acceptance receipt is incomplete"
+    return
+  fi
   backend="$(release_app_gke_backend "$APP")"
   functional="$(release_app_functional_fields "$APP" | jq -Rn '[inputs | select(length > 0)] | map({key: ., value: "passed"}) | from_entries')"
   case "$backend" in

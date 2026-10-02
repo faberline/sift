@@ -111,7 +111,14 @@ pub(crate) async fn tail_logs(
         .map_err(|error| ApiError::bad_request("invalid_tail_query", error.to_string()))?;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(request.wait_ms);
     loop {
-        let mut response = execute_query_v1(&state, &query)?;
+        let scanning = state.clone();
+        let scan_query = query.clone();
+        let mut response =
+            tokio::task::spawn_blocking(move || execute_query_v1(&scanning, &scan_query))
+                .await
+                .map_err(|error| {
+                    ApiError::internal(format!("tail query worker failed: {error}"))
+                })??;
         let last_cursor = response.data["records"]
             .as_array()
             .and_then(|records| records.last())

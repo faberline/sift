@@ -126,6 +126,8 @@ fn run_collector(source: &Path, checkpoint: &Path, quarantine: &Path, endpoint: 
     let output = Command::new(env!("CARGO_BIN_EXE_sift"))
         .args([
             "collect",
+            "--format",
+            "structured",
             "--source",
             source.to_str().unwrap(),
             "--source-id",

@@ -31,4 +31,8 @@ pub(crate) mod job_service;
 
 pub(crate) mod forward_service;
 
+pub(crate) mod journal_log_page;
+pub(crate) mod log_count;
+pub(crate) mod metric_source;
 pub(crate) mod query_role_service;
+pub(crate) mod query_v2;

@@ -115,6 +115,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
             .paths
             .insert(path.to_string(), PathItem::new(method, operation));
     }
+    super::production_schema::extend(&mut document);
     document
 }
 

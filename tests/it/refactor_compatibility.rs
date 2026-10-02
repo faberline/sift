@@ -17,6 +17,11 @@ const TIME: &str = "2026-09-30T12:34:56.123456789Z";
 
 fn golden(name: &str, bytes: &[u8]) -> Vec<u8> {
     let path = std::path::Path::new(FIXTURES).join(name);
+    if (name.ends_with("-v8.json") || name.ends_with("-020.json"))
+        && std::env::var_os("SIFT_CAPTURE_020_CONTRACT").is_some()
+    {
+        std::fs::write(&path, bytes).unwrap();
+    }
     let expected = std::fs::read(path).unwrap();
     assert_eq!(bytes, expected, "fixture {name} changed");
     expected
@@ -171,7 +176,15 @@ fn projection_snapshots_read_and_reencode_without_change() {
         projection
             .apply_idempotent(&stored(cursor, signal))
             .unwrap();
-        let bytes = golden(name, &projection.snapshot().unwrap());
+        let bytes = if signal == SignalKind::Metric {
+            // Version 8 accounts for the added OTLP interval and histogram
+            // fields. The old snapshot remains a required migration input.
+            let old = std::fs::read(std::path::Path::new(FIXTURES).join(name)).unwrap();
+            projection.restore(&old).unwrap();
+            golden("projection-metric-v8.json", &projection.snapshot().unwrap())
+        } else {
+            golden(name, &projection.snapshot().unwrap())
+        };
         projection.restore(&bytes).unwrap();
         assert_eq!(projection.snapshot().unwrap(), bytes);
     }
@@ -180,9 +193,24 @@ fn projection_snapshots_read_and_reencode_without_change() {
 #[test]
 fn openapi_bytes_do_not_change() {
     golden(
-        "openapi.json",
+        "openapi-020.json",
         &serde_json::to_vec(&sift::openapi()).unwrap(),
     );
+    let previous: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/refactor_compatibility/openapi.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let current = serde_json::to_value(sift::openapi()).unwrap();
+    for (path, operations) in previous["paths"].as_object().unwrap() {
+        assert_eq!(
+            &current["paths"][path], operations,
+            "legacy OpenAPI route changed: {path}"
+        );
+    }
 }
 
 #[test]
@@ -226,5 +254,18 @@ fn cli_help_bytes_do_not_change() {
         collect(vec![hidden.into()], &mut pages);
     }
     assert!(pages.len() > 14, "capture subcommands as well as the root");
-    golden("cli-help.json", &serde_json::to_vec(&pages).unwrap());
+    let old: BTreeMap<String, String> = serde_json::from_slice(
+        &std::fs::read(std::path::Path::new(FIXTURES).join("cli-help.json")).unwrap(),
+    )
+    .unwrap();
+    for (path, help) in old {
+        if !["", "collect", "query"].contains(&path.as_str()) {
+            assert_eq!(
+                pages[&path].replace("0.2.0", "0.1.2"),
+                help,
+                "old help page {path}"
+            );
+        }
+    }
+    golden("cli-help-020.json", &serde_json::to_vec(&pages).unwrap());
 }

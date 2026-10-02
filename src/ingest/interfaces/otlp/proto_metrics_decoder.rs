@@ -1,23 +1,16 @@
 //! OTLP protobuf metrics into metric events, with their temporality and
 //! exemplars.
 
-use std::collections::BTreeMap;
-
 use anyhow::Result;
-use serde_json::{json, Value};
+use transport_otlp::proto as wire;
 use transport_otlp::proto::{metric, number_data_point};
-use transport_otlp::{proto as wire, OtlpSignal};
 
-use crate::ingest::application::event_identity::stable_id;
+use super::metric_normalization::{explicit_histogram, metric_event, MetricInput};
 use crate::ingest::interfaces::otlp::otlp_codec::{item_error, OtlpItemError};
-use crate::ingest::interfaces::otlp::otlp_event_builder::{apply_common_attributes, base_event};
 use crate::ingest::interfaces::otlp::otlp_proto_values::{
     proto_attributes, proto_resource, proto_scope, valid_proto_id,
 };
-use crate::{
-    AttributeValue, InstrumentationScope, MetricExemplar, MetricPoint, MetricTemporality,
-    OperationalEventV2,
-};
+use crate::{MetricExemplar, MetricTemporality, OperationalEventV2};
 
 pub(super) fn decode_metrics_proto(
     request: wire::ExportMetricsServiceRequest,
@@ -38,61 +31,140 @@ pub(super) fn decode_metrics_proto(
                     )));
                     continue;
                 };
-                let (points, temporality): (Vec<wire::NumberDataPoint>, MetricTemporality) =
-                    match data {
-                        metric::Data::Gauge(gauge) => (gauge.data_points, MetricTemporality::Gauge),
-                        metric::Data::Sum(sum) => (
-                            sum.data_points,
-                            proto_temporality(sum.aggregation_temporality),
-                        ),
-                        metric::Data::Histogram(histogram) => {
-                            for point in histogram.data_points {
-                                let value = point.sum.unwrap_or(point.count as f64);
-                                output.push(Ok(proto_metric_event(
-                                project,
-                                &resource,
-                                scope.clone(),
-                                &name,
-                                unit.clone(),
-                                value,
-                                proto_temporality(histogram.aggregation_temporality),
-                                point.time_unix_nano,
-                                proto_attributes(&point.attributes),
-                                proto_exemplars(&point.exemplars),
-                                json!({"count": point.count, "sum": point.sum, "bucketCounts": point.bucket_counts, "explicitBounds": point.explicit_bounds}),
-                            )));
-                            }
-                            continue;
-                        }
-                        metric::Data::ExponentialHistogram(_) | metric::Data::Summary(_) => {
-                            output.push(Err(item_error(
-                                None,
-                                format!("metric `{name}` has unsupported data"),
-                            )));
+                let (temporality, count) = match &data {
+                    metric::Data::Sum(sum) => (
+                        proto_temporality(sum.aggregation_temporality),
+                        sum.data_points.len(),
+                    ),
+                    metric::Data::Histogram(histogram) => (
+                        proto_temporality(histogram.aggregation_temporality),
+                        histogram.data_points.len(),
+                    ),
+                    metric::Data::ExponentialHistogram(histogram) => (
+                        proto_temporality(histogram.aggregation_temporality),
+                        histogram.data_points.len(),
+                    ),
+                    _ => (Ok(MetricTemporality::Gauge), 0),
+                };
+                let temporality =
+                    match temporality {
+                        Ok(value) => value,
+                        Err(error) => {
+                            output.extend((0..count.max(1)).map(|_| {
+                                Err(item_error(None, format!("metric `{name}`: {error}")))
+                            }));
                             continue;
                         }
                     };
+                let (points, temporality, monotonic): (
+                    Vec<wire::NumberDataPoint>,
+                    MetricTemporality,
+                    bool,
+                ) = match data {
+                    metric::Data::Gauge(gauge) => {
+                        (gauge.data_points, MetricTemporality::Gauge, false)
+                    }
+                    metric::Data::Sum(sum) => (sum.data_points, temporality, sum.is_monotonic),
+                    metric::Data::Histogram(histogram) => {
+                        for point in histogram.data_points {
+                            let value = point.sum.unwrap_or(point.count as f64);
+                            let result = metric_event(
+                                project,
+                                &resource,
+                                scope.clone(),
+                                MetricInput {
+                                    name: name.clone(),
+                                    unit: unit.clone(),
+                                    value,
+                                    temporality,
+                                    monotonic: false,
+                                    start: point.start_time_unix_nano,
+                                    end: point.time_unix_nano,
+                                    flags: point.flags,
+                                    attributes: proto_attributes(&point.attributes),
+                                    exemplars: proto_exemplars(&point.exemplars),
+                                    histogram: Some(explicit_histogram(
+                                        point.count,
+                                        point.sum,
+                                        point.explicit_bounds,
+                                        point.bucket_counts,
+                                        point.min,
+                                        point.max,
+                                    )),
+                                },
+                            );
+                            output.push(result.map_err(|error| {
+                                item_error(None, format!("metric `{name}`: {error}"))
+                            }));
+                        }
+                        continue;
+                    }
+                    metric::Data::ExponentialHistogram(histogram) => {
+                        for point in histogram.data_points {
+                            let positive = point.positive.unwrap_or_default();
+                            let negative = point.negative.unwrap_or_default();
+                            let result = metric_event(project, &resource, scope.clone(), MetricInput {
+                                name: name.clone(), unit: unit.clone(), value: point.sum.unwrap_or(point.count as f64),
+                                temporality, monotonic: false,
+                                start: point.start_time_unix_nano, end: point.time_unix_nano, flags: point.flags,
+                                attributes: proto_attributes(&point.attributes), exemplars: proto_exemplars(&point.exemplars),
+                                histogram: Some(crate::shared_kernel::projection_metric::MetricHistogramV1 {
+                                    kind: crate::shared_kernel::projection_metric::HistogramKind::Exponential,
+                                    count: point.count, sum: point.sum.unwrap_or(0.0), sum_present: point.sum.is_some(),
+                                    scale: Some(point.scale), zero_count: point.zero_count, zero_threshold: point.zero_threshold,
+                                    positive_offset: positive.offset, positive_bucket_counts: positive.bucket_counts,
+                                    negative_offset: negative.offset, negative_bucket_counts: negative.bucket_counts,
+                                    explicit_bounds: Vec::new(), bucket_counts: Vec::new(), min: point.min, max: point.max,
+                                }),
+                            });
+                            output.push(result.map_err(|error| {
+                                item_error(None, format!("metric `{name}`: {error}"))
+                            }));
+                        }
+                        continue;
+                    }
+                    metric::Data::Summary(_) => {
+                        output.push(Err(item_error(
+                            None,
+                            format!("metric `{name}` has unsupported data"),
+                        )));
+                        continue;
+                    }
+                };
                 for point in points {
-                    let Some(value) = point.value.and_then(proto_number) else {
+                    let Some(value) = point
+                        .value
+                        .and_then(proto_number)
+                        .or_else(|| (point.flags & 1 != 0).then_some(0.0))
+                    else {
                         output.push(Err(item_error(
                             None,
                             format!("metric `{name}` point has no value"),
                         )));
                         continue;
                     };
-                    output.push(Ok(proto_metric_event(
+                    let result = metric_event(
                         project,
                         &resource,
                         scope.clone(),
-                        &name,
-                        unit.clone(),
-                        value,
-                        temporality,
-                        point.time_unix_nano,
-                        proto_attributes(&point.attributes),
-                        proto_exemplars(&point.exemplars),
-                        json!({"startTimeUnixNano": point.start_time_unix_nano, "flags": point.flags}),
-                    )));
+                        MetricInput {
+                            name: name.clone(),
+                            unit: unit.clone(),
+                            value,
+                            temporality,
+                            monotonic,
+                            start: point.start_time_unix_nano,
+                            end: point.time_unix_nano,
+                            flags: point.flags,
+                            attributes: proto_attributes(&point.attributes),
+                            exemplars: proto_exemplars(&point.exemplars),
+                            histogram: None,
+                        },
+                    );
+                    output
+                        .push(result.map_err(|error| {
+                            item_error(None, format!("metric `{name}`: {error}"))
+                        }));
                 }
             }
         }
@@ -100,53 +172,11 @@ pub(super) fn decode_metrics_proto(
     Ok(output)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn proto_metric_event(
-    project: &str,
-    resource: &BTreeMap<String, String>,
-    scope: Option<InstrumentationScope>,
-    name: &str,
-    unit: Option<String>,
-    value: f64,
-    temporality: MetricTemporality,
-    time: u64,
-    attributes: BTreeMap<String, AttributeValue>,
-    exemplars: Vec<MetricExemplar>,
-    payload: Value,
-) -> OperationalEventV2 {
-    let identity = format!(
-        "{name}:{time}:{value}:{}:{}",
-        serde_json::to_string(&attributes).unwrap_or_default(),
-        serde_json::to_string(&payload).unwrap_or_default()
-    );
-    let mut event = base_event(
-        OtlpSignal::Metrics,
-        project,
-        resource,
-        stable_id("metric", project, &identity),
-        time,
-        time,
-        payload,
-    );
-    event.instrumentation_scope = scope;
-    event.attributes = attributes;
-    apply_common_attributes(&mut event);
-    event.metric = Some(MetricPoint {
-        name: name.to_string(),
-        value,
-        stale: false,
-        unit,
-        temporality,
-        exemplars,
-    });
-    event
-}
-
-fn proto_temporality(value: i32) -> MetricTemporality {
-    if value == 1 {
-        MetricTemporality::Delta
-    } else {
-        MetricTemporality::Cumulative
+fn proto_temporality(value: i32) -> Result<MetricTemporality> {
+    match value {
+        1 => Ok(MetricTemporality::Delta),
+        2 => Ok(MetricTemporality::Cumulative),
+        _ => anyhow::bail!("aggregationTemporality must be DELTA or CUMULATIVE"),
     }
 }
 
@@ -163,7 +193,7 @@ fn proto_exemplars(values: &[wire::Exemplar]) -> Vec<MetricExemplar> {
         .iter()
         .filter_map(|value| {
             Some(MetricExemplar {
-                value: value.value.clone().and_then(|value| match value {
+                value: value.value.and_then(|value| match value {
                     wire::exemplar::Value::AsDouble(value) if value.is_finite() => Some(value),
                     wire::exemplar::Value::AsInt(value) => Some(value as f64),
                     _ => None,
