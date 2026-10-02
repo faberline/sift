@@ -42,11 +42,19 @@ def append(path, message, level='INFO', source_id=None):
 
 
 def collected(api, source_id, expected):
-    answer = api.request('POST', '/api/v1/query', {'version': 1, 'project': api.project, 'mode': 'sync',
+    request = {'version': 1, 'project': api.project, 'mode': 'sync',
         'limit': 1000, 'signal': {'kind': 'logs', 'filter': {
-            'op': 'eq', 'field': 'attributes.pilot_source.value', 'value': source_id}}})
-    require(answer.get('next_cursor') is None, 'pilot collected log page is incomplete')
-    rows = answer['data']['records']
+            'op': 'eq', 'field': 'attributes.pilot_source.value', 'value': source_id}}}
+    rows, cursors = [], set()
+    for _ in range(1000):
+        answer = api.request('POST', '/api/v1/query', request)
+        rows.extend(answer['data']['records'])
+        require(len(rows) <= 1000, 'pilot collected log result exceeded its limit')
+        cursor = answer.get('next_cursor')
+        if cursor is None: break
+        require(cursor not in cursors, 'pilot collected log cursor did not advance')
+        cursors.add(cursor); request['cursor'] = cursor
+    else: raise ValueError('pilot collected log query exceeded its page limit')
     require(len(rows) == len(expected) and len({row['event_id'] for row in rows}) == len(expected),
             'collected records are missing or duplicated')
     actual = sorted(row['json_payload']['raw'] for row in rows)

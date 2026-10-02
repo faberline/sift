@@ -5,6 +5,7 @@ from unittest.mock import patch
 from load_client import Api
 from load_data import encoded
 from pilot_runtime import Receiver
+from pilot_workflow import collected
 from run_pilot import input_block, limits
 
 
@@ -44,6 +45,30 @@ class Pilot(unittest.TestCase):
             receiver = Receiver.__new__(Receiver); receiver.root = Path(temp)
             (receiver.root / 'deliveries.jsonl').write_bytes(b'{"status":200}\n{"status":')
             self.assertEqual(receiver.snapshot(), [{'status': 200}])
+
+    def test_native_collection_reads_all_pages_including_an_empty_filtered_page(self):
+        def row(identity, raw):
+            return {'event_id': identity, 'json_payload': {'raw': raw},
+                'resource': {'service.name': 'sift-pilot'}}
+        pages = [([row('first', 'a')], 'one'), ([], 'two'), ([row('last', 'b')], None)]
+        class Pages:
+            project = 'pilot-project'
+            def request(self, _method, _path, request):
+                self.cursor = request.get('cursor')
+                records, cursor = pages.pop(0)
+                return {'data': {'records': records}, 'next_cursor': cursor}
+        api = Pages()
+        self.assertEqual(set(collected(api, 'source', ['a', 'b'])), {'first', 'last'})
+        self.assertEqual(api.cursor, 'two')
+        self.assertFalse(pages)
+
+    def test_a_repeated_native_log_cursor_cannot_claim_a_complete_read(self):
+        class Pages:
+            project = 'pilot-project'
+            def request(self, *_):
+                return {'data': {'records': []}, 'next_cursor': 'repeated'}
+        with self.assertRaisesRegex(ValueError, 'cursor did not advance'):
+            collected(Pages(), 'source', [])
 
 
 if __name__ == '__main__': unittest.main()
