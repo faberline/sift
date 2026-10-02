@@ -4,7 +4,9 @@ import hashlib,json,re,math
 from pathlib import Path
 
 GATES=('functional','promql_oracle','control_failover','load_30m','load_24h',
-    'node_failure','pvc_restore','gcs_outage','all_disk_restore','dual_write_7d','capacity','delivery')
+    'node_failure','pvc_restore','gcs_outage','all_disk_restore','source_fidelity','capacity','delivery')
+
+SOURCE_SIGNALS=('logs','metrics','traces','alerts')
 
 COMMON={'result','source_commit','image','cluster_identity_sha256','evidence_sha256'}
 FIELDS={
@@ -15,7 +17,8 @@ FIELDS={
  'pvc_restore':{'lost_acknowledged_events':int,'control_state_differences':int},
  'gcs_outage':{'duration_seconds':int,'acknowledged_after_rpo_limit':int,'collector_pending_preserved':bool,'resumed':bool},
  'all_disk_restore':{'control_state_differences':int,'lost_recent_seconds':int,'identity_differences':int},
- 'dual_write_7d':{'duration_seconds':int,'differences':int,'compared_signals':list,'gcp_rollback_configured':bool},
+ 'source_fidelity':{'duration_seconds':int,'reference_origin':str,'differences':int,
+    'compared_signals':list,'compared_records':dict,'complete':bool,'gcp_rollback_configured':bool},
  'capacity':{'measured_samples':int,'sample_mean_bytes':float,'cost_cap_usd':float,'actual_cost_usd':float,'capacity_exceeded':bool,'pvc_sized_from_samples':bool},
  'delivery':{'webhook_p95_seconds':float,'retry_notification_ids_unchanged':bool,'unknown_recovery_notifications':int,'mute_verified':bool,'hold_verified':bool},
 }
@@ -45,7 +48,7 @@ def validate(proof,candidate,image):
     exact_keys(proof['cleanup'],{'status'},'cleanup')
     exact_keys(proof['topology'],{'gke_mode','store_voters','control_voters'},'topology')
     typed(proof['topology']['store_voters'],int,'store voters');typed(proof['topology']['control_voters'],int,'control voters')
-    require(proof.get('schema')=='sift.production-acceptance/v1','acceptance schema')
+    require(proof.get('schema')=='sift.production-acceptance/v2','acceptance schema')
     require(proof.get('source_commit')==candidate['commit'],'source commit differs')
     require(proof.get('image')==image and '@sha256:' in image,'candidate image differs')
     require(proof.get('topology')=={'gke_mode':'standard','store_voters':3,'control_voters':3},'fixed Standard GKE topology')
@@ -78,9 +81,13 @@ def validate(proof,candidate,image):
     require(g.get('collector_pending_preserved') is True and g.get('resumed') is True,'GCS outage collection or recovery')
     g=proof['gates']['all_disk_restore']
     require(0<=g.get('lost_recent_seconds',999)<=900 and g.get('identity_differences')==0,'all-disk restore bound or identity')
-    g=proof['gates']['dual_write_7d']
-    require(g.get('duration_seconds',0)>=604800 and g.get('differences')==0,'seven-day double-write comparison')
-    require(g.get('compared_signals')==['logs','metrics','traces','alerts'] and g.get('gcp_rollback_configured') is True,'double-write coverage or rollback')
+    g=proof['gates']['source_fidelity']
+    require(g['duration_seconds']>=1800 and g['differences']==0,'30-minute source comparison')
+    require(g['reference_origin'] in ('generated','gcp'),'source reference origin')
+    require(g['compared_signals']==list(SOURCE_SIGNALS) and g['complete'] is True,'complete source coverage')
+    exact_keys(g['compared_records'],SOURCE_SIGNALS,'compared source counts')
+    require(all(type(count) is int and count>0 for count in g['compared_records'].values()),'each signal needs compared records')
+    require(g['gcp_rollback_configured'] is (g['reference_origin']=='gcp'),'migration rollback or fresh-install reference')
     g=proof['gates']['capacity']
     require(g.get('measured_samples',0)>0 and g.get('sample_mean_bytes',0)>0,'real sample measurement')
     require(g.get('cost_cap_usd',0)>0 and 0<=g.get('actual_cost_usd',-1)<=g['cost_cap_usd'],'cost cap')
@@ -126,7 +133,7 @@ def validate_release_receipt(receipt,candidate,image):
 def self_test():
     import copy
     c={'commit':'a'*40};image='ghcr.io/faberline/sift@sha256:'+'b'*64
-    p={'schema':'sift.production-acceptance/v1','source_commit':c['commit'],'image':image,
+    p={'schema':'sift.production-acceptance/v2','source_commit':c['commit'],'image':image,
         'cluster_identity_sha256':'c'*64,'topology':{'gke_mode':'standard','store_voters':3,'control_voters':3},
         'cleanup':{'status':'clean'},'gates':{}}
     for name in GATES:p['gates'][name]={'result':'passed','source_commit':c['commit'],'image':image,
@@ -140,11 +147,16 @@ def self_test():
     p['gates']['control_failover']['leader_changes']=1
     p['gates']['gcs_outage'].update({'duration_seconds':1000,'acknowledged_after_rpo_limit':0,'collector_pending_preserved':True,'resumed':True})
     p['gates']['all_disk_restore'].update({'lost_recent_seconds':900,'identity_differences':0})
-    p['gates']['dual_write_7d'].update({'duration_seconds':604800,'differences':0,'compared_signals':['logs','metrics','traces','alerts'],'gcp_rollback_configured':True})
+    p['gates']['source_fidelity'].update({'duration_seconds':1800,'reference_origin':'generated',
+        'differences':0,'compared_signals':list(SOURCE_SIGNALS),'compared_records':{signal:100 for signal in SOURCE_SIGNALS},
+        'complete':True,'gcp_rollback_configured':False})
     p['gates']['capacity'].update({'measured_samples':100,'sample_mean_bytes':1000,'cost_cap_usd':100,'actual_cost_usd':90,'capacity_exceeded':False,'pvc_sized_from_samples':True})
     p['gates']['delivery'].update({'webhook_p95_seconds':30,'retry_notification_ids_unchanged':True,'unknown_recovery_notifications':0,'mute_verified':True,'hold_verified':True})
     p['gates']['promql_oracle'].update({'prometheus_version':'3.5.0','expressions_compared':22})
     validate(p,c,image)
+    migration=copy.deepcopy(p)
+    migration['gates']['source_fidelity'].update({'reference_origin':'gcp','gcp_rollback_configured':True})
+    validate(migration,c,image)
     negative=0
     for name in GATES:
         bad=copy.deepcopy(p);del bad['gates'][name]
@@ -156,11 +168,26 @@ def self_test():
         except ValueError:negative+=1
         else:raise AssertionError(name+' image accepted')
     for name,field,value in [('load_24h','acknowledged_events',863999999),('gcs_outage','acknowledged_after_rpo_limit',1),
-        ('all_disk_restore','lost_recent_seconds',901),('delivery','unknown_recovery_notifications',1),('dual_write_7d','duration_seconds',604799)]:
+        ('all_disk_restore','lost_recent_seconds',901),('delivery','unknown_recovery_notifications',1),
+        ('source_fidelity','duration_seconds',1799),('source_fidelity','reference_origin','unknown'),
+        ('source_fidelity','complete',False),('source_fidelity','differences',1),
+        ('source_fidelity','compared_records',{signal:0 for signal in SOURCE_SIGNALS}),
+        ('source_fidelity','compared_records',{signal:True for signal in SOURCE_SIGNALS}),
+        ('source_fidelity','compared_records',{'logs':100}),
+        ('source_fidelity','compared_signals',['logs','metrics','traces']),
+        ('source_fidelity','gcp_rollback_configured',True)]:
         bad=copy.deepcopy(p);bad['gates'][name][field]=value
         try:validate(bad,c,image)
         except ValueError:negative+=1
         else:raise AssertionError(field+' invalid value accepted')
+    bad=copy.deepcopy(migration);bad['gates']['source_fidelity']['gcp_rollback_configured']=False
+    try:validate(bad,c,image)
+    except ValueError:negative+=1
+    else:raise AssertionError('migration without rollback accepted')
+    bad=copy.deepcopy(p);bad['schema']='sift.production-acceptance/v1'
+    try:validate(bad,c,image)
+    except ValueError:negative+=1
+    else:raise AssertionError('legacy acceptance silently reinterpreted')
     for name,field,value in [('load_30m','log_query_p95_seconds',True),('capacity','actual_cost_usd',float('nan')),
         ('node_failure','lost_acknowledged_events',False),('functional','bearer_token','must-not-be-published')]:
         bad=copy.deepcopy(p);bad['gates'][name][field]=value
@@ -204,6 +231,6 @@ def self_test():
         try:load_proof(proof_path,candidate,image)
         except ValueError:negative+=1
         else:raise AssertionError('missing raw evidence accepted')
-    print(f'production receipt self-test PASS: 2 synthetic positive, {negative} negative controls')
+    print(f'production receipt self-test PASS: 3 synthetic positive, {negative} negative controls')
 
 if __name__=='__main__': self_test()

@@ -86,7 +86,7 @@ def main():
     require(not args.output.exists(), 'output must be new')
     with args.output.open('x') as out:out.write(json.dumps(report,indent=2)+'\n')
     args.output.chmod(0o600)
-    print('Runtime checks passed. Load, fault, and dual-write gates have not run.')
+    print('Runtime checks passed. Load, fault, and source comparison gates have not run.')
 
 if __name__=='__main__':
     try:main()

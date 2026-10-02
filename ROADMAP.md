@@ -10,10 +10,16 @@ The rated target is 10,000 items per second. This is a target until P4 passes.
 | P1 | Native log collection, durable delivery, node-local metric scraping, OTLP alignment | Raw data and identity survive rotation, outage, and restart |
 | P2 | Replicated control data, V2 queries, bounded PromQL subset, saved queries | Correct queries and durable state after restart, leader change, and restore |
 | P3 | Error groups, alert evaluation, durable Webhook delivery, CLI, read-only MCP | Discover, notify, resolve, recur, mute, and recover with stable notification IDs |
-| P4 | GKE load, fault, restore, and shadow tests | One candidate passes every production gate with linked evidence |
+| P4 | GKE load, fault, restore, and source comparisons | One candidate passes every production gate with linked evidence |
 
 See [the production contract](docs/production-v1.md) for exact gates.
 See [current evidence](STATUS.md) for work that has passed.
+
+A new installation does not need existing application traffic.
+Start with a small controlled test workload. Check inputs against complete
+Sift reads. Run a source comparison for at least 30 minutes before acceptance.
+Seven-day dual-write is optional when an existing service moves from GCP.
+The 10,000-item-per-second rating still needs both load gates and fault tests.
 
 Later work includes a web UI, GCP managed-service inputs, full PromQL, and
 100,000 items per second. The first release has fixed membership and shards.

@@ -5,6 +5,13 @@ and three control voters. Keep membership and shard placement fixed.
 Sift owns collection, storage, queries, error groups, and alerts.
 Operators use the CLI, HTTP API, or read-only MCP tools.
 
+A new installation can start without existing application traffic.
+Use a controlled test program to emit logs, metrics, traces, and known errors.
+Save its input records before sending. Compare complete Sift reads with these
+records. Start with low traffic to check collection, queries, and notifications.
+This trial does not establish the 10,000-item-per-second capacity rating.
+Both rated load gates and fault tests below remain required for that rating.
+
 ## Inputs and identity
 
 Keep the structured service log format. Accept JSON and text logs too.
@@ -102,13 +109,21 @@ restore separately. Bind every receipt to the source commit, candidate run,
 root image digest, platform digest, configuration, time window, and evidence
 hashes. A prior 1x1 receipt cannot satisfy this production contract.
 
-Dual-write for seven days. Compare same-source logs, metric values, trace span
-sets, and alert events. Send Sift alerts to a verification Webhook first.
-Start with the service with the most logs and the service with the largest
-peak. Enable production notifications one service at a time after acceptance.
+Compare source data for at least 30 minutes. Check logs, metric values, trace
+span sets, and expected alert events. Every signal must have compared records.
+Compare every record in the time window. Empty, partial, or sampled data cannot
+pass. Send Sift alerts to a verification Webhook first.
+
+For a fresh installation, use generated inputs as the independent reference.
+No existing application traffic or GCP export is required.
+For an existing-service migration, use same-source GCP exports and keep the
+GCP rollback settings. Seven-day dual-write is an optional observation period.
+It is not a release gate. Choose a window that includes the service behavior
+to be checked. Start with the service with the most logs or the largest peak.
+Enable production notifications one service at a time after acceptance.
 Stop the switch on any data difference, restore failure, or capacity breach.
-Keep the GCP rollback settings. Services above the validated 10,000 items/s
-boundary remain on GCP until the next capacity tier passes.
+Services above the validated 10,000 items/s boundary remain on GCP until the
+next capacity tier passes.
 
 ## Local delivery and live acceptance
 
@@ -123,7 +138,12 @@ source. The CI job retains this report. Test filters are refused in candidate mo
 
 Copy `scripts/production/config.example.json` to a private work directory.
 Set the approved cost cap and current cost estimate. Include the cost of fault
-drills and verification. Measure store bytes per item with application data.
+drills and verification. Set `reference_origin` to `generated` for a new
+installation or `gcp` for a migration. Set `comparison_hours` to at least `0.5`.
+The base estimate covers 24.5 hours of rated load plus the comparison window.
+It does not reserve seven days. Measure stored bytes from the actual test or
+application workload. Generated traffic must still be sent to a real Sift
+process before its storage footprint is measured.
 The existing local segment policy keeps 30 days of hot data.
 A five-minute archive commit does not remove all local segment data.
 The preparation step reserves twice the measured 30-day store footprint
@@ -132,7 +152,7 @@ Measure stored bytes across logs, metrics, and traces. Size control data too.
 Include these PVC sizes in the cost estimate. Verify disk use during load.
 
 Save `gcloud container clusters describe` JSON to `cluster.json`.
-Save at least 100 matching application log entries to `samples.json`.
+Save at least 100 matching test or application log entries to `samples.json`.
 Use the container names and namespaces in the configuration. System logs do
 not qualify. Do not commit raw logs, credentials, or Secret contents.
 The current agents collect the instance namespace.
@@ -216,24 +236,36 @@ python3 -B scripts/production/run_load.py \
 The load output proves only its own gate. Measure Webhook delivery separately.
 Keep the per-second input and read hashes in `verified.jsonl`.
 The raw payload files are private. Do not commit them.
-Fault drills and seven-day comparisons remain required.
+Fault drills and a complete source comparison remain required.
 Use complete source exports for each comparison window.
 Each JSONL export starts with a `sift.production-observations/v1` header.
-The header includes origin, candidate, cluster hash, time window, services,
+The header includes origin (`generated`, `gcp`, or `sift`), candidate, cluster hash, time window, services,
 and exact counts for logs, metrics, traces, alerts, and control records.
 Set `complete: true`, `sampled: false`, and `truncated: false` only after all
 source pages have been read. Each data row has `signal`, `identity`, and `content`.
 Identity includes project, environment, and the source record key.
 Content includes the full normalized source payload and resource identity.
 Use the same normalization for both providers. Keep raw exports private.
+For generated inputs, build the reference export from the saved producer
+records. Do not use Sift reads to create the expected records.
+Include expected alert events from the test sequence. Read actual deliveries
+from the verification Webhook. Preserve notification IDs across retries.
 
 `scripts/production/compare_exports.py` compares all rows with a disk index.
 It detects missing records, extra records, changed contents, and duplicates.
 Use `--mode recovery` for Sift before and after a fault.
 Use `--mode dual-write` for GCP and Sift exports of the same source window.
-One matching window does not prove seven days or export completeness.
-The application-specific export adapters and continuous coverage must be
-verified with the selected source services before cutover.
+Use `--mode generated` for saved test inputs and Sift output.
+The comparison result uses `sift.production-comparison/v2` and records the
+reference origin. One matching window does not prove continuous coverage.
+Read every source page. Cover the full selected window without gaps.
+The `source_fidelity` gate requires at least 1,800 seconds, zero differences,
+complete data, and positive counts for logs, metrics, traces, and alerts.
+It requires GCP rollback only when `reference_origin` is `gcp`.
+The acceptance document uses `sift.production-acceptance/v2`.
+The old seven-day contract is not silently reinterpreted.
+The application-specific GCP adapters are needed only for an existing-service
+migration. Live generated-input exporters and fault evidence still need verification.
 Put each measured gate record in `evidence/GATE.json` beside `acceptance.json`.
 The acceptance document must contain the exact SHA-256 of each gate file.
 Use `scripts/release/production_receipt.py` as the gate field contract.

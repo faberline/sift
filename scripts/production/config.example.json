@@ -9,6 +9,8 @@
   "webhook_secret": "sift-webhooks",
   "webhook_hosts": ["REPLACE_WITH_EXACT_WEBHOOK_HOST"],
   "services": [{"project": "REPLACE_WITH_GCP_PROJECT", "namespace": "REPLACE_WITH_APP_NAMESPACE", "container": "REPLACE_WITH_APP_CONTAINER"}],
+  "reference_origin": "generated",
+  "comparison_hours": 0.5,
   "cost_cap_usd": 0,
   "estimated_hourly_cost_usd": 0,
   "estimated_fixed_cost_usd": 0,

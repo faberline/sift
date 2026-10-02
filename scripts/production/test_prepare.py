@@ -11,6 +11,7 @@ class Preparation(unittest.TestCase):
             'namespace':'app','name':'sift','archive_uri':'gs://project-one-backups/sift',
             'peer_tls_secret':'sift-peer-tls','webhook_secret':'sift-webhooks','webhook_hosts':['alerts.example.com'],
             'services':[{'project':'project-one','namespace':'app','container':'checkout'}],
+            'reference_origin':'generated','comparison_hours':.5,
             'cost_cap_usd':1000,'estimated_hourly_cost_usd':1,'estimated_fixed_cost_usd':10,
             'measured_store_bytes_per_item':1000,'store_pvc_gib':50000,'control_pvc_gib':5}
         self.cluster={'name':'acceptance','location':'asia-east1-a','status':'RUNNING','id':'permanent-cluster-id',
@@ -28,17 +29,30 @@ class Preparation(unittest.TestCase):
         self.assertEqual(resource['spec']['voterCount'],3)
         self.assertIn('@sha256:',resource['spec']['image'])
         self.assertIs(report['production_accepted'],False)
-        self.assertEqual(report['budget']['estimated_hours'],192.5)
+        self.assertEqual(report['budget']['estimated_hours'],25)
+        self.assertEqual(report['budget']['estimated_cost_usd'],35)
+        self.assertEqual(report['source_comparison'],{'reference_origin':'generated','minimum_hours':.5,'gcp_rollback_required':False})
+        self.assertNotIn('seven-day dual-write',report['required_live_checks'])
         self.assertEqual(report['local_hot_retention_seconds'],2592000)
         self.assertEqual(report['minimum_store_pvc_gib'],48280)
     def test_missing_spend_capacity_or_destination_controls_are_refused(self):
         original=copy.deepcopy(self.config)
         for key,value in [('cost_cap_usd',0),('cost_cap_usd',1),('measured_store_bytes_per_item',0),
             ('store_pvc_gib',1),('store_pvc_gib',50),('control_pvc_gib',True),('webhook_hosts',['*.example.com']),
-            ('archive_uri','gs://project-one-backups'),('estimated_hourly_cost_usd',float('nan'))]:
+            ('archive_uri','gs://project-one-backups'),('estimated_hourly_cost_usd',float('nan')),
+            ('reference_origin','unknown'),('comparison_hours',.49),('comparison_hours',True),
+            ('comparison_hours',float('nan'))]:
             with self.subTest(key=key,value=value):
                 self.config=copy.deepcopy(original);self.config[key]=value
                 with self.assertRaises(ValueError):self.run_prepare()
+    def test_migration_window_is_explicit_and_budgeted_without_a_seven_day_minimum(self):
+        self.config.update({'reference_origin':'gcp','comparison_hours':1,'cost_cap_usd':35.5})
+        _,report=self.run_prepare()
+        self.assertEqual(report['budget']['estimated_hours'],25.5)
+        self.assertEqual(report['budget']['estimated_cost_usd'],35.5)
+        self.assertTrue(report['source_comparison']['gcp_rollback_required'])
+        self.config['cost_cap_usd']=35.49
+        with self.assertRaises(ValueError):self.run_prepare()
     def test_system_or_other_project_samples_cannot_size_applications(self):
         for key,value in [('namespace_name','kube-system'),('project_id','another-project'),('container_name','other'),
                           ('cluster_name','another-cluster'),('location','another-location')]:

@@ -1,4 +1,4 @@
-"""Compare complete canonical exports. One comparison does not prove a seven-day run."""
+"""Compare complete canonical exports against generated input, GCP, or pre-fault Sift data."""
 import argparse, hashlib, json, os, re, sqlite3, tempfile
 from pathlib import Path
 
@@ -32,7 +32,7 @@ def import_file(db, path, table, maximum):
         require(set(header) == HEAD and header['schema'] == 'sift.production-observations/v1', 'export header differs')
         require(header['complete'] is True and header['sampled'] is False and header['truncated'] is False,
                 'partial or sampled exports cannot prove correctness')
-        require(header['origin'] in ('sift', 'gcp'), 'export origin differs')
+        require(header['origin'] in ('sift', 'gcp', 'generated'), 'export origin differs')
         require(type(header['source_commit']) is str and re.fullmatch('[0-9a-f]{40}',header['source_commit']), 'candidate source is invalid')
         require(type(header['image']) is str and re.fullmatch(r'ghcr\.io/faberline/sift@sha256:[0-9a-f]{64}',header['image']), 'candidate image is invalid')
         require(type(header['cluster_identity_sha256']) is str and re.fullmatch('[0-9a-f]{64}',header['cluster_identity_sha256']), 'cluster identity is invalid')
@@ -63,7 +63,7 @@ def import_file(db, path, table, maximum):
     return header, sha.hexdigest(), counts
 
 def compare(before, after, mode, maximum=2_000_000):
-    require(mode in ('recovery','dual-write'), 'comparison mode differs')
+    require(mode in ('recovery','dual-write','generated'), 'comparison mode differs')
     with tempfile.TemporaryDirectory(prefix='sift-export-comparison-') as temp:
         db = sqlite3.connect(str(Path(temp) / 'observations.sqlite'))
         try:
@@ -75,7 +75,8 @@ def compare(before, after, mode, maximum=2_000_000):
                 db.execute('CREATE TABLE '+table+'(signal TEXT,key BLOB,sha BLOB,PRIMARY KEY(signal,key)) WITHOUT ROWID')
             bh, bs, bc = import_file(db, Path(before), 'before_rows', maximum)
             ah, ass, ac = import_file(db, Path(after), 'after_rows', maximum)
-            require(bh['origin'] == ('sift' if mode == 'recovery' else 'gcp') and ah['origin'] == 'sift', 'comparison origins differ')
+            origin={'recovery':'sift','dual-write':'gcp','generated':'generated'}[mode]
+            require(bh['origin']==origin and ah['origin']=='sift','comparison origins differ')
             for name in ('source_commit','image','cluster_identity_sha256','start_unix_nano','end_unix_nano','services'):
                 require(bh[name] == ah[name], 'comparison ' + name + ' differs')
             require(sum(bc.values()) > 0, 'empty exports cannot prove recovery or comparison')
@@ -88,8 +89,9 @@ def compare(before, after, mode, maximum=2_000_000):
                 changed = db.execute('SELECT count(*) FROM before_rows b JOIN after_rows a '
                     'ON b.signal=a.signal AND b.key=a.key WHERE b.signal=? AND b.sha<>a.sha', (signal,)).fetchone()[0]
                 differences[signal] = {'missing':missing,'extra':extra,'changed':changed}
-            return {'schema':'sift.production-comparison/v1','result':'matched' if not any(
+            return {'schema':'sift.production-comparison/v2','result':'matched' if not any(
                 any(value.values()) for value in differences.values()) else 'different', 'production_accepted':False,
+                'reference_origin':bh['origin'],
                 'source_commit':bh['source_commit'],'image':bh['image'],'cluster_identity_sha256':bh['cluster_identity_sha256'],
                 'start_unix_nano':bh['start_unix_nano'],'end_unix_nano':bh['end_unix_nano'],
                 'before_sha256':bs,'after_sha256':ass,'compared_records':bc,'differences':differences}
@@ -98,7 +100,7 @@ def compare(before, after, mode, maximum=2_000_000):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--before',type=Path,required=True); parser.add_argument('--after',type=Path,required=True)
-    parser.add_argument('--mode',choices=['recovery','dual-write'],required=True)
+    parser.add_argument('--mode',choices=['recovery','dual-write','generated'],required=True)
     parser.add_argument('--output',type=Path,required=True)
     args = parser.parse_args()
     result = compare(args.before,args.after,args.mode)

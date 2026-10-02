@@ -28,8 +28,11 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
     image='ghcr.io/faberline/sift@'+binding['root_digest']
     required={'project','cluster','location','namespace','name','archive_uri','peer_tls_secret','webhook_secret',
         'webhook_hosts','services','cost_cap_usd','estimated_hourly_cost_usd','estimated_fixed_cost_usd',
-        'measured_store_bytes_per_item','store_pvc_gib','control_pvc_gib'}
+        'measured_store_bytes_per_item','store_pvc_gib','control_pvc_gib','reference_origin','comparison_hours'}
     require(type(config) is dict and set(config)==required, 'acceptance configuration fields differ')
+    require(config['reference_origin'] in ('generated','gcp'),'source reference must be generated or GCP')
+    comparison_hours=number(config['comparison_hours'],'source comparison hours')
+    require(comparison_hours>=.5,'source comparison must cover at least 30 minutes')
     for name in ['namespace','name','peer_tls_secret','webhook_secret']:
         require(re.fullmatch('[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?',config[name]) is not None, name+' must be a Kubernetes name')
     require(cluster.get('name')==config['cluster'] and cluster.get('location')==config['location'], 'cluster differs')
@@ -44,7 +47,7 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
     for host in hosts:
         require(type(host) is str and len(host)<=253 and re.fullmatch(r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+',host) is not None,'Webhook hosts must be exact DNS names')
     services=config['services']
-    require(type(services) is list and len(services)>0,'application services are required')
+    require(type(services) is list and len(services)>0,'test or application services are required')
     for service in services:
         require(type(service) is dict and set(service)=={'project','namespace','container'}, 'service source fields differ')
         require(all(type(value) is str and value for value in service.values()),'service identity is required')
@@ -61,7 +64,7 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
         if any(labels.get('project_id')==s['project'] and labels.get('namespace_name')==s['namespace']
             and labels.get('container_name')==s['container'] for s in services):
             selected.append(entry)
-    require(len(selected)>=100,'at least 100 matching application samples are required')
+    require(len(selected)>=100,'at least 100 matching test or application samples are required')
     require(all(any(e['resource']['labels'].get('project_id')==s['project']
         and e['resource']['labels'].get('namespace_name')==s['namespace']
         and e['resource']['labels'].get('container_name')==s['container'] for e in selected) for s in services), 'each service needs samples')
@@ -79,9 +82,9 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
     fixed=config['estimated_fixed_cost_usd']
     require(type(fixed) in (int,float) and math.isfinite(fixed) and fixed>=0,'fixed cost estimate is invalid')
     # The operator supplies current rates for nodes, disks, GCS, and request costs.
-    hours=24.5+7*24
+    hours=24.5+comparison_hours
     estimate=hours*hourly+fixed
-    require(estimate<=cap,'load and seven-day comparison estimate exceeds the cost cap')
+    require(estimate<=cap,'load and source comparison estimate exceeds the cost cap')
     identity={key:config[key] for key in ['project','cluster','location']}
     identity['self_link']=cluster['selfLink']
     require(type(cluster.get('id')) is str and 0<len(cluster['id'])<=512,'permanent GKE cluster identity is required')
@@ -95,8 +98,10 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
             'storage':{'storeSize':str(config['store_pvc_gib'])+'Gi','controlSize':str(config['control_pvc_gib'])+'Gi','gatewaySize':'2Gi','querySize':'2Gi'},
             'ingest':{'maxItemsPerMinute':720000,'maxConcurrentRequests':32},
             'gcpProjectId':config['project'],'gkeClusterName':config['cluster'],'gkeLocation':config['location']}}
-    report={'schema':'sift.production-preparation/v1','result':'prepared','production_accepted':False,
+    report={'schema':'sift.production-preparation/v2','result':'prepared','production_accepted':False,
         'source_commit':binding['commit'],'image':image,'cluster_identity_sha256':cluster_hash,
+        'source_comparison':{'reference_origin':config['reference_origin'],'minimum_hours':comparison_hours,
+            'gcp_rollback_required':config['reference_origin']=='gcp'},
         'sample_sources':services,
         'sample_count':len(sizes),'source_entry_mean_bytes':sum(sizes)/len(sizes),
         'source_entry_p95_bytes':sizes[math.ceil(len(sizes)*.95)-1],
@@ -105,7 +110,7 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
         'budget':{'cap_usd':cap,'estimated_hours':hours,'estimated_cost_usd':estimate},
         'required_live_checks':['three distinct ready nodes','same candidate on all Sift Pods','GCS write and read',
             'Webhook allowlist and Secret mount','GCP external probe','30-minute load','24-hour load',
-            'node and PVC loss','GCS outage longer than 15 minutes','all-disk joint restore','seven-day dual-write']}
+            'node and PVC loss','GCS outage longer than 15 minutes','all-disk joint restore','complete source comparison']}
     return resource,report
 
 def main():

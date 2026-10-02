@@ -21,6 +21,17 @@ class Exports(unittest.TestCase):
         result=compare(self.file('before'),self.file('after'),'recovery')
         self.assertEqual(result['result'],'matched');self.assertIs(result['production_accepted'],False)
         self.assertEqual(result['compared_records'],{s:1 for s in SIGNALS})
+    def test_generated_input_can_verify_a_fresh_install_without_gcp_traffic(self):
+        header=copy.deepcopy(self.header);header['origin']='generated'
+        before=self.file('generated',header=header)
+        result=compare(before,self.file('sift'),'generated')
+        self.assertEqual(result['result'],'matched')
+        self.assertEqual(result['reference_origin'],'generated')
+        self.assertIs(result['production_accepted'],False)
+        rows=copy.deepcopy(self.rows);rows[3]['content']['value']=[9]
+        self.assertEqual(compare(before,self.file('sift-changed',rows=rows),'generated')['differences']['alerts']['changed'],1)
+        with self.assertRaises(ValueError):compare(self.file('sift-before'),self.file('sift-after'),'generated')
+        with self.assertRaises(ValueError):compare(before,self.file('sift-after'),'dual-write')
     def test_equal_row_counts_cannot_hide_changed_source_identity_or_content(self):
         rows=copy.deepcopy(self.rows);rows[0]['identity']['source_id']='other';rows[1]['content']['value']=[9]
         result=compare(self.file('before'),self.file('after',rows=rows),'recovery')

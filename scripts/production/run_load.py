@@ -188,7 +188,7 @@ def run_gate(args, binding, resource, preflight, runtime, templates, api, enviro
                 raise
     write(args.output_dir / (args.gate + '.json'), gate)
     api.close()
-    print('Load gate passed. Fault, delivery, capacity, and seven-day gates remain required.')
+    print('Load gate passed. Fault, delivery, capacity, and source comparison gates remain required.')
 
 if __name__ == '__main__':
     try: main()
