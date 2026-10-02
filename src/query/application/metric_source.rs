@@ -7,6 +7,7 @@ use super::{
 use crate::app::{interfaces::http::api_error::ApiError, service_state::ServiceState};
 use crate::projection::{MetricQuery, MetricSeriesResultV1, PROJECTION_METRIC_STORE};
 use crate::query::domain::metric_expression::{Expr, Labels, Sample, Series};
+use crate::query::domain::query_time::requires_archive_at;
 use crate::shared_kernel::{
     event::{AttributeValue, SignalKind},
     query_v2::QueryRequestV2,
@@ -156,11 +157,10 @@ pub(crate) fn load_metrics(
             .ok_or_else(|| ApiError::bad_request("invalid_query", "metric end overflow"))?,
     )
     .map_err(|e| ApiError::bad_request("invalid_query", e.to_string()))?;
-    let replay = if start
-        < (chrono::Utc::now() - chrono::Duration::minutes(15))
-            .timestamp_nanos_opt()
-            .unwrap_or(i64::MIN)
-    {
+    let replay = if requires_archive_at(
+        chrono::DateTime::from_timestamp_nanos(start),
+        chrono::Utc::now(),
+    ) {
         let replay = state.projections().new_metric_replay();
         match replay_cold_query(
             state,

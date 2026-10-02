@@ -6,6 +6,7 @@ use super::{
 use crate::app::{interfaces::http::api_error::ApiError, service_state::ServiceState};
 use crate::projection::{LogQuery, PROJECTION_LOGGING_STORE};
 use crate::query::domain::filter_evaluator::evaluate_filter;
+use crate::query::domain::query_time::requires_archive_at;
 use crate::shared_kernel::{
     event::SignalKind, query_expression::QueryExpressionV1, query_response::QueryResponseV1,
     query_v2::QueryRequestV2,
@@ -44,7 +45,7 @@ pub(crate) fn count_logs(
         .projections()
         .catch_up(PROJECTION_LOGGING_STORE)
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    let replay = if start_time < Utc::now() - chrono::Duration::minutes(15) {
+    let replay = if requires_archive_at(start_time.with_timezone(&Utc), Utc::now()) {
         let replay = state
             .projections()
             .new_log_replay()
