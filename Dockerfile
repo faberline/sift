@@ -1,5 +1,5 @@
 # HANDWRITE-BEGIN gap="sift-source-image-artifact" tracker="1606" reason="Provide the source-build Sift image contract."
-FROM rust:1.96-bookworm AS build
+FROM rust:1.96-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS build
 ARG TARGETPLATFORM
 WORKDIR /workspace
 COPY --chown=65532:65532 . .
@@ -10,7 +10,7 @@ RUN --mount=type=cache,id=sift-cargo-registry,target=/usr/local/cargo/registry \
     && install -D -m 0755 /workspace/target/release/sift /image-root/usr/local/bin/sift
 RUN install -d -m 0700 -o 65532 -g 65532 /image-root/var/lib/sift
 
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:ce0d66bc0f64aae46e6a03add867b07f42cc7b8799c949c2e898057b7f75a151
 COPY --chown=65532:65532 --from=build /image-root/usr/local/bin/sift /usr/local/bin/sift
 COPY --from=build --chown=65532:65532 --chmod=0700 /image-root/var/lib/sift /var/lib/sift
 ENV SIFT_HOST=0.0.0.0 \

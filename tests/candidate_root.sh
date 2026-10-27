@@ -92,4 +92,23 @@ if [[ -e "$temporary_root/network-called" ]]; then
   exit 1
 fi
 
+# An inherited child-probe flag would make the real VAT journeys return early.
+# The nested copy has no candidate test suite: reaching that suite would fail
+# differently, so the exact diagnostic proves rejection at the entry boundary.
+for probe in VAT_OBSERVABILITY_PROBE VAT_SERVICE_OBSERVABILITY_PROBE; do
+  for value in '' 1; do
+    if env -u VAT_OBSERVABILITY_PROBE -u VAT_SERVICE_OBSERVABILITY_PROBE \
+        SIFT_REPO_ROOT="$nested_root" "$probe=$value" \
+        bash "$nested_root/test.sh" --candidate \
+        >"$temporary_root/probe.stdout" 2>"$temporary_root/probe.stderr"; then
+      echo "candidate mode accepted inherited $probe" >&2
+      exit 1
+    fi
+    grep -F \
+      'candidate mode refuses inherited VAT_OBSERVABILITY_PROBE or VAT_SERVICE_OBSERVABILITY_PROBE' \
+      "$temporary_root/probe.stderr" >/dev/null
+    echo "candidate inherited-probe refusal: $probe (value length ${#value}): ok"
+  done
+done
+
 echo "candidate root isolation: ok"
