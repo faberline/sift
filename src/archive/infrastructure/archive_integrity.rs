@@ -8,10 +8,11 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 
 use crate::archive::domain::archive_event_time::acknowledgement_time_bounds;
-use crate::archive::domain::archive_manifest::ArchiveSegment;
 use crate::archive::infrastructure::parquet_event_codec::{
     decode_parquet_batch, open_parquet_reader,
 };
+use crate::shared_kernel::archive_manifest::ArchiveSegment;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(super) fn verify_archive_segment_file(segment: &ArchiveSegment, path: &Path) -> Result<()> {
@@ -101,7 +102,7 @@ pub(super) fn verify_bytes(
     bytes: &[u8],
     kind: &str,
 ) -> Result<()> {
-    if bytes.len() as u64 != expected_size || sha256(bytes) != expected_hash {
+    if bytes.len() as u64 != expected_size || sha256_hex(bytes) != expected_hash {
         bail!("{kind} archive object failed hash/size verification");
     }
     Ok(())
@@ -131,8 +132,4 @@ pub(super) fn verify_file(
         bail!("{kind} archive object failed hash/size verification");
     }
     Ok(())
-}
-
-pub(in crate::archive) fn sha256(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
 }

@@ -47,12 +47,13 @@ pub(super) fn base_event(
     } else {
         observed_nanos
     });
-    let mut event = OperationalEventV2::for_project(
+    let mut event = OperationalEventV2::for_project_at(
         project,
         environment,
         event_id,
         signal_kind(signal),
         payload,
+        Utc::now(),
     );
     event.occurred_at = occurred_at;
     event.observed_at = observed_at;

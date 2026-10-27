@@ -6,14 +6,13 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::journal::application::dedupe_window::append_unique_dedupe_page;
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
 use crate::journal::domain::journal_limits::RECOVERY_PAGE_EVENTS;
-use crate::journal::domain::journal_state::JournalState;
-use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::domain::resident_window::ResidentWindow;
 use crate::shared_kernel::event_content_digest::{decode_digest, xor_digest};
 
-impl DurableJournal {
+impl JournalRuntime {
     /// Adopt a hash-verified archive checkpoint on a caught-up replica.
     ///
     /// The journal write lock also blocks queries and appends. The local
@@ -22,8 +21,8 @@ impl DurableJournal {
     /// to rebuild from the retained canonical rows.
     pub(crate) fn adopt_archive_checkpoint(
         &self,
-        restored: &DurableJournal,
-        receipt: &crate::archive::application::archive_receipts::ArchiveReceipt,
+        restored: &dyn crate::journal::domain::journal_api::JournalApi<Error = anyhow::Error>,
+        receipt: &crate::shared_kernel::archive_receipts::ArchiveReceipt,
         expected_raw_cursor: u64,
     ) -> Result<()> {
         if receipt.manifest.raft_snapshot_index != expected_raw_cursor
@@ -36,7 +35,7 @@ impl DurableJournal {
         self.recovery_required.store(true, Ordering::Release);
         let mut state = self.state.write().expect("journal state lock poisoned");
         self.dedupe.preflight_rebuild()?;
-        let staged_dedupe = self.dedupe.replace_from(&restored.dedupe)?;
+        let staged_dedupe = self.dedupe.replace_from(restored.dedupe())?;
         if staged_dedupe.indexed_through_cursor != expected_raw_cursor
             || staged_dedupe.newest_cursor > expected_raw_cursor
             || staged_dedupe.rebuild_required
@@ -44,19 +43,16 @@ impl DurableJournal {
             bail!("validated archive checkpoint dedupe index disagrees with its manifest");
         }
         let last_cursor = state.last_cursor.max(expected_raw_cursor);
-        let prior_archive =
-            crate::archive::application::archive_status_queries::committed_status(self.data_dir())?;
+        let prior_archive = self.archive_read.committed_status(self.data_dir())?;
         let archive_identity_changed = prior_archive.as_ref().is_some_and(|status| {
             status.manifest_uri != receipt.manifest_uri
                 || status.manifest_sha256 != receipt.manifest_sha256
         });
         self.storage
             .reconcile_retained_prefix(restored.storage(), receipt.manifest.raft_snapshot_index)?;
-        let watermarks =
-            crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt(
-                self.data_dir(),
-                receipt,
-            )?;
+        let watermarks = self
+            .archive_maintenance
+            .adopt_receipt(self.data_dir(), receipt)?;
         self.wal.compact_through(watermarks)?;
 
         let projection_generation = if receipt.manifest.retention_scan.is_none()
@@ -67,13 +63,18 @@ impl DurableJournal {
         } else {
             state.projection_generation
         };
-        let mut rebuilt = JournalState {
+        let mut rebuilt = ResidentWindow {
             projection_generation,
             retention_generation: receipt.manifest.retention_generation,
-            ..JournalState::default()
+            ..ResidentWindow::default()
         };
-        let mut recovery =
-            CanonicalRecoveryReader::open(&self.storage, &self.wal, watermarks, 0, false)?;
+        let mut recovery = self.resources.reader(
+            self.storage.as_ref(),
+            self.wal.as_ref(),
+            watermarks,
+            0,
+            false,
+        )?;
         let mut local_after_archive = 0_u64;
         let mut local_after_archive_digest = [0_u8; 32];
         let mut suffix_dedupe_page = Vec::with_capacity(RECOVERY_PAGE_EVENTS);
@@ -88,13 +89,13 @@ impl DurableJournal {
                     xor_event_content_digest(&mut local_after_archive_digest, &event.event)?;
                     suffix_dedupe_page.push(event.clone());
                     if suffix_dedupe_page.len() == RECOVERY_PAGE_EVENTS {
-                        append_unique_dedupe_page(&self.dedupe, &mut suffix_dedupe_page)?;
+                        append_unique_dedupe_page(self.dedupe.as_ref(), &mut suffix_dedupe_page)?;
                     }
                 }
                 Self::insert_recovered(&mut rebuilt, event, self.resident_limit)?;
             }
         }
-        append_unique_dedupe_page(&self.dedupe, &mut suffix_dedupe_page)?;
+        append_unique_dedupe_page(self.dedupe.as_ref(), &mut suffix_dedupe_page)?;
         rebuilt.last_cursor = rebuilt.last_cursor.max(last_cursor);
         let retained_events = receipt
             .manifest
@@ -107,15 +108,19 @@ impl DurableJournal {
             .try_into()
             .map_err(|_| anyhow::anyhow!("archive event content digest must be 32 bytes"))?;
         rebuilt.event_content_digest = xor_digest(archived_digest, local_after_archive_digest);
-        crate::storage::JournalHead::new(rebuilt.last_cursor, retained_events)
+        self.resources.persist_head(
+            self.data_dir(),
+            &crate::journal::domain::journal_head::JournalHead::new(
+                rebuilt.last_cursor,
+                retained_events,
+            )
             .with_projection_generation(projection_generation)
-            .with_retention_generation(rebuilt.retention_generation)
-            .persist(self.data_dir())?;
+            .with_retention_generation(rebuilt.retention_generation),
+        )?;
         *state = rebuilt;
         drop(state);
-        crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
-            self, 128, 1_280_000,
-        )?;
+        self.archive_maintenance
+            .resume_local_blob_gc(self, 128, 1_280_000)?;
         self.recovery_required.store(false, Ordering::Release);
         Ok(())
     }
@@ -125,7 +130,7 @@ impl DurableJournal {
     /// It does not download every cumulative Parquet segment.
     pub(crate) fn adopt_archive_retention_delta(
         &self,
-        receipt: &crate::archive::application::archive_receipts::ArchiveReceipt,
+        receipt: &crate::shared_kernel::archive_receipts::ArchiveReceipt,
         expected_raw_cursor: u64,
     ) -> Result<()> {
         let delta = receipt
@@ -138,9 +143,10 @@ impl DurableJournal {
         {
             bail!("archive retention delta does not match its Raft cursor or generation");
         }
-        let local_status =
-            crate::archive::application::archive_status_queries::committed_status(self.data_dir())?
-                .context("archive retention delta requires its source receipt")?;
+        let local_status = self
+            .archive_read
+            .committed_status(self.data_dir())?
+            .context("archive retention delta requires its source receipt")?;
         if local_status.manifest_uri != delta.source_manifest_uri
             || local_status.manifest_sha256 != delta.source_manifest_sha256
             || local_status.retention_generation != delta.source_generation
@@ -160,11 +166,9 @@ impl DurableJournal {
         let cutoff = DateTime::<Utc>::from_timestamp_nanos(delta.cutoff_unix_nano);
         self.storage
             .evict_expired_before(cutoff, expected_raw_cursor)?;
-        let watermarks =
-            crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt(
-                self.data_dir(),
-                receipt,
-            )?;
+        let watermarks = self
+            .archive_maintenance
+            .adopt_receipt(self.data_dir(), receipt)?;
         self.apply_expiration_head(
             cutoff,
             delta.source_event_count,
@@ -173,9 +177,8 @@ impl DurableJournal {
             decode_digest(&receipt.manifest.event_content_sha256)?,
             false,
         )?;
-        crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
-            self, 128, 1_280_000,
-        )?;
+        self.archive_maintenance
+            .resume_local_blob_gc(self, 128, 1_280_000)?;
         self.wal.compact_through(watermarks)?;
         self.recovery_required.store(false, Ordering::Release);
         Ok(())
@@ -187,7 +190,7 @@ impl DurableJournal {
     /// restore on every lifecycle tick.
     pub(crate) fn adopt_archive_coverage(
         &self,
-        receipt: &crate::archive::application::archive_receipts::ArchiveReceipt,
+        receipt: &crate::shared_kernel::archive_receipts::ArchiveReceipt,
         expected_raw_cursor: u64,
     ) -> Result<()> {
         if receipt.manifest.raft_snapshot_index != expected_raw_cursor {
@@ -216,16 +219,19 @@ impl DurableJournal {
         if state.total_events != expected_events {
             bail!("archive coverage event count disagrees with the caught-up journal");
         }
-        let watermarks =
-            crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt(
-                self.data_dir(),
-                receipt,
-            )?;
+        let watermarks = self
+            .archive_maintenance
+            .adopt_receipt(self.data_dir(), receipt)?;
         state.retention_generation = receipt.manifest.retention_generation;
-        crate::storage::JournalHead::new(state.last_cursor, state.total_events)
+        self.resources.persist_head(
+            self.data_dir(),
+            &crate::journal::domain::journal_head::JournalHead::new(
+                state.last_cursor,
+                state.total_events,
+            )
             .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())?;
+            .with_retention_generation(state.retention_generation),
+        )?;
         self.wal.compact_through(watermarks)?;
         self.recovery_required.store(false, Ordering::Release);
         Ok(())

@@ -1,0 +1,73 @@
+{
+  "schema": "sift.online-dependencies/v1",
+  "rust": "1.96.1",
+  "python": "3.11.11",
+  "uv": "0.12.1",
+  "docker": "29.8.2",
+  "repositories": {
+    "workspace": "c9f4b9371dd7ed4828b0d94a420895fe8ecc3ebe",
+    "vat": "1ba31b2f2ddc49bad1d85a03f889a164227667c9",
+    "lumen": "efa78ff4158d1565d5e879e0cf3cf46072f27c8e",
+    "tape": "a47393f2dc30c07c3be5d4f6c39ddb1a43ea2cf7",
+    "relay": "c7e3a7350b5e5867a1e7a3509cc894a6ce17e996",
+    "defer": "f01a079cc0ae023d77d96ef3590aae0becf59d62"
+  },
+  "checker": {
+    "repository": "faberline/workspace",
+    "revision": "c4e6dac20272384890193e6e2f8c86c4b8b0fb2b",
+    "blobs": {
+      "scripts/meta/rust_arch/__init__.py": "a297060bb95c7cea394406448cb92083c0056be9",
+      "scripts/meta/rust_arch/cargo.py": "ae2a106d660438313e0c365aa50e2d6a01d60974",
+      "scripts/meta/rust_arch/cli.py": "61fb57c71d464f6b39bb677ee5c770e8a13ec413",
+      "scripts/meta/rust_arch/config.py": "fe2a97a53ebf5e42ae6b2cd4349090610c737dd3",
+      "scripts/meta/rust_arch/files.py": "3d45e828743b2241d9782db9650668066f788e12",
+      "scripts/meta/rust_arch/model.py": "c17596f946bea19859b8f3afa098bb6337f97358",
+      "scripts/meta/rust_arch/modtree.py": "987a5fa81cf4adf40c5c7f1bc9ab3d08f3e079a3",
+      "scripts/meta/rust_arch/policy.toml": "d6dee6072e72f0da67ac8df63605ce03e89cedd6",
+      "scripts/meta/rust_arch/ratchet.py": "81a860e7d05ba41816b38d24ecc903f29c359d9f",
+      "scripts/meta/rust_arch/report.py": "75aca8679a1633376c4a9f48e4aac919eed79330",
+      "scripts/meta/rust_arch/rules_ddd.py": "f4c991afb6b97b2a25c5826d6216c6d59cf9b2b6",
+      "scripts/meta/rust_arch/rules_deps.py": "c37d89bde4356ea3fc6c39af90dabb9f30845669",
+      "scripts/meta/rust_arch/rules_layout.py": "4d14372e51b0dfe6d376c651d4614dd876c52e00",
+      "scripts/meta/rust_arch/rules_size.py": "e57ad732fd57a57db433d498a3ec9ef1fef5c238",
+      "scripts/meta/rust_arch/rustsrc.py": "abf51a8513ae10908e3f5dd1f567ff8b4a204a32",
+      "scripts/meta/rust_arch_contract.py": "91f847973a1ca1a94d21813ddf8680407a7e6ecf"
+    }
+  },
+  "ignored_cases": {
+    "gke_operation_scope": 19,
+    "operator_reconcile_oracle": 3,
+    "vat_lumen_observability_e2e": 1,
+    "vat_service_observability_e2e": 1
+  },
+  "limits": {
+    "gate_output_bytes": 16777216,
+    "artifact_tail_bytes": 16384,
+    "artifact_total_bytes": 524288,
+    "retention_days": 3
+  },
+  "checker_requirements_sha256": "acaa356aef1cc032d23933059016b867b7ce66ca5c5b30b77cae25829a012082",
+  "required_gates": [
+    "prepare",
+    "ci-unit-controls",
+    "candidate-entrypoint",
+    "format",
+    "locked-build",
+    "core-build-stamp",
+    "full-rust-suite",
+    "ignored-inventory",
+    "all-required-ignored",
+    "clippy",
+    "canonical-architecture",
+    "zero-exceptions",
+    "compatibility-bytes",
+    "official-rw1",
+    "docker-named-volume",
+    "source-unchanged"
+  ],
+  "images": {
+    "rust": "rust:1.96-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc",
+    "runtime": "gcr.io/distroless/cc-debian12:nonroot@sha256:ce0d66bc0f64aae46e6a03add867b07f42cc7b8799c949c2e898057b7f75a151",
+    "go": "docker.io/library/golang:1.25.0-bookworm@sha256:81dc45d05a7444ead8c92a389621fafabc8e40f8fd1a19d7e5df14e61e98bc1a"
+  }
+}

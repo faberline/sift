@@ -15,7 +15,7 @@ code.
 | **published language** | The types and functions a context offers to other contexts: its application layer, or its whole public API when it has none. |
 | **shared kernel** | `src/shared_kernel/`: the event model and the digests and ids every context shares, usable without declaring a dependency. |
 | **assembly** | Code that wires contexts together and belongs to none: `src/lib.rs`, `src/app/` and `src/bin/sift/`. |
-| **compat facade** | A module that only re-exports items from their new home, so a public path from before the DDD split keeps compiling. |
+| **compat facade** | A module that only re-exported items from their new home, so a public path from before the DDD split kept compiling. P1 added them and P2 deleted them; see [architecture](architecture.md#public-api). |
 | **exception** | A recorded rule break in `ddd.toml`, with the exact files and a reason that says what P2 does. |
 | **P1 / P2** | The two phases of the DDD split: P1 moves and splits files without changing behaviour; P2 makes each approved change. See [ADR 0001](adr/0001-ddd-layout.md). |
 
@@ -47,7 +47,7 @@ code.
 | **canonical WAL** | The per-signal framed write-ahead log, fsynced before acknowledgement. It is the only source of truth; every index can be rebuilt from it. |
 | **raw cursor** | The journal's monotonic append position. A checkpoint pairs it with the Raft applied index; both describe the same durable prefix. |
 | **journal head** | The persisted journal identity (last cursor, retained event count, projection generation, retention generation). It survives hot-segment eviction. |
-| **resident window** | The in-memory tail of recent stored events the journal keeps, 100,000 by default. The code calls it `JournalState`; P2 renames it. |
+| **resident window** | The in-memory tail of recent stored events the journal keeps, 100,000 by default. The code calls it `ResidentWindow`. |
 | **epoch map / virtual bucket** | An event id hashes to one of 4,096 virtual buckets (`VIRTUAL_BUCKETS`), and an epoch map assigns buckets to shards from an activation cursor on. |
 | **idempotency window** | Six hours (`IDEMPOTENCY_WINDOW_SECONDS`) of hourly acknowledgement generations, during which a repeated event id is a duplicate. |
 | **dedupe receipt** | What the journal keeps for each acknowledged event (project, event id, cursor, acknowledgement time) to detect duplicates. |
@@ -109,7 +109,7 @@ code.
 | **storage reservation** | The local disk bytes an append reserves before it is admitted: three times the encoded bytes plus 128 bytes per event. |
 | **governance policy** | A per-project privacy and cardinality policy (string cap, attribute allow and deny lists, redaction text, GenAI capture) applied before an event enters Raft. |
 | **GenAI content capture** | A policy flag, off by default. When off, GenAI prompt, completion and message attributes are redacted. |
-| **Cloud Logging coexistence identity** | A stable event id (`gcp-log-…`) computed from project, monitored resource, timestamp and canonical payload, so the Cloud Logging normalizer and CRI collection give one line one id and dual delivery is duplicate-safe. |
+| **Cloud Logging coexistence identity** | A stable event id (`gcp-log-…`) computed from project, monitored resource, timestamp and canonical payload. CRI collection derives it when Cloud Logging coexistence is on. |
 | **drain** | Refusing new ingest batches and waiting until every accepted batch has a durable result; readiness reports not ready meanwhile. |
 
 ## Collector

@@ -12,3 +12,5 @@ pub(crate) mod query_request_v1;
 pub(crate) mod query_response_v1;
 pub(crate) mod query_role_router;
 pub(crate) mod query_v1;
+
+pub(crate) mod forward_response;

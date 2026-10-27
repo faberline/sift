@@ -123,6 +123,31 @@ async fn min_cursor_wait_returns_typed_lag_then_wakes_after_projection_publish()
     );
 }
 
+#[tokio::test]
+async fn lag_port_keeps_wire_bytes_and_error_text_for_each_projection() {
+    let temp = tempfile::tempdir().unwrap();
+    let journal = Arc::new(DurableJournal::open(temp.path()).unwrap());
+    let runtime = ProjectionRuntime::open(temp.path(), journal).unwrap();
+    for name in [
+        PROJECTION_LOGGING_STORE,
+        sift::projection::PROJECTION_METRIC_STORE,
+        sift::projection::PROJECTION_TRACE_STORE,
+        "unknown-projection",
+    ] {
+        let lag = runtime
+            .wait_for_min_cursor(name, 123, Duration::from_millis(1))
+            .await
+            .unwrap_err();
+        let previous = service_projection::ProjectionLag::new(name, 123, 0, 1);
+        assert_eq!(
+            serde_json::to_vec(&lag).unwrap(),
+            serde_json::to_vec(&previous).unwrap()
+        );
+        assert_eq!(lag.to_string(), previous.to_string());
+        assert!(std::error::Error::source(&lag).is_none());
+    }
+}
+
 #[test]
 fn projection_state_is_checkpointed_in_large_intervals_and_flushes_explicitly() {
     let temp = tempfile::tempdir().unwrap();

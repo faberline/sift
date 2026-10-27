@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::archive::domain::archive_manifest::ArchiveSegment;
 use crate::archive::infrastructure::archive_integrity::{verify_bytes, verify_file};
+use crate::shared_kernel::archive_manifest::ArchiveSegment;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;

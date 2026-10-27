@@ -1,0 +1,5 @@
+# CPython 3.11 / Linux x86-64 wheels from PyPI; no optional extras or dependencies.
+# Sources: https://pypi.org/project/tree-sitter/0.23.2/#files
+#          https://pypi.org/pypi/tree-sitter-rust/0.23.2/json
+tree-sitter @ https://files.pythonhosted.org/packages/2f/5a/3169d9933be813776a9b4b3f2e671d3d50fa27e589dee5578f6ecef7ff6d/tree_sitter-0.23.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl --hash=sha256:614590611636044e071d3a0b748046d52676dbda3bc9fa431216231e11dd98f7
+tree-sitter-rust @ https://files.pythonhosted.org/packages/22/85/9b137393d39279d24acbb5ff69e6103a3793b988f11c2ab3c06e3b23a09b/tree_sitter_rust-0.23.2-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl --hash=sha256:540cf826932fe7cfd800361e368617e138c3d7914fad3b90786b7505af216be6

@@ -6,7 +6,6 @@
 pub(crate) mod agent_workloads;
 pub(crate) mod api_endpoint_discovery;
 pub(crate) mod backup_cron_job;
-pub(crate) mod constants;
 pub(crate) mod managed_service;
 pub(crate) mod network_policy;
 pub(crate) mod role_workloads;

@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Context, Result};
 use regex::Regex;
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PromFunction {
@@ -23,10 +23,40 @@ pub struct ParsedPromQuery {
     pub function: PromFunction,
 }
 
-pub fn parse_promql(input: &str) -> Result<ParsedPromQuery> {
+#[derive(Debug, Error)]
+pub enum PromQlError {
+    #[error("query must not be empty")]
+    EmptyQuery,
+    #[error("unsupported PromQL; expected a metric selector or sum/avg/min/max/count/rate")]
+    UnsupportedQuery,
+    #[error("unsupported label matcher `{0}`")]
+    UnsupportedLabelMatcher(String),
+    #[error("escaped PromQL label values are not supported in phase one")]
+    EscapedLabelValue,
+    #[error("decimal seconds must contain digits")]
+    NoDigits,
+    #[error("decimal exponent is invalid")]
+    InvalidExponent(#[source] std::num::ParseIntError),
+    #[error("decimal seconds contain more than one exponent")]
+    SeveralExponents,
+    #[error("decimal seconds have an invalid mantissa")]
+    InvalidMantissa,
+    #[error("decimal seconds exceed the supported precision")]
+    PrecisionParse(#[source] std::num::ParseIntError),
+    #[error("decimal seconds exceed the supported precision")]
+    PrecisionConversion(#[source] std::num::TryFromIntError),
+    #[error("decimal seconds are outside nanosecond range")]
+    NanosecondRange,
+    #[error("decimal seconds are outside nanosecond range")]
+    NanosecondRangeConversion(#[source] std::num::TryFromIntError),
+    #[error(transparent)]
+    Regex(#[from] regex::Error),
+}
+
+pub fn parse_promql(input: &str) -> Result<ParsedPromQuery, PromQlError> {
     let input = input.trim();
     if input.is_empty() {
-        bail!("query must not be empty");
+        return Err(PromQlError::EmptyQuery);
     }
     let function = Regex::new(r"^(sum|avg|min|max|count|rate)\((.*)\)$")?;
     let (function, selector) = match function.captures(input) {
@@ -47,7 +77,7 @@ pub fn parse_promql(input: &str) -> Result<ParsedPromQuery> {
     let selector_pattern = Regex::new(r#"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(.*)\})?$"#)?;
     let captures = selector_pattern
         .captures(&selector)
-        .context("unsupported PromQL; expected a metric selector or sum/avg/min/max/count/rate")?;
+        .ok_or(PromQlError::UnsupportedQuery)?;
     let metric = captures[1].to_string();
     let mut labels = BTreeMap::new();
     if let Some(matchers) = captures.get(2).map(|value| value.as_str()) {
@@ -55,7 +85,7 @@ pub fn parse_promql(input: &str) -> Result<ParsedPromQuery> {
         for part in split_matchers(matchers)? {
             let captures = matcher
                 .captures(part)
-                .with_context(|| format!("unsupported label matcher `{part}`"))?;
+                .ok_or_else(|| PromQlError::UnsupportedLabelMatcher(part.to_string()))?;
             labels.insert(captures[1].to_string(), captures[2].to_string());
         }
     }
@@ -66,24 +96,24 @@ pub fn parse_promql(input: &str) -> Result<ParsedPromQuery> {
     })
 }
 
-fn split_matchers(input: &str) -> Result<Vec<&str>> {
+fn split_matchers(input: &str) -> Result<Vec<&str>, PromQlError> {
     if input.trim().is_empty() {
         return Ok(Vec::new());
     }
     if input.contains('\\') {
-        bail!("escaped PromQL label values are not supported in phase one");
+        return Err(PromQlError::EscapedLabelValue);
     }
     Ok(input.split(',').collect())
 }
 
-pub(in crate::query) fn parse_decimal_seconds_nanos(value: &str) -> Result<i64> {
+pub(in crate::query) fn parse_decimal_seconds_nanos(value: &str) -> Result<i64, PromQlError> {
     let (negative, unsigned) = match value.as_bytes().first() {
         Some(b'-') => (true, &value[1..]),
         Some(b'+') => (false, &value[1..]),
         _ => (false, value),
     };
     if unsigned.is_empty() {
-        bail!("decimal seconds must contain digits");
+        return Err(PromQlError::NoDigits);
     }
     let mut exponent_parts = unsigned.split(['e', 'E']);
     let mantissa = exponent_parts.next().unwrap_or_default();
@@ -91,10 +121,10 @@ pub(in crate::query) fn parse_decimal_seconds_nanos(value: &str) -> Result<i64> 
         .next()
         .map(str::parse::<i32>)
         .transpose()
-        .context("decimal exponent is invalid")?
+        .map_err(PromQlError::InvalidExponent)?
         .unwrap_or(0);
     if exponent_parts.next().is_some() {
-        bail!("decimal seconds contain more than one exponent");
+        return Err(PromQlError::SeveralExponents);
     }
     let mut mantissa_parts = mantissa.split('.');
     let integer = mantissa_parts.next().unwrap_or_default();
@@ -104,30 +134,30 @@ pub(in crate::query) fn parse_decimal_seconds_nanos(value: &str) -> Result<i64> 
         || !integer.bytes().all(|byte| byte.is_ascii_digit())
         || !fraction.bytes().all(|byte| byte.is_ascii_digit())
     {
-        bail!("decimal seconds have an invalid mantissa");
+        return Err(PromQlError::InvalidMantissa);
     }
     let digits = format!("{integer}{fraction}");
     let coefficient = digits
         .parse::<i128>()
-        .context("decimal seconds exceed the supported precision")?;
+        .map_err(PromQlError::PrecisionParse)?;
     if coefficient == 0 {
         return Ok(0);
     }
     let fraction_digits =
-        i128::try_from(fraction.len()).context("decimal seconds exceed the supported precision")?;
+        i128::try_from(fraction.len()).map_err(PromQlError::PrecisionConversion)?;
     let power = i128::from(exponent) - fraction_digits + 9;
     let magnitude = if power >= 0 {
-        let power = u32::try_from(power).context("decimal seconds are outside nanosecond range")?;
+        let power = u32::try_from(power).map_err(PromQlError::NanosecondRangeConversion)?;
         coefficient
             .checked_mul(
                 10_i128
                     .checked_pow(power)
-                    .context("decimal seconds are outside nanosecond range")?,
+                    .ok_or(PromQlError::NanosecondRange)?,
             )
-            .context("decimal seconds are outside nanosecond range")?
+            .ok_or(PromQlError::NanosecondRange)?
     } else {
         let divisor_power =
-            u32::try_from(-power).context("decimal seconds are outside nanosecond range")?;
+            u32::try_from(-power).map_err(PromQlError::NanosecondRangeConversion)?;
         let Some(divisor) = 10_i128.checked_pow(divisor_power) else {
             return Ok(0);
         };
@@ -138,9 +168,9 @@ pub(in crate::query) fn parse_decimal_seconds_nanos(value: &str) -> Result<i64> 
     let nanos = if negative {
         magnitude
             .checked_neg()
-            .context("decimal seconds are outside nanosecond range")?
+            .ok_or(PromQlError::NanosecondRange)?
     } else {
         magnitude
     };
-    i64::try_from(nanos).context("decimal seconds are outside nanosecond range")
+    i64::try_from(nanos).map_err(PromQlError::NanosecondRangeConversion)
 }

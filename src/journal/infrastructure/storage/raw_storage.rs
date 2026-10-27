@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::journal::domain::segment_manifest::{AppendLocation, SegmentManifest};
-use crate::journal::domain::shard_route::{EpochMap, Route};
 use crate::journal::domain::storage_config::StorageConfig;
 use crate::journal::infrastructure::storage::blob_store::BlobStore;
 use crate::journal::infrastructure::storage::segment_read::SegmentEventReader;
 use crate::journal::infrastructure::storage::segment_store::SegmentStore;
 use crate::journal::infrastructure::storage::shard_router::ShardRouter;
+use crate::shared_kernel::segment_manifest::{AppendLocation, SegmentManifest};
+use crate::shared_kernel::shard_route::{EpochMap, Route};
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::{ContentBlobRef, OperationalEventV2, SignalKind};
 

@@ -5,9 +5,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::collector::domain::config::CriSourceConfig;
 use crate::collector::domain::record::RecordEnrichment;
@@ -52,32 +52,48 @@ pub(in crate::collector) struct CriFrame {
     pub(in crate::collector) content: Vec<u8>,
 }
 
-pub(in crate::collector) fn parse_cri_frame(line: &[u8]) -> Result<CriFrame> {
+#[derive(Debug, Error)]
+pub(in crate::collector) enum CriError {
+    #[error("CRI record is missing timestamp delimiter")]
+    MissingTimestampDelimiter,
+    #[error("CRI record is missing stream delimiter")]
+    MissingStreamDelimiter,
+    #[error("CRI record is missing tag delimiter")]
+    MissingTagDelimiter,
+    #[error("CRI timestamp must be UTF-8")]
+    TimestampNotUtf8(#[source] std::str::Utf8Error),
+    #[error("CRI timestamp must be RFC3339")]
+    TimestampNotRfc3339(#[source] chrono::ParseError),
+    #[error("CRI stream must be stdout or stderr")]
+    InvalidStream,
+    #[error("CRI tag must be F or P")]
+    InvalidTag,
+    #[error("CRI restart index must be u32")]
+    InvalidRestartIndex(#[source] std::num::ParseIntError),
+    #[error("invalid CRI {0}")]
+    InvalidWorkloadId(String),
+}
+
+pub(in crate::collector) fn parse_cri_frame(line: &[u8]) -> Result<CriFrame, CriError> {
     let line = trim_line_ending(line);
     let mut spaces = line
         .iter()
         .enumerate()
         .filter_map(|(index, byte)| (*byte == b' ').then_some(index));
-    let first = spaces
-        .next()
-        .context("CRI record is missing timestamp delimiter")?;
-    let second = spaces
-        .next()
-        .context("CRI record is missing stream delimiter")?;
-    let third = spaces
-        .next()
-        .context("CRI record is missing tag delimiter")?;
-    let timestamp = std::str::from_utf8(&line[..first]).context("CRI timestamp must be UTF-8")?;
-    DateTime::parse_from_rfc3339(timestamp).context("CRI timestamp must be RFC3339")?;
+    let first = spaces.next().ok_or(CriError::MissingTimestampDelimiter)?;
+    let second = spaces.next().ok_or(CriError::MissingStreamDelimiter)?;
+    let third = spaces.next().ok_or(CriError::MissingTagDelimiter)?;
+    let timestamp = std::str::from_utf8(&line[..first]).map_err(CriError::TimestampNotUtf8)?;
+    DateTime::parse_from_rfc3339(timestamp).map_err(CriError::TimestampNotRfc3339)?;
     let stream = match &line[first + 1..second] {
         b"stdout" => CriStream::Stdout,
         b"stderr" => CriStream::Stderr,
-        _ => bail!("CRI stream must be stdout or stderr"),
+        _ => return Err(CriError::InvalidStream),
     };
     let tag = match &line[second + 1..third] {
         b"F" => CriTag::Full,
         b"P" => CriTag::Partial,
-        _ => bail!("CRI tag must be F or P"),
+        _ => return Err(CriError::InvalidTag),
     };
     Ok(CriFrame {
         stream,
@@ -169,7 +185,7 @@ pub(in crate::collector) fn enrichment(
 
 pub(in crate::collector) fn parse_workload_path(
     relative: &Path,
-) -> Result<Option<WorkloadIdentity>> {
+) -> Result<Option<WorkloadIdentity>, CriError> {
     let components = relative
         .components()
         .map(|component| component.as_os_str().to_string_lossy().to_string())
@@ -204,7 +220,7 @@ pub(in crate::collector) fn parse_workload_path(
     }
     let restart = restart_text
         .parse::<u32>()
-        .context("CRI restart index must be u32")?;
+        .map_err(CriError::InvalidRestartIndex)?;
     Ok(Some(WorkloadIdentity {
         namespace: namespace.to_string(),
         pod: pod_name.to_string(),
@@ -214,14 +230,14 @@ pub(in crate::collector) fn parse_workload_path(
     }))
 }
 
-fn validate_workload_id(name: &str, value: &str) -> Result<()> {
+fn validate_workload_id(name: &str, value: &str) -> Result<(), CriError> {
     if value.is_empty()
         || value.len() > MAX_WORKLOAD_ID_BYTES
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
     {
-        bail!("invalid CRI {name}");
+        return Err(CriError::InvalidWorkloadId(name.to_owned()));
     }
     Ok(())
 }

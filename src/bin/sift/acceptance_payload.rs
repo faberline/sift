@@ -40,7 +40,7 @@ pub(super) fn acceptance_payload(args: AcceptancePayloadArgs) -> Result<()> {
     }
     let bytes = match args.kind {
         AcceptancePayloadKind::OtlpLogsProtobuf => {
-            use sift::ingest::otlp::wire::{
+            use transport_otlp::proto::{
                 any_value, AnyValue, ExportLogsServiceRequest, KeyValue, LogRecord, Resource,
                 ResourceLogs, ScopeLogs,
             };
@@ -104,7 +104,7 @@ pub(super) fn acceptance_payload(args: AcceptancePayloadArgs) -> Result<()> {
             .encode_to_vec()
         }
         AcceptancePayloadKind::PrometheusRemoteWriteV1 => {
-            use sift::prometheus::remote::{Label, Sample, TimeSeries, WriteRequest};
+            use metrics_remote_write::proto::{Label, Sample, TimeSeries, WriteRequest};
 
             let base_millis = i64::try_from(args.timestamp_unix_nano / 1_000_000)
                 .context("Prometheus fixture timestamp exceeds i64 milliseconds")?;

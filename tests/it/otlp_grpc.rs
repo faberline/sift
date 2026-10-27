@@ -7,7 +7,7 @@ use opentelemetry_proto::tonic::{
     resource::v1::Resource,
 };
 use sift::{
-    auth::{SiftAuthConfig, SiftVerifier},
+    access::{SiftAuthConfig, SiftVerifier},
     EventQuery, ServiceState, SignalKind,
 };
 use tonic::{codec::CompressionEncoding, Request};
@@ -66,7 +66,7 @@ async fn official_otlp_grpc_types_gzip_and_partial_success_work() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let server_state = state.clone();
     let server = tokio::spawn(async move {
-        sift::grpc::serve(listener, server_state, verifier, async {
+        sift::ingest::serve_otlp_grpc(listener, server_state, verifier, async {
             let _ = shutdown_rx.await;
         })
         .await
@@ -117,14 +117,14 @@ async fn grpc_gateway_proxy_preserves_gzip_and_partial_success() {
     let server_state = state.clone();
     let store_verifier = verifier.clone();
     let store = tokio::spawn(async move {
-        sift::grpc::serve(store_listener, server_state, store_verifier, async {
+        sift::ingest::serve_otlp_grpc(store_listener, server_state, store_verifier, async {
             let _ = store_shutdown_rx.await;
         })
         .await
         .unwrap();
     });
     let proxy = tokio::spawn(async move {
-        sift::grpc::serve_proxy(
+        sift::operations::serve_otlp_grpc_proxy(
             proxy_listener,
             &format!("http://{store_address}"),
             verifier,
@@ -166,7 +166,7 @@ async fn hidden_acceptance_grpc_client_uses_the_public_otlp_service() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let server_state = state.clone();
     let server = tokio::spawn(async move {
-        sift::grpc::serve(listener, server_state, verifier, async {
+        sift::ingest::serve_otlp_grpc(listener, server_state, verifier, async {
             let _ = shutdown_rx.await;
         })
         .await

@@ -18,7 +18,7 @@ pub(super) struct ServeArgs {
     /// OTLP/gRPC listener port. It defaults to 4317 for the normal HTTP port.
     #[arg(long, env = "SIFT_GRPC_PORT")]
     pub(super) grpc_port: Option<u16>,
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::node::DEFAULT_DATA_DIR)]
     pub(super) data_dir: PathBuf,
     /// Development-only temporary storage. Production roles refuse this flag.
     #[arg(long, conflicts_with = "data_dir")]
@@ -52,7 +52,7 @@ pub(super) enum RunRole {
     Operator,
 }
 
-impl From<RunRole> for sift::storage::StorageRole {
+impl From<RunRole> for sift::node::StorageRole {
     fn from(role: RunRole) -> Self {
         match role {
             RunRole::All => Self::All,

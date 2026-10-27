@@ -35,7 +35,7 @@ pub(super) async fn mcp(args: McpArgs) -> Result<()> {
             if !args.stdio {
                 anyhow::bail!("only --stdio is supported by `sift mcp serve`");
             }
-            sift::mcp::serve_stdio(args.endpoint, args.token).await
+            sift::query::serve_mcp_stdio(args.endpoint, args.token).await
         }
     }
 }

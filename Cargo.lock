@@ -3775,6 +3775,7 @@ dependencies = [
  "crc32fast",
  "flate2",
  "hex",
+ "http-body",
  "index-text",
  "k8s-openapi",
  "kube",

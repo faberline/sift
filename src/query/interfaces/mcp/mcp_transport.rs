@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::query::infrastructure::sift_api_client::SiftApiClient;
+use crate::query::application::sift_api_service::SiftApiClient;
 use crate::query::interfaces::mcp::sift_mcp_server::SiftMcpServer;
 
 const MCP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -25,7 +25,7 @@ pub fn http_router(endpoint: &str) -> Result<axum::Router> {
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    let default_origins = vec![base.endpoint.origin().ascii_serialization()];
+    let default_origins = vec![base.endpoint_origin()];
     let config = service_mcp::HttpTransportConfig::from_env(
         MCP_ALLOWED_HOSTS_ENV,
         MCP_ALLOWED_ORIGINS_ENV,

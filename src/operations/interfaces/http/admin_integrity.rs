@@ -9,7 +9,7 @@ use axum::Json;
 use service_auth::RoleMapPrincipal;
 use sha2::{Digest, Sha256};
 
-use crate::access::interfaces::http::project_authorization::authorize_global_admin;
+use crate::access::application::project_authorization::authorize_global_admin;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::node::infrastructure::data_layout::LayoutManifest;
@@ -48,9 +48,10 @@ pub(crate) async fn admin_integrity(
     )
     .map_err(|error| ApiError::internal(format!("decode integrity layout: {error}")))?;
     let storage_root = state.journal().storage().root();
-    let archive =
-        crate::archive::application::archive_status_queries::committed_status(storage_root)
-            .map_err(|error| ApiError::internal(format!("read archive integrity: {error}")))?;
+    let archive = state
+        .archive_reads()
+        .committed_status(storage_root)
+        .map_err(|error| ApiError::internal(format!("read archive integrity: {error}")))?;
     let watermarks = archive
         .as_ref()
         .map(|status| status.watermarks)
@@ -62,7 +63,7 @@ pub(crate) async fn admin_integrity(
     };
 
     let mut reader = state
-        .journal
+        .journal_service()
         .projection_read_session(0)
         .map_err(|error| ApiError::internal(format!("open integrity scan: {error}")))?;
     let mut event_count = 0_u64;

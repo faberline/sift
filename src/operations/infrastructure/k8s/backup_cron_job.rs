@@ -4,14 +4,16 @@
 use serde_json::json;
 use service_k8s::render::{self, RenderCtx};
 
+use crate::operations::domain::instance_names::{BACKUP_COMPONENT, HTTP_PORT};
 use crate::operations::infrastructure::k8s::agent_workloads::{
     projected_client_token_mount, projected_client_token_volume,
 };
-use crate::operations::infrastructure::k8s::constants::{BACKUP_COMPONENT, HTTP_PORT};
 use crate::operations::infrastructure::k8s::role_workloads::{
     container_security_context, role_selector_labels,
 };
-use crate::operations::interfaces::crd::sift_spec::{AuthMode, BackupSpec, SiftSpec};
+use crate::shared_kernel::instance_spec::{
+    InstanceAuth as AuthMode, InstanceBackup as BackupSpec, InstanceSettings as SiftSpec,
+};
 
 pub(super) fn backup_cron_job_plan(
     cx: &RenderCtx<'_>,

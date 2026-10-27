@@ -5,11 +5,11 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 
-use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::storage::segment_files::{
     read_events, read_events_after, verify_segment,
 };
 use crate::journal::infrastructure::storage::segment_store::SegmentStore;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(crate) struct SegmentEventReader {

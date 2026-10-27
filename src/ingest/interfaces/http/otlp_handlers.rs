@@ -10,7 +10,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use service_auth::RoleMapPrincipal;
 
-use crate::access::interfaces::http::project_authorization::authorize_project;
+use crate::access::application::project_authorization::authorize_project;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::ingest::application::retention_admission::retention_rejection;
@@ -82,7 +82,7 @@ async fn ingest_otlp(
     )
     .map_err(|error| ApiError::bad_request("unsupported_content_type", error.to_string()))?;
     let decoded_body = state
-        .admission
+        .admission()
         .decode_body(&headers, body)
         .map_err(ApiError::from_admission)?;
     state
@@ -92,7 +92,7 @@ async fn ingest_otlp(
         crate::ingest::interfaces::otlp::otlp_codec::decode(signal, media, &decoded_body, project)
             .map_err(|error| ApiError::bad_request("invalid_otlp", error.to_string()))?;
     let _permit = state
-        .admission
+        .admission()
         .acquire(project, decoded.item_count(), state.is_draining())
         .map_err(ApiError::from_admission)?;
     let mut rejected = 0usize;
@@ -122,7 +122,7 @@ async fn ingest_otlp(
         let event_bytes = serde_json::to_vec(&event)
             .map(|value| value.len())
             .unwrap_or(usize::MAX);
-        if let Err(error) = state.admission.validate_event_bytes(event_bytes) {
+        if let Err(error) = state.admission().validate_event_bytes(event_bytes) {
             rejected += 1;
             if messages.len() < 8 {
                 messages.push(error.message);

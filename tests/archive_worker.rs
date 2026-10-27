@@ -136,7 +136,7 @@ async fn committed_receipt_retries_a_late_wal_compaction_failure() {
     let archived_wal = std::fs::read(&wal).unwrap();
     assert!(!archived_wal.is_empty());
 
-    sift::storage::archive::archive_journal_local(state.journal()).unwrap();
+    sift::archive::archive_journal_local(state.journal()).unwrap();
     assert!(storage_durable::FramedLogReader::read_frames(&wal, 0)
         .unwrap()
         .is_empty());

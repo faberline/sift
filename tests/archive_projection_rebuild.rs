@@ -7,11 +7,11 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use chrono::{SecondsFormat, Utc};
 use sift::{
+    archive,
     projection::{
         LogQuery, MetricQuery, ProjectionRuntime, PROJECTION_LOGGING_STORE,
         PROJECTION_METRIC_STORE, PROJECTION_TRACE_STORE,
     },
-    storage::archive,
     DurableJournal, EventEnvelope, MetricPoint, MetricTemporality, SignalKind,
 };
 

@@ -52,9 +52,6 @@ fn group_commit_is_owned_by_service_executor() {
 
 #[test]
 fn ingest_admission_mechanics_are_owned_by_service_http() {
-    let limits =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ingest/limits.rs"))
-            .expect("read Sift ingest limits");
     let controller = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/ingest/application/admission_controller.rs"
@@ -62,7 +59,7 @@ fn ingest_admission_mechanics_are_owned_by_service_http() {
     .expect("read Sift ingest admission controller");
     let decoder = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/ingest/interfaces/http/request_body_decoder.rs"
+        "/src/ingest/application/request_body_decoder.rs"
     ))
     .expect("read Sift ingest body decoder");
     let limit_values = std::fs::read_to_string(concat!(
@@ -80,7 +77,7 @@ fn ingest_admission_mechanics_are_owned_by_service_http() {
         "/src/ingest/domain/admission_error.rs"
     ))
     .expect("read Sift ingest admission error");
-    let source = limits + &controller + &decoder + &limit_values + &limits_env + &error;
+    let source = controller + &decoder + &limit_values + &limits_env + &error;
 
     assert!(
         source.contains("service_http::WeightedAdmission"),
@@ -104,16 +101,22 @@ fn ingest_admission_mechanics_are_owned_by_service_http() {
 
 #[test]
 fn reverse_proxy_runtime_is_owned_by_service_http() {
-    let source = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/operations/interfaces/http/gateway_proxy.rs"
-    ))
-    .expect("read Sift proxy adapter");
+    let source: String = [
+        "/src/operations/interfaces/http/gateway_proxy.rs",
+        "/src/operations/application/gateway_policy.rs",
+    ]
+    .iter()
+    .map(|path| {
+        std::fs::read_to_string(format!("{}{path}", env!("CARGO_MANIFEST_DIR")))
+            .expect("read Sift proxy adapter and upstream use case")
+    })
+    .collect();
 
     assert!(
         source.contains("impl service_http::ReverseProxyPolicy for SiftRolePolicy"),
         "Sift must provide only its upstream selection policy"
     );
+    assert!(source.contains("service_http::reverse_proxy_router"));
     for local_mechanism in ["reqwest::Client", "async fn forward", "fn is_hop_header"] {
         assert!(
             !source.contains(local_mechanism),
@@ -141,12 +144,12 @@ fn persistent_query_job_transitions_use_service_executor() {
     .collect();
     let query_v1 = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/query/interfaces/http/query_v1.rs"
+        "/src/query/application/query_run.rs"
     ))
     .expect("read Sift query handlers");
     let query_role = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/query/interfaces/http/query_role_router.rs"
+        "/src/query/application/query_role_service.rs"
     ))
     .expect("read Sift query role router");
     let source = library + &query_v1 + &query_role;
@@ -189,17 +192,14 @@ fn shutdown_order_and_task_failures_use_server_lifecycle() {
 
 #[test]
 fn scoped_bearer_middleware_is_owned_by_service_auth() {
-    let facade = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/auth.rs"))
-        .expect("read Sift auth adapter");
-    let scoped = std::fs::read_to_string(concat!(
+    let source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/access/interfaces/http/scoped_authorization.rs"
     ))
     .expect("read Sift scoped authorization");
-    let source = facade + &scoped;
 
     assert!(
-        source.contains("impl service_auth::ScopedAuthorization for SiftVerifier"),
+        source.contains("impl service_auth::ScopedAuthorization for AuthorizationService"),
         "Sift must provide route, project, and role policy through the shared trait"
     );
     assert!(
@@ -262,7 +262,9 @@ fn kubernetes_workloads_are_owned_by_service_k8s() {
     let source: String = [
         "/src/operations/interfaces/crd/sift_spec.rs",
         "/src/operations/interfaces/operator.rs",
-        "/src/operations/infrastructure/k8s/constants.rs",
+        "/src/operations/interfaces/managed_service.rs",
+        "/src/operations/application/instance_service.rs",
+        "/src/operations/domain/instance_names.rs",
         "/src/operations/infrastructure/k8s/managed_service.rs",
         "/src/operations/infrastructure/k8s/api_endpoint_discovery.rs",
         "/src/operations/infrastructure/k8s/role_workloads.rs",
@@ -349,11 +351,6 @@ fn logging_text_index_is_owned_by_index_text() {
 
 #[test]
 fn manifest_last_archive_flow_is_owned_by_storage_segment() {
-    let facade = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/storage/archive.rs"
-    ))
-    .expect("read Sift archive adapter");
     let upload = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/archive/application/upload_archive_snapshot.rs"
@@ -361,7 +358,7 @@ fn manifest_last_archive_flow_is_owned_by_storage_segment() {
     .expect("read Sift archive upload");
     let expire = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/archive/application/expire_committed_events.rs"
+        "/src/archive/application/retention_expiration.rs"
     ))
     .expect("read Sift archive expiration");
     let codec = std::fs::read_to_string(concat!(
@@ -369,7 +366,15 @@ fn manifest_last_archive_flow_is_owned_by_storage_segment() {
         "/src/archive/infrastructure/parquet_event_codec.rs"
     ))
     .expect("read Sift archive codec");
-    let source = facade + &upload + &expire + &codec;
+    let resources = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/archive/infrastructure/resource_adapter.rs"
+    ))
+    .expect("read Sift archive resource adapter");
+    assert!(resources.contains("storage_segment::ArchiveCoordinator"));
+    assert!(!upload.contains("storage_segment::ArchiveCoordinator"));
+    assert!(!expire.contains("storage_segment::ArchiveCoordinator"));
+    let source = upload + &expire + &codec + &resources;
 
     assert!(source.contains("storage_segment::ArchiveCoordinator"));
     assert!(source.contains("impl storage_segment::RecordCodec<StoredEvent>"));
@@ -388,7 +393,17 @@ fn typed_projection_flow_is_owned_by_service_projection() {
         "/src/projection/infrastructure/service_projection_adapter.rs"
     ))
     .expect("read Sift projection adapter");
-    let source = runtime + &adapter;
+    let backend = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/projection/infrastructure/shared_runtime_backend.rs"
+    ))
+    .expect("read shared projection runtime adapter");
+    let wiring = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/app/projection_wiring.rs"
+    ))
+    .expect("read shared projection runtime assembly");
+    let source = runtime + &adapter + &backend + &wiring;
 
     assert!(source.contains("service_projection::ProjectionRegistry"));
     assert!(source.contains("ProjectionHandle<StoredEvent, LoggingProjection>"));
@@ -404,9 +419,11 @@ fn typed_projection_flow_is_owned_by_service_projection() {
 fn otlp_wire_and_direct_grpc_runtime_are_owned_by_transport_otlp() {
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
         .expect("read Sift manifest");
-    let normalizer =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/ingest/otlp.rs"))
-            .expect("read Sift OTLP adapter");
+    let decoder = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/ingest/interfaces/otlp/proto_logs_decoder.rs"
+    ))
+    .expect("read Sift OTLP protobuf decoder");
     let grpc_proxy = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/src/operations/interfaces/grpc/otlp_proxy.rs"
@@ -420,7 +437,7 @@ fn otlp_wire_and_direct_grpc_runtime_are_owned_by_transport_otlp() {
     let grpc = grpc_proxy + &grpc_server;
 
     assert!(manifest.contains("transport-otlp ="));
-    assert!(normalizer.contains("pub use transport_otlp::proto as wire"));
+    assert!(decoder.contains("use transport_otlp::{proto as wire"));
     assert!(grpc.contains("transport_otlp::serve_grpc"));
     assert!(grpc.contains("impl transport_otlp::OtlpConsumer for SiftGrpcConsumer"));
     assert!(!std::path::Path::new(concat!(

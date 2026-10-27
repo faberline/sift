@@ -5,17 +5,17 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::RwLock;
 
+use crate::projection::domain::runtime_metadata::ProjectionDescriptor;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use service_projection::ProjectionDescriptor;
-use sha2::{Digest, Sha256};
 
-use crate::projection::application::projection_runtime::Projection;
+use crate::projection::domain::projection::Projection;
 use crate::projection::domain::trace::{
     best_path, correlations, detect_cycles, remove_tracked_cursor, trace_key, trace_matches,
     SpanEventV1, SpanLinkV1, SpanRecordV1, TraceLocation, TracePage, TraceQuery, TraceResultV1,
     TraceState, DEFAULT_RETAINED_TRACE_SPANS, PROJECTION_TRACE_STORE, TRACE_SCHEMA_VERSION,
 };
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
@@ -217,6 +217,8 @@ impl Default for TraceProjection {
 }
 
 impl Projection for TraceProjection {
+    type Error = anyhow::Error;
+
     fn descriptor(&self) -> ProjectionDescriptor {
         ProjectionDescriptor {
             name: PROJECTION_TRACE_STORE.into(),
@@ -358,7 +360,7 @@ impl Projection for TraceProjection {
     }
 
     fn semantic_digest(&self) -> Result<String> {
-        Ok(hex::encode(Sha256::digest(self.snapshot()?)))
+        Ok(sha256_hex(self.snapshot()?))
     }
 }
 

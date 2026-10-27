@@ -30,13 +30,13 @@ use tonic::codec::CompressionEncoding;
 use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 
-use crate::access::infrastructure::sift_verifier::SiftVerifier;
-use crate::ingest::interfaces::grpc::otlp_grpc_server::authorize;
+use crate::access::application::authorization_service::AuthorizationService;
+use crate::app::grpc_authorization::authorize;
 
 #[derive(Clone)]
 struct OtlpGrpcProxy {
     channel: Channel,
-    verifier: Arc<SiftVerifier>,
+    verifier: Arc<AuthorizationService>,
 }
 
 /// Serve the public OTLP/gRPC port while keeping the durable append boundary
@@ -44,7 +44,7 @@ struct OtlpGrpcProxy {
 pub async fn serve_proxy<F>(
     listener: tokio::net::TcpListener,
     store_endpoint: &str,
-    verifier: Arc<SiftVerifier>,
+    verifier: Arc<AuthorizationService>,
     maximum_message_bytes: usize,
     shutdown: F,
 ) -> anyhow::Result<()>

@@ -12,7 +12,7 @@ use crate::terminal_output::print_json_terminal;
 
 #[derive(Args)]
 pub(super) struct SnapshotArgs {
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::node::DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
     /// Write the raw snapshot bytes here; omit to emit them in a JSON terminal envelope.
     #[arg(long)]

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::archive::infrastructure::archive_integrity::sha256;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 /// Non-durable file store for rebuildable archive scratch pages.
 ///
@@ -40,7 +40,7 @@ impl EphemeralFileObjectStore {
     }
 
     fn meta(&self, key: &str, bytes: &[u8], content_type: &str) -> storage_object::ObjectMeta {
-        let version = storage_object::ObjectVersion::new(sha256(bytes));
+        let version = storage_object::ObjectVersion::new(sha256_hex(bytes));
         storage_object::ObjectMeta {
             key: key.to_string(),
             size: bytes.len() as u64,
@@ -72,7 +72,7 @@ impl storage_object::ObjectStore for EphemeralFileObjectStore {
                 std::fs::read(&path).map_err(|error| storage_object::ObjectStoreError::Io {
                     message: error.to_string(),
                 })?;
-            if sha256(&current) != expected.as_str() {
+            if sha256_hex(&current) != expected.as_str() {
                 return Err(storage_object::ObjectStoreError::PreconditionFailed {
                     key: key.to_string(),
                 });

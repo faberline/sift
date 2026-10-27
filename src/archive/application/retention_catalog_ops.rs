@@ -3,16 +3,16 @@
 
 use anyhow::{bail, Result};
 
+use crate::archive::application::spill_service::SpillService as SpillCatalog;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
-use crate::archive::infrastructure::archive_catalog::decode_archive_catalog_entry;
-use crate::archive::infrastructure::gcs_uri::gcs_uri;
-use crate::archive::infrastructure::spill_catalog::SpillCatalog;
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
+use crate::archive::domain::gcs_uri::gcs_uri;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 use crate::SignalKind;
 
 pub(super) fn apply_catalog_remove(
-    catalog: &storage_segment::PagedCatalog,
-    root: &mut storage_segment::CatalogRoot,
+    catalog: &crate::archive::application::catalog_service::CatalogService,
+    root: &mut crate::shared_kernel::catalog_manifest::CatalogRoot,
     key: &str,
     bucket: &str,
     gc_candidates: &mut SpillCatalog,
@@ -32,9 +32,9 @@ pub(super) fn apply_catalog_remove(
 }
 
 pub(super) fn apply_catalog_upsert(
-    catalog: &storage_segment::PagedCatalog,
-    root: &mut storage_segment::CatalogRoot,
-    entry: storage_segment::CatalogEntry,
+    catalog: &crate::archive::application::catalog_service::CatalogService,
+    root: &mut crate::shared_kernel::catalog_manifest::CatalogRoot,
+    entry: crate::archive::domain::resource_ports::CatalogEntry,
     bucket: &str,
     gc_candidates: &mut SpillCatalog,
     live_objects: &mut SpillCatalog,
@@ -53,8 +53,8 @@ pub(super) fn apply_catalog_upsert(
 }
 
 pub(super) fn retained_watermarks_from_catalog(
-    catalog: &storage_segment::PagedCatalog,
-    root: &storage_segment::CatalogRoot,
+    catalog: &crate::archive::application::catalog_service::CatalogService,
+    root: &crate::shared_kernel::catalog_manifest::CatalogRoot,
 ) -> Result<ArchiveWatermarks> {
     let mut watermarks = ArchiveWatermarks::default();
     for signal in SignalKind::ALL {
