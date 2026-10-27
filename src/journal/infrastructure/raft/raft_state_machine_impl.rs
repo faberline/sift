@@ -12,8 +12,6 @@ use crate::journal::domain::append_policy::{
 };
 use crate::journal::domain::checkpoint_position::CheckpointPosition;
 use crate::journal::domain::control_state::{ControlState, CONTROL_STATE_FORMAT_VERSION};
-use crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_BYTES;
-use crate::journal::domain::sift_command::SiftCommandV1;
 use crate::journal::infrastructure::raft::archive_checkpoint::write_archive_checkpoint;
 use crate::journal::infrastructure::raft::command_codec::{
     decode_command, COMMAND_MAGIC, MAX_ENCODED_COMMAND_BYTES,
@@ -26,6 +24,8 @@ use crate::journal::infrastructure::raft::snapshot_restore::{
     restore_streamed_snapshot, validate_streamed_snapshot,
 };
 use crate::journal::infrastructure::raft::snapshot_writer::write_snapshot;
+use crate::shared_kernel::raft_batch_limits::RAFT_BATCH_MAX_BYTES;
+use crate::shared_kernel::sift_command::SiftCommandV1;
 
 impl RaftStateMachine for SiftStateMachine {
     fn snapshot_capability(&self) -> Option<&'static str> {
@@ -101,10 +101,11 @@ impl RaftStateMachine for SiftStateMachine {
             } => {
                 if retention_generation == 0
                     || self.journal.retention_generation() < retention_generation
-                    || crate::archive::application::archive_status_queries::committed_status(
-                        self.journal.data_dir(),
-                    )?
-                    .is_some_and(|status| status.retention_scan_pending)
+                    || self
+                        .journal
+                        .archive_read()
+                        .committed_status(self.journal.data_dir())?
+                        .is_some_and(|status| status.retention_scan_pending)
                 {
                     bail!("Sift retention fence clear is not covered by committed retention");
                 }
@@ -158,7 +159,7 @@ impl RaftStateMachine for SiftStateMachine {
             .lock()
             .expect("Sift control state lock poisoned")
             .applied_index;
-        write_snapshot(&self.journal, applied_index, writer)?;
+        write_snapshot(self.journal.as_ref(), applied_index, writer)?;
         Ok(())
     }
 
@@ -182,7 +183,7 @@ impl RaftStateMachine for SiftStateMachine {
     }
 
     fn validate_snapshot(&self, reader: &mut dyn Read) -> Result<()> {
-        let stage = validate_streamed_snapshot(&self.journal, reader)?;
+        let stage = validate_streamed_snapshot(self.journal.as_ref(), reader)?;
         *self
             .validated_archive_stage
             .lock()
@@ -198,7 +199,7 @@ impl RaftStateMachine for SiftStateMachine {
             .expect("Sift validated archive stage lock poisoned")
             .take();
         let snapshot = restore_streamed_snapshot(
-            &self.journal,
+            self.journal.as_ref(),
             current_applied_index,
             reader,
             staged_archive,

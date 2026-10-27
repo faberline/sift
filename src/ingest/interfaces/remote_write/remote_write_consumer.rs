@@ -90,12 +90,13 @@ impl metrics_remote_write::RemoteWriteConsumer for SiftRemoteWriteConsumer<'_> {
                     "value_bits": sample.value.to_bits()
                 }))?;
                 let event_id = format!("prom-rw-{}", hex::encode(&Sha256::digest(identity)[..16]));
-                let mut event = EventEnvelope::for_project(
+                let mut event = EventEnvelope::for_project_at(
                     project,
                     environment,
                     event_id,
                     SignalKind::Metric,
                     serde_json::json!({"prometheus_remote_write": "1.0"}),
+                    Utc::now(),
                 );
                 event.occurred_at = occurred_at.clone();
                 event.observed_at = occurred_at;

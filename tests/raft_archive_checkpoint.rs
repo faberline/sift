@@ -12,8 +12,8 @@ use axum::{
 use raft_runtime::RaftStateMachine;
 use sha2::{Digest, Sha256};
 use sift::{
+    archive,
     projection::{LogQuery, ProjectionRuntime, PROJECTION_LOGGING_STORE},
-    storage::archive,
     DurableJournal, EventEnvelope, EventQuery, ServiceState, SignalKind,
 };
 use storage_object::ObjectStore;
@@ -48,7 +48,7 @@ fn log_at(index: u64, occurred_at: chrono::DateTime<chrono::Utc>) -> EventEnvelo
 async fn committed_retention_fence_survives_restart_and_blocks_only_queries() {
     let data = tempfile::tempdir().unwrap();
     let journal = Arc::new(DurableJournal::open(data.path()).unwrap());
-    let state_machine = sift::durability::SiftStateMachine::new(journal.clone());
+    let state_machine = sift::journal::SiftStateMachine::new(journal.clone());
     let command = serde_json::to_vec(&serde_json::json!({
         "kind": "retention_fence",
         "fence": {
@@ -97,7 +97,7 @@ async fn committed_retention_fence_survives_restart_and_blocks_only_queries() {
 fn committed_local_segments_make_a_small_voter_checkpoint() {
     let source_dir = tempfile::tempdir().unwrap();
     let source_journal = Arc::new(DurableJournal::open(source_dir.path()).unwrap());
-    let source = sift::durability::SiftStateMachine::new(source_journal.clone());
+    let source = sift::journal::SiftStateMachine::new(source_journal.clone());
     for index in 1..=200_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
@@ -115,7 +115,7 @@ fn committed_local_segments_make_a_small_voter_checkpoint() {
 
     let follower_dir = tempfile::tempdir().unwrap();
     let follower_journal = Arc::new(DurableJournal::open(follower_dir.path()).unwrap());
-    let follower = sift::durability::SiftStateMachine::new(follower_journal.clone());
+    let follower = sift::journal::SiftStateMachine::new(follower_journal.clone());
     for index in 1..=200_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
@@ -138,7 +138,7 @@ fn committed_local_segments_make_a_small_voter_checkpoint() {
 fn resident_checkpoint_is_small_and_refuses_a_behind_voter() {
     let source_dir = tempfile::tempdir().unwrap();
     let source_journal = Arc::new(DurableJournal::open(source_dir.path()).unwrap());
-    let source = sift::durability::SiftStateMachine::new(source_journal.clone());
+    let source = sift::journal::SiftStateMachine::new(source_journal.clone());
     for index in 1..=100_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
@@ -156,7 +156,7 @@ fn resident_checkpoint_is_small_and_refuses_a_behind_voter() {
 
     let caught_up_dir = tempfile::tempdir().unwrap();
     let caught_up_journal = Arc::new(DurableJournal::open(caught_up_dir.path()).unwrap());
-    let caught_up = sift::durability::SiftStateMachine::new(caught_up_journal);
+    let caught_up = sift::journal::SiftStateMachine::new(caught_up_journal);
     for index in 1..=100_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
@@ -170,7 +170,7 @@ fn resident_checkpoint_is_small_and_refuses_a_behind_voter() {
 
     let behind_dir = tempfile::tempdir().unwrap();
     let behind_journal = Arc::new(DurableJournal::open(behind_dir.path()).unwrap());
-    let behind = sift::durability::SiftStateMachine::new(behind_journal);
+    let behind = sift::journal::SiftStateMachine::new(behind_journal);
     for index in 1..=99_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
@@ -187,7 +187,7 @@ fn resident_checkpoint_is_small_and_refuses_a_behind_voter() {
 async fn resident_checkpoint_carries_the_retention_fence_to_a_voter() {
     let source_dir = tempfile::tempdir().unwrap();
     let source_journal = Arc::new(DurableJournal::open(source_dir.path()).unwrap());
-    let source = sift::durability::SiftStateMachine::new(source_journal);
+    let source = sift::journal::SiftStateMachine::new(source_journal);
     let append = serde_json::to_vec(&serde_json::json!({
         "kind":"append_events",
         "events":[log(1)]
@@ -212,7 +212,7 @@ async fn resident_checkpoint_carries_the_retention_fence_to_a_voter() {
 
     let follower_dir = tempfile::tempdir().unwrap();
     let follower_journal = Arc::new(DurableJournal::open(follower_dir.path()).unwrap());
-    let follower = sift::durability::SiftStateMachine::new(follower_journal.clone());
+    let follower = sift::journal::SiftStateMachine::new(follower_journal.clone());
     follower.apply(1, &append).unwrap();
     follower.take_append_outcomes(1);
     follower.restore(&mut checkpoint.as_slice()).unwrap();
@@ -246,7 +246,7 @@ async fn resident_checkpoint_carries_the_retention_fence_to_a_voter() {
 fn sealed_raft_prefix_can_compact_while_newer_ingest_continues() {
     let source_dir = tempfile::tempdir().unwrap();
     let source_journal = Arc::new(DurableJournal::open(source_dir.path()).unwrap());
-    let source = sift::durability::SiftStateMachine::new(source_journal.clone());
+    let source = sift::journal::SiftStateMachine::new(source_journal.clone());
     for index in 1..=100_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
@@ -282,7 +282,7 @@ fn sealed_raft_prefix_can_compact_while_newer_ingest_continues() {
 
     let follower_dir = tempfile::tempdir().unwrap();
     let follower_journal = Arc::new(DurableJournal::open(follower_dir.path()).unwrap());
-    let follower = sift::durability::SiftStateMachine::new(follower_journal.clone());
+    let follower = sift::journal::SiftStateMachine::new(follower_journal.clone());
     for index in 1..=120_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
@@ -327,7 +327,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
     tokio::task::spawn_blocking(|| {
         let source_dir = tempfile::tempdir().unwrap();
         let source_journal = Arc::new(DurableJournal::open(source_dir.path()).unwrap());
-        let source = sift::durability::SiftStateMachine::new(source_journal.clone());
+        let source = sift::journal::SiftStateMachine::new(source_journal.clone());
         for index in 1..=200_u64 {
             let command = serde_json::to_vec(&serde_json::json!({
                 "kind":"append_events",
@@ -351,7 +351,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let follower_dir = tempfile::tempdir().unwrap();
         let follower_journal = Arc::new(DurableJournal::open(follower_dir.path()).unwrap());
-        let follower = sift::durability::SiftStateMachine::new(follower_journal.clone());
+        let follower = sift::journal::SiftStateMachine::new(follower_journal.clone());
         for index in 1..=220_u64 {
             let command = serde_json::to_vec(&serde_json::json!({
                 "kind":"append_events",
@@ -392,7 +392,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let restore_dir = tempfile::tempdir().unwrap();
         let restore_journal = Arc::new(DurableJournal::open(restore_dir.path()).unwrap());
-        let restored = sift::durability::SiftStateMachine::new(restore_journal.clone());
+        let restored = sift::journal::SiftStateMachine::new(restore_journal.clone());
         restored.restore(&mut checkpoint.as_slice()).unwrap();
         assert_eq!(restored.applied_index(), 200);
         assert_eq!(restore_journal.total_event_count(), 200);
@@ -429,7 +429,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let partial_dir = tempfile::tempdir().unwrap();
         let partial_journal = Arc::new(DurableJournal::open(partial_dir.path()).unwrap());
-        let partial = sift::durability::SiftStateMachine::new(partial_journal.clone());
+        let partial = sift::journal::SiftStateMachine::new(partial_journal.clone());
         let first = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
             "events":[log(1)]
@@ -443,7 +443,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let delta_source_dir = tempfile::tempdir().unwrap();
         let delta_source_journal = Arc::new(DurableJournal::open(delta_source_dir.path()).unwrap());
-        let delta_source = sift::durability::SiftStateMachine::new(delta_source_journal.clone());
+        let delta_source = sift::journal::SiftStateMachine::new(delta_source_journal.clone());
         let delta_now = chrono::Utc::now();
         for (index, event) in [
             (1, log_at(1, delta_now - chrono::Duration::days(179))),
@@ -468,7 +468,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         let delta_follower_journal =
             Arc::new(DurableJournal::open(delta_follower_dir.path()).unwrap());
         let delta_follower =
-            sift::durability::SiftStateMachine::new(delta_follower_journal.clone());
+            sift::journal::SiftStateMachine::new(delta_follower_journal.clone());
         delta_follower
             .restore(&mut source_checkpoint.as_slice())
             .unwrap();
@@ -483,7 +483,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         let delta_status = archive::committed_status(delta_source_dir.path())
             .unwrap()
             .unwrap();
-        let delta_barrier = sift::durability::encode_archive_checkpoint_barrier_for_diagnostics(
+        let delta_barrier = sift::journal::encode_archive_checkpoint_barrier_for_diagnostics(
             delta_status.retention_generation,
             delta_status.manifest_uri,
             delta_status.manifest_sha256,
@@ -525,12 +525,12 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         let retained_source_journal =
             Arc::new(DurableJournal::open(retained_source_dir.path()).unwrap());
         let retained_source =
-            sift::durability::SiftStateMachine::new(retained_source_journal.clone());
+            sift::journal::SiftStateMachine::new(retained_source_journal.clone());
         let retained_follower_dir = tempfile::tempdir().unwrap();
         let retained_follower_journal =
             Arc::new(DurableJournal::open(retained_follower_dir.path()).unwrap());
         let retained_follower =
-            sift::durability::SiftStateMachine::new(retained_follower_journal.clone());
+            sift::journal::SiftStateMachine::new(retained_follower_journal.clone());
         for (index, event) in [
             (1, log_at(1, now - chrono::Duration::days(179))),
             (2, log_at(2, now)),
@@ -595,7 +595,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         let retention_status = archive::committed_status(retained_source_dir.path())
             .unwrap()
             .unwrap();
-        let barrier = sift::durability::encode_archive_checkpoint_barrier_for_diagnostics(
+        let barrier = sift::journal::encode_archive_checkpoint_barrier_for_diagnostics(
             retention_status.retention_generation,
             retention_status.manifest_uri.clone(),
             retention_status.manifest_sha256.clone(),
@@ -613,7 +613,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let crash_dir = tempfile::tempdir().unwrap();
         let crash_journal = Arc::new(DurableJournal::open(crash_dir.path()).unwrap());
-        let crash_state = sift::durability::SiftStateMachine::new(crash_journal.clone());
+        let crash_state = sift::journal::SiftStateMachine::new(crash_journal.clone());
         for (index, event) in [
             (1, log_at(1, now - chrono::Duration::days(179))),
             (2, log_at(2, now)),
@@ -663,7 +663,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let ahead_dir = tempfile::tempdir().unwrap();
         let ahead_journal = Arc::new(DurableJournal::open(ahead_dir.path()).unwrap());
-        let ahead = sift::durability::SiftStateMachine::new(ahead_journal.clone());
+        let ahead = sift::journal::SiftStateMachine::new(ahead_journal.clone());
         for (index, event) in [
             (1, log_at(1, now - chrono::Duration::days(179))),
             (2, log_at(2, now)),
@@ -728,7 +728,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let restarted_journal =
             Arc::new(DurableJournal::open(retained_follower_dir.path()).unwrap());
-        let restarted = sift::durability::SiftStateMachine::new(restarted_journal.clone());
+        let restarted = sift::journal::SiftStateMachine::new(restarted_journal.clone());
         let restarted_projections =
             ProjectionRuntime::open(retained_follower_dir.path(), restarted_journal.clone())
                 .unwrap();
@@ -834,7 +834,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             .unwrap();
         let no_gc_dir = tempfile::tempdir().unwrap();
         let no_gc_journal = Arc::new(DurableJournal::open(no_gc_dir.path()).unwrap());
-        let no_gc_follower = sift::durability::SiftStateMachine::new(no_gc_journal);
+        let no_gc_follower = sift::journal::SiftStateMachine::new(no_gc_journal);
         no_gc_follower
             .restore(&mut no_gc_checkpoint.as_slice())
             .unwrap();

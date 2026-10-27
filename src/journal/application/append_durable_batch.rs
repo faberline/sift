@@ -6,15 +6,16 @@ use std::sync::atomic::Ordering;
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::event::EventEnvelope;
 use crate::journal::application::dedupe_window::rebuild_dedupe_index;
-use crate::journal::domain::append_result::AppendResult;
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::recent_cursor::recent_receipt_at;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::shared_kernel::append_result::AppendResult;
+use crate::shared_kernel::event::EventEnvelope;
 use crate::shared_kernel::retention_boundary::retention_rejection_at;
+use crate::shared_kernel::single_signal_batch::ensure_single_signal;
 use crate::shared_kernel::stored_event::StoredEvent;
 
-impl DurableJournal {
+impl JournalRuntime {
     pub fn append(&self, event: EventEnvelope) -> Result<AppendResult> {
         self.append_durable_batch(vec![event])?
             .pop()
@@ -46,13 +47,7 @@ impl DurableJournal {
         // this gate through the durable append so retention cannot delete a
         // newly created blob before its event reference becomes visible.
         let _blob_gate = self.blob_gate.lock().expect("Sift blob gate poisoned");
-        let signal = events
-            .first()
-            .context("Sift durable batch must not be empty")?
-            .signal;
-        if events.iter().any(|event| event.signal != signal) {
-            bail!("Sift durable batch must contain exactly one signal");
-        }
+        ensure_single_signal("Sift durable batch", &events)?;
         let mut governed = Vec::with_capacity(events.len());
         for event in events {
             let event = self.govern_event(event)?;
@@ -152,19 +147,18 @@ impl DurableJournal {
                 );
             }
             if let Err(append_error) = self.dedupe.append_batch_at(&staged, acknowledged_at) {
-                let archived =
-                    crate::archive::application::archive_status_queries::committed_watermarks(
-                        self.data_dir(),
-                    )?;
+                let archived = self.archive_read.committed_watermarks(self.data_dir())?;
                 let expected_last_cursor = staged
                     .last()
                     .map(|stored| stored.cursor)
                     .unwrap_or(state.last_cursor);
                 if let Err(rebuild_error) = rebuild_dedupe_index(
                     self.data_dir(),
-                    &self.storage,
-                    &self.wal,
-                    &self.dedupe,
+                    self.resources.as_ref(),
+                    self.archive_read.as_ref(),
+                    self.storage.as_ref(),
+                    self.wal.as_ref(),
+                    self.dedupe.as_ref(),
                     archived,
                     expected_last_cursor,
                 ) {
@@ -177,10 +171,16 @@ impl DurableJournal {
             for stored in staged {
                 Self::push_resident(&mut state, stored, self.resident_limit)?;
             }
-            crate::storage::JournalHead::new(state.last_cursor, state.total_events)
-                .with_projection_generation(state.projection_generation)
-                .with_retention_generation(state.retention_generation)
-                .persist(self.data_dir())
+            self.resources
+                .persist_head(
+                    self.data_dir(),
+                    &crate::journal::domain::journal_head::JournalHead::new(
+                        state.last_cursor,
+                        state.total_events,
+                    )
+                    .with_projection_generation(state.projection_generation)
+                    .with_retention_generation(state.retention_generation),
+                )
                 .context("persist journal head before acknowledging the durable batch")?;
             self.accepted.add(staged_cursors.len() as u64);
         }

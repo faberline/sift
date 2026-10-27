@@ -10,8 +10,8 @@ use std::{
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::{ContentBlobRef, OperationalEventV2};
 
 #[derive(Debug, Clone)]
@@ -36,7 +36,7 @@ impl BlobStore {
     }
 
     pub fn put(&self, bytes: &[u8], encoding: impl Into<String>) -> Result<ContentBlobRef> {
-        let digest = hex::encode(Sha256::digest(bytes));
+        let digest = sha256_hex(bytes);
         let hash = format!("sha256:{digest}");
         let path = self.path_for_hash(&hash)?;
         if path.exists() {
@@ -59,7 +59,7 @@ impl BlobStore {
     pub fn read(&self, hash: &str) -> Result<Vec<u8>> {
         let path = self.path_for_hash(hash)?;
         let bytes = fs::read(&path).with_context(|| format!("read blob {}", path.display()))?;
-        let actual = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
+        let actual = format!("sha256:{}", sha256_hex(&bytes));
         if actual != hash {
             bail!("blob hash mismatch: expected {hash}, got {actual}");
         }

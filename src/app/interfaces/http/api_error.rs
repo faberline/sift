@@ -1,10 +1,10 @@
 //! The error every HTTP handler returns, and how it becomes service_http's
 //! detailed error envelope with its retry and projection-lag metadata.
 
+use crate::projection::application::projection_runtime::ProjectionLag;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use service_http::ProjectionMetadata;
-use service_projection::ProjectionLag;
 
 use crate::ingest::domain::admission_error::AdmissionError;
 
@@ -86,7 +86,8 @@ impl ApiError {
 
     pub(crate) fn from_admission(error: AdmissionError) -> Self {
         Self {
-            status: error.status,
+            status: StatusCode::from_u16(error.status.code())
+                .expect("Sift admission status is valid"),
             error: error.code,
             message: error.message,
             retryable: error.retryable,

@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{SecondsFormat, Utc};
-use sift::{storage::archive, DurableJournal, EventEnvelope, SignalKind};
+use sift::{archive, DurableJournal, EventEnvelope, SignalKind};
 
 fn event(id: &str, occurred_at: chrono::DateTime<Utc>, attachment: bool) -> EventEnvelope {
     let mut event = EventEnvelope::for_project(

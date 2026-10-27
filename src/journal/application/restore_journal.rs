@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::recent_cursor::recent_cursor_at;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::shared_kernel::stored_event::StoredEvent;
 
-impl DurableJournal {
+impl JournalRuntime {
     /// Restore one globally ordered page without creating a second full-copy
     /// JSON snapshot. Cold archive restore calls this repeatedly, so resident
     /// memory stays bounded by the journal cache plus one recovery page.
@@ -89,10 +89,16 @@ impl DurableJournal {
         for event in events {
             Self::push_resident(&mut state, event, self.resident_limit)?;
         }
-        crate::storage::JournalHead::new(state.last_cursor, state.total_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())
+        self.resources
+            .persist_head(
+                self.data_dir(),
+                &crate::journal::domain::journal_head::JournalHead::new(
+                    state.last_cursor,
+                    state.total_events,
+                )
+                .with_projection_generation(state.projection_generation)
+                .with_retention_generation(state.retention_generation),
+            )
             .context("persist restored journal head")?;
         self.accepted.add(restored_events);
         Ok(())
@@ -108,7 +114,7 @@ impl DurableJournal {
 
     pub(crate) fn restore_archive_receipts(
         &self,
-        receipts: &[crate::storage::DedupeReceipt],
+        receipts: &[crate::shared_kernel::dedupe_receipt::DedupeReceipt],
         indexed_through_cursor: u64,
     ) -> Result<()> {
         self.dedupe
@@ -120,13 +126,14 @@ impl DurableJournal {
 
     pub(crate) fn set_restored_archive_head(
         &self,
-        manifest: &crate::archive::domain::archive_manifest::ArchiveManifest,
+        manifest: &crate::shared_kernel::archive_manifest::ArchiveManifest,
     ) -> Result<()> {
         self.dedupe
             .mark_rebuilt_through(manifest.raft_snapshot_index)?;
         let dedupe = self.dedupe.stats()?;
         if dedupe.newest_cursor > manifest.raft_snapshot_index
-            || dedupe.window_seconds != crate::storage::IDEMPOTENCY_WINDOW_SECONDS as u64
+            || dedupe.window_seconds
+                != crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS as u64
         {
             bail!("restored archive dedupe index disagrees with its manifest");
         }
@@ -146,10 +153,15 @@ impl DurableJournal {
         state.retention_generation = manifest.retention_generation;
         state.event_content_digest = event_content_digest;
         state.projection_generation = state.projection_generation.saturating_add(1);
-        crate::storage::JournalHead::new(state.last_cursor, state.total_events)
+        self.resources.persist_head(
+            self.data_dir(),
+            &crate::journal::domain::journal_head::JournalHead::new(
+                state.last_cursor,
+                state.total_events,
+            )
             .with_projection_generation(state.projection_generation)
-            .with_retention_generation(state.retention_generation)
-            .persist(self.data_dir())?;
+            .with_retention_generation(state.retention_generation),
+        )?;
         self.accepted.add(newly_counted);
         Ok(())
     }

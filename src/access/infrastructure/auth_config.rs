@@ -46,7 +46,7 @@ impl SiftAuthConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::auth::*;
+    use super::*;
 
     #[test]
     fn open_config_has_no_tokens() {

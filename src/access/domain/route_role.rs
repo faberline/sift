@@ -1,24 +1,28 @@
 //! The role each HTTP route needs, and the Kubernetes verb a role asks the API
 //! server about.
 
-use axum::http::Method;
-use service_auth::Role;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RouteRole {
+    Read,
+    Write,
+    Admin,
+}
 
-pub(in crate::access) fn role_verb(role: Role) -> &'static str {
+pub(in crate::access) fn role_verb(role: RouteRole) -> &'static str {
     match role {
-        Role::Read => "get",
-        Role::Write => "create",
-        Role::Admin => "update",
+        RouteRole::Read => "get",
+        RouteRole::Write => "create",
+        RouteRole::Admin => "update",
     }
 }
 
-pub(in crate::access) fn http_role(method: &Method, path: &str) -> Role {
+pub(in crate::access) fn http_role(method: &str, path: &str) -> RouteRole {
     if path.starts_with("/admin/") {
-        Role::Admin
+        RouteRole::Admin
     } else if matches!(
         path,
         "/v1/logs" | "/v1/metrics" | "/v1/traces" | "/prometheus/api/v1/write"
-    ) || (*method != Method::GET
+    ) || (method != "GET"
         && !matches!(
             path,
             "/api/v1/query"
@@ -28,8 +32,8 @@ pub(in crate::access) fn http_role(method: &Method, path: &str) -> Role {
                 | "/prometheus/api/v1/query_range"
         ))
     {
-        Role::Write
+        RouteRole::Write
     } else {
-        Role::Read
+        RouteRole::Read
     }
 }

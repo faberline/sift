@@ -6,8 +6,8 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::io::{Read, Write};
 
-use crate::journal::domain::raft_batch_limits::RAFT_BATCH_MAX_BYTES;
-use crate::journal::domain::sift_command::SiftCommandV1;
+use crate::shared_kernel::raft_batch_limits::RAFT_BATCH_MAX_BYTES;
+use crate::shared_kernel::sift_command::SiftCommandV1;
 
 pub(super) const COMMAND_MAGIC: &[u8; 8] = b"SIFTCMD1";
 

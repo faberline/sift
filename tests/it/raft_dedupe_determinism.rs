@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{Duration, SecondsFormat, TimeZone, Utc};
-use sift::{durability, DurableJournal, EventEnvelope, EventQuery, SignalKind};
+use sift::{journal, DurableJournal, EventEnvelope, EventQuery, SignalKind};
 
 fn event_for_project(project: &str) -> EventEnvelope {
     let mut event = EventEnvelope::for_project(
@@ -22,7 +22,7 @@ fn event() -> EventEnvelope {
 }
 
 fn command(at: chrono::DateTime<Utc>) -> Vec<u8> {
-    durability::encode_raft_batch_at_for_diagnostics(
+    journal::encode_raft_batch_at_for_diagnostics(
         vec![event()],
         &at.to_rfc3339_opts(SecondsFormat::Nanos, true),
     )
@@ -33,10 +33,10 @@ fn command(at: chrono::DateTime<Utc>) -> Vec<u8> {
 fn identical_event_ids_are_isolated_by_project() {
     let root = tempfile::tempdir().unwrap();
     let journal = Arc::new(DurableJournal::open(root.path()).unwrap());
-    let state_machine = durability::SiftStateMachine::new(journal.clone());
+    let state_machine = journal::SiftStateMachine::new(journal.clone());
     let decision_time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
 
-    let first = durability::encode_raft_batch_at_for_diagnostics(
+    let first = journal::encode_raft_batch_at_for_diagnostics(
         vec![event_for_project("project-a")],
         &decision_time.to_rfc3339_opts(SecondsFormat::Nanos, true),
     )
@@ -46,7 +46,7 @@ fn identical_event_ids_are_isolated_by_project() {
     assert_eq!(first_result[0].raw_cursor, 1);
     assert!(!first_result[0].duplicate);
 
-    let second = durability::encode_raft_batch_at_for_diagnostics(
+    let second = journal::encode_raft_batch_at_for_diagnostics(
         vec![event_for_project("project-b")],
         &decision_time.to_rfc3339_opts(SecondsFormat::Nanos, true),
     )
@@ -59,10 +59,10 @@ fn identical_event_ids_are_isolated_by_project() {
     drop(state_machine);
     drop(journal);
     let journal = Arc::new(DurableJournal::open(root.path()).unwrap());
-    let state_machine = durability::SiftStateMachine::new(journal.clone());
+    let state_machine = journal::SiftStateMachine::new(journal.clone());
 
     for (index, project, expected_cursor) in [(3, "project-a", 1), (4, "project-b", 2)] {
-        let retry = durability::encode_raft_batch_at_for_diagnostics(
+        let retry = journal::encode_raft_batch_at_for_diagnostics(
             vec![event_for_project(project)],
             &decision_time.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -81,8 +81,8 @@ fn every_voter_uses_the_raft_time_for_the_six_hour_duplicate_boundary() {
     let second_root = tempfile::tempdir().unwrap();
     let first_journal = Arc::new(DurableJournal::open(first_root.path()).unwrap());
     let second_journal = Arc::new(DurableJournal::open(second_root.path()).unwrap());
-    let first = durability::SiftStateMachine::new(first_journal.clone());
-    let second = durability::SiftStateMachine::new(second_journal.clone());
+    let first = journal::SiftStateMachine::new(first_journal.clone());
+    let second = journal::SiftStateMachine::new(second_journal.clone());
     // This time is intentionally far behind the process wall clock. The
     // second voter restarts before it receives the boundary command. Opening
     // the data directory must not prune the T0 decision that T5 still needs.
@@ -104,7 +104,7 @@ fn every_voter_uses_the_raft_time_for_the_six_hour_duplicate_boundary() {
     let boundary = command(decision_time + Duration::hours(6));
     first.apply_local(2, &boundary).unwrap();
     let second_journal = Arc::new(DurableJournal::open(second_root.path()).unwrap());
-    let second = durability::SiftStateMachine::new(second_journal.clone());
+    let second = journal::SiftStateMachine::new(second_journal.clone());
     second.apply_local(2, &boundary).unwrap();
     let first_boundary = first.take_append_outcomes(2).unwrap();
     let second_boundary = second.take_append_outcomes(2).unwrap();

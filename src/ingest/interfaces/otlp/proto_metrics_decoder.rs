@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use transport_otlp::proto::{metric, number_data_point};
 use transport_otlp::{proto as wire, OtlpSignal};
 
-use crate::ingest::domain::otlp_event_id::stable_id;
+use crate::ingest::application::event_identity::stable_id;
 use crate::ingest::interfaces::otlp::otlp_codec::{item_error, OtlpItemError};
 use crate::ingest::interfaces::otlp::otlp_event_builder::{apply_common_attributes, base_event};
 use crate::ingest::interfaces::otlp::otlp_proto_values::{

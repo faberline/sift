@@ -54,7 +54,7 @@ pub(super) struct BackupArgs {
 pub(super) async fn backup(args: BackupArgs) -> Result<()> {
     let result = match (args.url.as_deref(), args.data_dir.as_deref()) {
         (Some(url), None) => {
-            sift::backup::backup_live_journal_authenticated(
+            sift::operations::backup_live_journal_authenticated(
                 url,
                 args.token.as_deref(),
                 args.token_file.as_deref(),
@@ -67,7 +67,7 @@ pub(super) async fn backup(args: BackupArgs) -> Result<()> {
         }
         (None, Some(data_dir)) => {
             let journal = DurableJournal::open(data_dir)?;
-            sift::backup::backup_journal(&journal, &args.dest, args.retention_secs)?
+            sift::operations::backup_journal(&journal, &args.dest, args.retention_secs)?
         }
         _ => anyhow::bail!(
             "choose exactly one backup source: live --url or legacy offline --data-dir"

@@ -1,5 +1,5 @@
 use chrono::{Duration, TimeZone, Utc};
-use sift::{storage::DedupeIndex, EventEnvelope, SignalKind, StoredEvent};
+use sift::{journal::DedupeIndex, EventEnvelope, SignalKind, StoredEvent};
 
 fn copy_tree(source: &std::path::Path, target: &std::path::Path) {
     std::fs::create_dir(target).unwrap();

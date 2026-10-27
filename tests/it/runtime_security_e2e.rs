@@ -7,7 +7,7 @@ use axum::{
 };
 use service_auth::{Role, TokenClaims};
 use sift::{
-    auth::{SiftAuthConfig, SiftVerifier},
+    access::{SiftAuthConfig, SiftVerifier},
     openapi, protected_router, ServiceState,
 };
 use tower::ServiceExt;

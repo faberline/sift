@@ -2,4 +2,3 @@
 //! listener and the journal's Prometheus metrics.
 
 pub(crate) mod journal_metrics;
-pub(crate) mod peer_server;

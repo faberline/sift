@@ -4,7 +4,7 @@ use std::{fs, path::PathBuf, process::Command};
 
 use serde_json::{json, Value};
 use service_k8s::ManagedService;
-use sift::operator::Sift;
+use sift::operations::Sift;
 
 fn sift_resource() -> Sift {
     serde_json::from_value(json!({

@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use raft_runtime::{FsyncPolicy, HostConfig, Membership, RaftHost, RaftStateMachine, RaftStore};
 use sift::{
-    backup::backup_journal, durability::SiftStateMachine, DurableJournal, EventEnvelope,
+    journal::SiftStateMachine, operations::backup_journal, DurableJournal, EventEnvelope,
     EventQuery, SignalKind,
 };
 

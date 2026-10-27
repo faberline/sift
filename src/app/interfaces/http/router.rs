@@ -7,6 +7,7 @@ use anyhow::Result;
 use axum::routing::{get, post};
 use axum::Router;
 
+use crate::access::application::authorization_service::AuthorizationService;
 use crate::access::infrastructure::sift_verifier::SiftVerifier;
 use crate::access::interfaces::http::scoped_authorization::auth_middleware;
 use crate::app::service_state::ServiceState;
@@ -55,7 +56,7 @@ pub fn router(state: Arc<ServiceState>) -> Router {
 /// remain reachable when `SIFT_AUTH=required`.
 pub fn protected_router(state: Arc<ServiceState>, verifier: Arc<SiftVerifier>) -> Router {
     router(state).layer(axum::middleware::from_fn_with_state(
-        verifier,
+        Arc::new(AuthorizationService::from_verifier(verifier)),
         auth_middleware,
     ))
 }
@@ -68,6 +69,9 @@ pub fn protected_router_with_mcp(
     internal_endpoint: &str,
 ) -> Result<Router> {
     Ok(router(state).merge(http_router(internal_endpoint)?).layer(
-        axum::middleware::from_fn_with_state(verifier, auth_middleware),
+        axum::middleware::from_fn_with_state(
+            Arc::new(AuthorizationService::from_verifier(verifier)),
+            auth_middleware,
+        ),
     ))
 }

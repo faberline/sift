@@ -11,7 +11,7 @@ use service_auth::k8s::{
     AccessReviewOutcome, ResourceAttributes, ReviewBackend, ReviewError, ReviewedIdentity,
     TokenReviewOutcome,
 };
-use sift::{auth::SiftVerifier, protected_router, ServiceState};
+use sift::{access::SiftVerifier, protected_router, ServiceState};
 use tower::ServiceExt;
 
 struct ReviewRecorder {

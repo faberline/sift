@@ -8,7 +8,7 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use crate::app::service_state::ServiceState;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::DurableJournal;
 use crate::projection::application::projection_runtime::ProjectionRuntime;
 
 pub struct ProjectionWorker {
@@ -46,10 +46,10 @@ impl ServiceState {
     /// The worker has no listener, WAL, or Raft group of its own and can be
     /// stopped after HTTP drain during graceful shutdown.
     pub fn start_projection_worker(&self) -> ProjectionWorker {
-        let projections = self.projections.clone();
-        let flush_projections = self.projections.clone();
-        let journal = self.journal.clone();
-        let flush_journal = self.journal.clone();
+        let projections = self.projection_service();
+        let flush_projections = self.projection_service();
+        let journal = self.journal_service();
+        let flush_journal = self.journal_service();
         let (shutdown, mut shutdown_rx) = tokio::sync::watch::channel(false);
         let task = tokio::spawn(async move {
             loop {

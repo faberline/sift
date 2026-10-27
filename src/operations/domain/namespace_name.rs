@@ -1,8 +1,12 @@
 //! The operator namespace: a lowercase DNS label.
 
-use anyhow::{bail, Result};
+use thiserror::Error;
 
-pub(in crate::operations) fn validate_namespace(namespace: &str) -> Result<()> {
+#[derive(Debug, Error)]
+#[error("operator namespace must be a valid lowercase DNS label")]
+pub(in crate::operations) struct InvalidNamespace;
+
+pub(in crate::operations) fn validate_namespace(namespace: &str) -> Result<(), InvalidNamespace> {
     if namespace.is_empty()
         || namespace.len() > 63
         || namespace.starts_with('-')
@@ -11,7 +15,7 @@ pub(in crate::operations) fn validate_namespace(namespace: &str) -> Result<()> {
             !character.is_ascii_lowercase() && !character.is_ascii_digit() && character != '-'
         })
     {
-        bail!("operator namespace must be a valid lowercase DNS label");
+        return Err(InvalidNamespace);
     }
     Ok(())
 }

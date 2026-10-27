@@ -4,22 +4,22 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::RwLock;
 
+use crate::projection::domain::runtime_metadata::ProjectionDescriptor;
 use anyhow::{bail, Context, Result};
 use index_text::{
     Analyzer, FieldSpec, MatchOperator, MemoryTextIndex, TextDocument, TextIndex,
     TextIndexSnapshot, TextQuery, TextSchema,
 };
 use serde::{Deserialize, Serialize};
-use service_projection::ProjectionDescriptor;
-use sha2::{Digest, Sha256};
 
-use crate::projection::application::log_record_normalizer::normalize;
-use crate::projection::application::projection_runtime::Projection;
 use crate::projection::domain::log::{
     projection_row_key, record_matches, LogPage, LogQuery, LogRecordV1, LoggingState,
     DEFAULT_RETAINED_LOG_RECORDS, LOGGING_SCHEMA_VERSION, PROJECTION_LOGGING_STORE, RESOURCE_TYPE,
     SERVICE_NAME,
 };
+use crate::projection::domain::log_record_normalizer::normalize;
+use crate::projection::domain::projection::Projection;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
@@ -112,6 +112,8 @@ impl LoggingProjection {
 }
 
 impl Projection for LoggingProjection {
+    type Error = anyhow::Error;
+
     fn descriptor(&self) -> ProjectionDescriptor {
         ProjectionDescriptor {
             name: PROJECTION_LOGGING_STORE.into(),
@@ -196,13 +198,11 @@ impl Projection for LoggingProjection {
             .state
             .read()
             .expect("logging projection state lock poisoned");
-        Ok(hex::encode(Sha256::digest(serde_json::to_vec(
-            &SemanticState {
-                records: &state.records,
-                projection_cursor: state.projection_cursor,
-                max_records: self.max_records,
-            },
-        )?)))
+        Ok(sha256_hex(serde_json::to_vec(&SemanticState {
+            records: &state.records,
+            projection_cursor: state.projection_cursor,
+            max_records: self.max_records,
+        })?))
     }
 }
 

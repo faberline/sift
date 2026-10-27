@@ -5,14 +5,14 @@ use std::collections::BTreeMap;
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 
-use crate::journal::domain::append_result::AppendResult;
-use crate::journal::domain::event_query::EventQuery;
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::recent_cursor::recent_receipt_at;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::shared_kernel::append_result::AppendResult;
+use crate::shared_kernel::event_query::EventQuery;
 use crate::shared_kernel::stored_event::StoredEvent;
 
-impl DurableJournal {
-    pub(super) fn result_for_at(
+impl JournalRuntime {
+    pub(crate) fn result_for_at(
         &self,
         project: &str,
         event_id: &str,
@@ -110,18 +110,14 @@ impl DurableJournal {
         self.ensure_recovered()?;
         let limit = limit.clamp(1, 10_000);
         let mut by_cursor = BTreeMap::<u64, StoredEvent>::new();
-        let archive_status =
-            crate::archive::application::archive_status_queries::committed_status(self.data_dir())?;
+        let archive_status = self.archive_read.committed_status(self.data_dir())?;
         if archive_status
             .as_ref()
             .is_some_and(|status| after < status.snapshot_index)
         {
             if let Some(events) =
-                crate::archive::application::replay_committed_events::read_committed_events_after(
-                    self.data_dir(),
-                    after,
-                    limit,
-                )?
+                self.archive_read
+                    .read_committed_events_after(self.data_dir(), after, limit)?
             {
                 for event in events {
                     by_cursor.insert(event.cursor, event);

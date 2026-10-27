@@ -4,16 +4,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use thiserror::Error;
 
 use crate::projection::domain::metric::{
     MetricChunkV1, MetricPointV1, MetricQuery, MetricRollupV1, ResidentMetricChunk,
     METRIC_CHUNK_POINTS,
 };
 use crate::projection::domain::metric_memory_size::{
-    metric_chunk_memory_bytes, metric_point_memory_bytes,
+    metric_chunk_memory_bytes, metric_point_memory_bytes, MetricMemoryError,
 };
 use crate::{AttributeValue, MetricPoint, MetricTemporality};
 
@@ -100,9 +99,41 @@ pub(in crate::projection) fn point_is_in_range(
         && end.is_none_or(|end| point.time_unix_nano < end)
 }
 
-pub(in crate::projection) fn validate_series_id(series_id: &str) -> Result<()> {
+#[derive(Debug, Error)]
+pub(in crate::projection) enum MetricSeriesError {
+    #[error("metric series id is not a SHA-256 hex digest")]
+    InvalidSeriesId,
+    #[error("resident metric chunk point count overflowed")]
+    ChunkPointCountOverflow,
+    #[error("resident metric chunk byte count overflowed")]
+    ChunkByteCountOverflow,
+    #[error("metric series point count overflowed")]
+    SeriesPointCountOverflow,
+    #[error("metric series resident byte count overflowed")]
+    SeriesByteCountOverflow,
+    #[error("resident metric chunk point count underflowed")]
+    ChunkPointCountUnderflow,
+    #[error("resident metric chunk byte count underflowed")]
+    ChunkByteCountUnderflow,
+    #[error("metric series resident byte count underflowed")]
+    SeriesByteCountUnderflow,
+    #[error("cannot build an empty metric chunk")]
+    EmptyChunkBuild,
+    #[error("metric chunk lost its tail")]
+    ChunkLostTail,
+    #[error("resident metric chunk cannot be empty")]
+    EmptyResidentChunk,
+    #[error("resident metric chunk byte metadata must be non-zero")]
+    ZeroChunkBytes,
+    #[error(transparent)]
+    Identity(#[from] serde_json::Error),
+    #[error(transparent)]
+    MemorySize(#[from] MetricMemoryError),
+}
+
+pub(in crate::projection) fn validate_series_id(series_id: &str) -> Result<(), MetricSeriesError> {
     if series_id.len() != 64 || !series_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        bail!("metric series id is not a SHA-256 hex digest");
+        return Err(MetricSeriesError::InvalidSeriesId);
     }
     Ok(())
 }
@@ -114,7 +145,7 @@ pub(in crate::projection) fn identity_material(
     resource: &BTreeMap<String, String>,
     attributes: &BTreeMap<String, AttributeValue>,
     overflow: bool,
-) -> Result<String> {
+) -> Result<String, MetricSeriesError> {
     serde_json::to_string(&serde_json::json!({
         "project": project,
         "environment": environment,
@@ -141,7 +172,7 @@ pub(in crate::projection) fn point_order(
 pub(in crate::projection) fn push_metric_point(
     series: &mut StoredMetricSeries,
     point: MetricPointV1,
-) -> Result<()> {
+) -> Result<(), MetricSeriesError> {
     let resident_bytes = metric_point_memory_bytes(&point)?;
     let needs_chunk = series
         .chunks
@@ -167,25 +198,25 @@ pub(in crate::projection) fn push_metric_point(
     chunk.point_count = chunk
         .point_count
         .checked_add(1)
-        .context("resident metric chunk point count overflowed")?;
+        .ok_or(MetricSeriesError::ChunkPointCountOverflow)?;
     chunk.materialized_bytes = chunk
         .materialized_bytes
         .checked_add(resident_bytes)
-        .context("resident metric chunk byte count overflowed")?;
+        .ok_or(MetricSeriesError::ChunkByteCountOverflow)?;
     series.point_count = series
         .point_count
         .checked_add(1)
-        .context("metric series point count overflowed")?;
+        .ok_or(MetricSeriesError::SeriesPointCountOverflow)?;
     series.resident_bytes = series
         .resident_bytes
         .checked_add(resident_bytes)
-        .context("metric series resident byte count overflowed")?;
+        .ok_or(MetricSeriesError::SeriesByteCountOverflow)?;
     Ok(())
 }
 
 pub(in crate::projection) fn pop_oldest_metric_point(
     series: &mut StoredMetricSeries,
-) -> Result<Option<String>> {
+) -> Result<Option<String>, MetricSeriesError> {
     let Some(chunk) = series.chunks.first_mut() else {
         return Ok(None);
     };
@@ -195,11 +226,11 @@ pub(in crate::projection) fn pop_oldest_metric_point(
     chunk.point_count = chunk
         .point_count
         .checked_sub(1)
-        .context("resident metric chunk point count underflowed")?;
+        .ok_or(MetricSeriesError::ChunkPointCountUnderflow)?;
     chunk.materialized_bytes = chunk
         .materialized_bytes
         .checked_sub(resident_bytes)
-        .context("resident metric chunk byte count underflowed")?;
+        .ok_or(MetricSeriesError::ChunkByteCountUnderflow)?;
     if series.chunks[0].points.is_empty() {
         series.chunks.remove(0);
     } else {
@@ -208,20 +239,18 @@ pub(in crate::projection) fn pop_oldest_metric_point(
     series.resident_bytes = series
         .resident_bytes
         .checked_sub(resident_bytes)
-        .context("metric series resident byte count underflowed")?;
+        .ok_or(MetricSeriesError::SeriesByteCountUnderflow)?;
     Ok(Some(point.event_id))
 }
 
 pub(in crate::projection) fn make_chunks(
     points: &[MetricPointV1],
-) -> Result<Vec<ResidentMetricChunk>> {
+) -> Result<Vec<ResidentMetricChunk>, MetricSeriesError> {
     points
         .chunks(METRIC_CHUNK_POINTS)
         .map(|points| {
-            let first = points
-                .first()
-                .context("cannot build an empty metric chunk")?;
-            let last = points.last().context("metric chunk lost its tail")?;
+            let first = points.first().ok_or(MetricSeriesError::EmptyChunkBuild)?;
+            let last = points.last().ok_or(MetricSeriesError::ChunkLostTail)?;
             resident_metric_chunk(MetricChunkV1 {
                 start_time_unix_nano: first.time_unix_nano,
                 end_time_unix_nano: last.time_unix_nano,
@@ -233,22 +262,18 @@ pub(in crate::projection) fn make_chunks(
 
 pub(in crate::projection) fn resident_metric_chunk(
     chunk: MetricChunkV1,
-) -> Result<ResidentMetricChunk> {
+) -> Result<ResidentMetricChunk, MetricSeriesError> {
     if chunk.points.is_empty() {
-        bail!("resident metric chunk cannot be empty");
+        return Err(MetricSeriesError::EmptyResidentChunk);
     }
     let point_count = chunk.points.len();
     let materialized_bytes = metric_chunk_memory_bytes(&chunk)?;
     if materialized_bytes == 0 {
-        bail!("resident metric chunk byte metadata must be non-zero");
+        return Err(MetricSeriesError::ZeroChunkBytes);
     }
     Ok(ResidentMetricChunk {
         chunk,
         point_count,
         materialized_bytes,
     })
-}
-
-pub(in crate::projection) fn sha256(bytes: impl AsRef<[u8]>) -> String {
-    hex::encode(Sha256::digest(bytes.as_ref()))
 }

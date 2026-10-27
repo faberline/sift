@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use thiserror::Error;
 
 pub const DEFAULT_BATCH_SIZE: usize = 100;
 pub const MAX_BATCH_SIZE: usize = 1000;
@@ -54,8 +54,32 @@ pub struct CollectorConfig {
     pub follow_poll_interval: Duration,
 }
 
+#[derive(Debug, Error)]
+pub enum CollectorConfigError {
+    #[error("collector {0} must not be empty")]
+    EmptyField(&'static str),
+    #[error("collector {0} must not exceed 512 bytes")]
+    FieldTooLong(&'static str),
+    #[error("collector token and token_file are mutually exclusive")]
+    TokenAndTokenFile,
+    #[error("collector batch_size must be between 1 and {max}", max = MAX_BATCH_SIZE)]
+    BatchSize,
+    #[error("collector max_line_bytes must be between 1 and {max}", max = MAX_LINE_BYTES)]
+    MaxLineBytes,
+    #[error("collector max_retries must not exceed 20")]
+    MaxRetries,
+    #[error("collector timeout and polling durations must be nonzero")]
+    ZeroDuration,
+    #[error("collector follow mode requires a regular file or CRI source")]
+    FollowStdin,
+    #[error("collector checkpoint and quarantine paths must differ")]
+    CheckpointIsQuarantine,
+    #[error("collector CRI {0} must be nonempty, bounded, and control-character-free")]
+    InvalidCriMetadata(String),
+}
+
 impl CollectorConfig {
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<(), CollectorConfigError> {
         for (name, value) in [
             ("source_id", self.source_id.as_str()),
             ("endpoint", self.endpoint.as_str()),
@@ -64,35 +88,35 @@ impl CollectorConfig {
             ("token_audience", self.token_audience.as_str()),
         ] {
             if value.trim().is_empty() {
-                bail!("collector {name} must not be empty");
+                return Err(CollectorConfigError::EmptyField(name));
             }
             if value.len() > 512 {
-                bail!("collector {name} must not exceed 512 bytes");
+                return Err(CollectorConfigError::FieldTooLong(name));
             }
         }
         if self.token.is_some() && self.token_file.is_some() {
-            bail!("collector token and token_file are mutually exclusive");
+            return Err(CollectorConfigError::TokenAndTokenFile);
         }
         if self.batch_size == 0 || self.batch_size > MAX_BATCH_SIZE {
-            bail!("collector batch_size must be between 1 and {MAX_BATCH_SIZE}");
+            return Err(CollectorConfigError::BatchSize);
         }
         if self.max_line_bytes == 0 || self.max_line_bytes > MAX_LINE_BYTES {
-            bail!("collector max_line_bytes must be between 1 and {MAX_LINE_BYTES}");
+            return Err(CollectorConfigError::MaxLineBytes);
         }
         if self.max_retries > 20 {
-            bail!("collector max_retries must not exceed 20");
+            return Err(CollectorConfigError::MaxRetries);
         }
         if self.request_timeout.is_zero()
             || self.initial_backoff.is_zero()
             || self.follow_poll_interval.is_zero()
         {
-            bail!("collector timeout and polling durations must be nonzero");
+            return Err(CollectorConfigError::ZeroDuration);
         }
         if self.follow && matches!(self.source, SourceSpec::Stdin) {
-            bail!("collector follow mode requires a regular file or CRI source");
+            return Err(CollectorConfigError::FollowStdin);
         }
         if self.checkpoint_path == self.quarantine_path {
-            bail!("collector checkpoint and quarantine paths must differ");
+            return Err(CollectorConfigError::CheckpointIsQuarantine);
         }
         if let SourceSpec::Cri(cri) = &self.source {
             validate_metadata("gcp_project", &cri.metadata.gcp_project)?;
@@ -110,9 +134,9 @@ impl CollectorConfig {
     }
 }
 
-fn validate_metadata(name: &str, value: &str) -> Result<()> {
+fn validate_metadata(name: &str, value: &str) -> Result<(), CollectorConfigError> {
     if value.trim().is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
-        bail!("collector CRI {name} must be nonempty, bounded, and control-character-free");
+        return Err(CollectorConfigError::InvalidCriMetadata(name.to_owned()));
     }
     Ok(())
 }

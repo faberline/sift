@@ -1,26 +1,27 @@
 //! Evicting committed segments older than the hot window from local storage.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::archive::application::archive_receipts::HotEvictionReceipt;
 use crate::archive::domain::archive_catalog_item::{segment_catalog_key, ArchiveCatalogItem};
-use crate::archive::domain::archive_manifest::{empty_dedupe_receipt, ArchiveSegment};
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::portable_manifest::portable_manifest;
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
-use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::shared_kernel::archive_manifest::{empty_dedupe_receipt, ArchiveSegment};
+use crate::shared_kernel::archive_receipts::HotEvictionReceipt;
 
 /// Evict local copies whose complete event set is older than the 30-day hot
 /// window and is present in the verified remote manifest.
-pub fn evict_committed_cold_segments_at(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+pub(crate) fn evict_committed_cold_segments_at(
+    services: &ArchiveServices,
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
 ) -> Result<HotEvictionReceipt> {
-    let manifest = fetch_verified_committed_root(journal.storage().root())?
+    let manifest = services
+        .fetch_verified_committed_root(journal.storage().root())?
         .context("cold segment eviction requires a committed remote manifest")?;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     let cutoff = now - chrono::Duration::days(30);
     let cutoff_nanos = cutoff
         .timestamp_nanos_opt()

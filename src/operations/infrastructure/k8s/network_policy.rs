@@ -5,14 +5,14 @@ use std::collections::BTreeMap;
 
 use service_k8s::render::{self, RenderCtx};
 
-use crate::operations::infrastructure::k8s::constants::{
+use crate::operations::domain::instance_names::{
     AGENT_COMPONENT, APP, BACKUP_COMPONENT, CONTROL_COMPONENT, GATEWAY_COMPONENT, HTTP_PORT,
     OTLP_GRPC_PORT, PEER_MTLS_PORT, QUERY_COMPONENT, STORE_COMPONENT,
 };
 use crate::operations::infrastructure::k8s::role_workloads::{
     full_role_selector, role_selector_labels,
 };
-use crate::operations::interfaces::crd::sift_spec::{AuthMode, SiftSpec};
+use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
 fn dns_egress() -> render::NetworkRulePlan {
     render::NetworkRulePlan::new(

@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::journal::domain::segment_manifest::SegmentManifest;
 use crate::journal::infrastructure::storage::raw_storage::RawStorage;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 impl RawStorage {

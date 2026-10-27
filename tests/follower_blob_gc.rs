@@ -9,7 +9,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{SecondsFormat, Utc};
 use raft_runtime::RaftStateMachine;
 use sha2::{Digest, Sha256};
-use sift::{storage::archive, DurableJournal, EventEnvelope, EventQuery, SignalKind};
+use sift::{archive, DurableJournal, EventEnvelope, EventQuery, SignalKind};
 
 fn log(id: &str, occurred_at: chrono::DateTime<Utc>, attachment: bool) -> EventEnvelope {
     let mut event = EventEnvelope::for_project(
@@ -29,7 +29,7 @@ fn log(id: &str, occurred_at: chrono::DateTime<Utc>, attachment: bool) -> EventE
     event
 }
 
-fn apply(machine: &sift::durability::SiftStateMachine, index: u64, event: EventEnvelope) {
+fn apply(machine: &sift::journal::SiftStateMachine, index: u64, event: EventEnvelope) {
     let command = serde_json::to_vec(&serde_json::json!({
         "kind": "append_events",
         "events": [event]
@@ -62,10 +62,10 @@ async fn follower_persists_and_resumes_local_blob_gc_from_an_archive_checkpoint(
         let now = Utc::now();
         let source_dir = tempfile::tempdir().unwrap();
         let source_journal = Arc::new(DurableJournal::open(source_dir.path()).unwrap());
-        let source = sift::durability::SiftStateMachine::new(source_journal.clone());
+        let source = sift::journal::SiftStateMachine::new(source_journal.clone());
         let follower_dir = tempfile::tempdir().unwrap();
         let follower_journal = Arc::new(DurableJournal::open(follower_dir.path()).unwrap());
-        let follower = sift::durability::SiftStateMachine::new(follower_journal.clone());
+        let follower = sift::journal::SiftStateMachine::new(follower_journal.clone());
 
         for (index, event) in [
             (
@@ -94,7 +94,7 @@ async fn follower_persists_and_resumes_local_blob_gc_from_an_archive_checkpoint(
         let status = archive::committed_status(source_dir.path())
             .unwrap()
             .unwrap();
-        let barrier = sift::durability::encode_archive_checkpoint_barrier_for_diagnostics(
+        let barrier = sift::journal::encode_archive_checkpoint_barrier_for_diagnostics(
             status.retention_generation,
             status.manifest_uri,
             status.manifest_sha256,

@@ -5,4 +5,6 @@
 pub(crate) mod crd;
 pub(crate) mod grpc;
 pub(crate) mod http;
+pub(crate) mod instance_conversion;
+pub(crate) mod managed_service;
 pub(crate) mod operator;

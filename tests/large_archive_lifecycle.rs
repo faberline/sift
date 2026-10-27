@@ -5,7 +5,7 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use sift::{storage::archive, DurableJournal, EventEnvelope, ServiceState, SignalKind};
+use sift::{archive, DurableJournal, EventEnvelope, ServiceState, SignalKind};
 
 const EVENT_COUNT: usize = 600_000;
 const BATCH_EVENTS: usize = 1_000;
