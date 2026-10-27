@@ -1,0 +1,20 @@
+{
+  "schema": "sift.approved-p2-driver/v1",
+  "reviewed_source_base": "3cc3a1a53cd50b2b44e47707bd2416e44dc456a0",
+  "reviewed_candidate_patch_sha256": "f0ab55e49e98b4606a6802c61f2e27da9275c8085b672d93d2cc64e9cbb8de5d",
+  "trust_status": "proposed-bootstrap-requires-independent-review",
+  "blobs": {
+    ".github/workflows/sift-pr-verify.yml": "ee53e08febc30ba1454714a180ffb19379f96c33",
+    "Dockerfile": "697d322f99d4defb625142a64c83063c6426c2f4",
+    "test.sh": "32f60cac75d1f42c5ff979097bd62bb7dab386be",
+    "tests/candidate_root.sh": "17cdec72f27cd076ef38db6375f02069af792633",
+    "tests/prometheus_compliance.sh": "e031214c7304edac0a2679e3c1c528f6e859c498",
+    "tests/docker_named_volume.sh": "740a2b9736292964159d1daed057d39d80ebad7e",
+    "scripts/faberline-core-test.sh": "d6fb7abaa421c8fe814370ffa62e1deff71ffe21",
+    "scripts/ci/online.py": "80fd10e35561271ca0bce70a607522618a33bea2",
+    "scripts/ci/prepare.py": "1758b67826d272bbd3e05ab0f45636b2aba8cbb3",
+    "scripts/ci/online-dependencies.lock.json": "9a620f5ac1fed0c45e532c3001eee012e3897b80",
+    "scripts/ci/checker-requirements.lock": "ec7a8214d730f21dbc72496f466dcebeda28ec70",
+    "scripts/ci/test_online.py": "e420076aac8cb322172e8e301cdea73d6b27c393"
+  }
+}
