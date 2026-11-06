@@ -10,12 +10,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIFT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$SIFT_DIR" && pwd)"
+cd "$REPO_ROOT"
 
-RUN_ID="${SIFT_KIND_RUN_ID:-$(date -u +%m%d%H%M%S)}"
+RUN_ID="${SIFT_KIND_RUN_ID:-$(date -u +%m%d%H%M%S)-$$}"
 CLUSTER_NAME="${SIFT_KIND_CLUSTER:-sift-mvp-${RUN_ID}}"
 NAMESPACE="${SIFT_KIND_NAMESPACE:-sift}"
 OPERATOR_NAMESPACE="sift-system"
 PROJECT="${SIFT_KIND_PROJECT:-sift-kind}"
+COLLECTOR_PROJECT="sift"
+EMITTER_POD="sift-kind-emitter"
 IMAGE="${SIFT_KIND_IMAGE:-sift:kind-${RUN_ID}}"
 GATEWAY_PORT="${SIFT_KIND_GATEWAY_PORT:-27380}"
 STORE_HTTP_BASE="${SIFT_KIND_STORE_HTTP_BASE:-27400}"
@@ -29,11 +32,17 @@ EVIDENCE_DIR="${SIFT_KIND_EVIDENCE_DIR:-/private/tmp/sift-kind-evidence/${RUN_ID
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sift-kind.XXXXXX")"
 KUBECONFIG="$WORK_DIR/kubeconfig"
 PEER_DIR="$WORK_DIR/peer-pki"
-SIFT_CLI="${SIFT_KIND_CLI:-$REPO_ROOT/target/debug/sift}"
+SIFT_CLI="${SIFT_KIND_CLI:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/debug/sift}"
 
 export KUBECONFIG
+export BUILDX_CONFIG="${BUILDX_CONFIG:-$WORK_DIR/buildx}"
 
 CLUSTER_CREATED=0
+IMAGE_OWNED=0
+EVIDENCE_READY=0
+SIFT_NAMESPACE_OWNED=0
+OPERATOR_NAMESPACE_OWNED=0
+STARTED="$SECONDS"
 FORWARD_PIDS=()
 TOKEN_FILE="$WORK_DIR/sift-rig.token"
 SIFT_URL="http://127.0.0.1:${GATEWAY_PORT}"
@@ -70,12 +79,16 @@ extract_sse_json() {
 }
 
 stop_forwards() {
-  local pid
+  local pid failed=0
   for pid in "${FORWARD_PIDS[@]:-}"; do
     kill "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      failed=1
+    fi
   done
   FORWARD_PIDS=()
+  [[ "$failed" == "0" ]]
 }
 
 capture_diagnostics() {
@@ -111,40 +124,117 @@ capture_diagnostics() {
   done
 }
 
+delete_namespaces() {
+  local namespaces volumes deadline
+  local owned=()
+  [[ "$SIFT_NAMESPACE_OWNED" == "0" ]] || owned+=("$NAMESPACE")
+  [[ "$OPERATOR_NAMESPACE_OWNED" == "0" ]] || owned+=("$OPERATOR_NAMESPACE")
+  if [[ "$SIFT_NAMESPACE_OWNED" == "0" && "$OPERATOR_NAMESPACE_OWNED" == "0" ]]; then
+    return 0
+  fi
+  kubectl delete namespace "${owned[@]}" --ignore-not-found --wait=true --timeout=180s || return 1
+  namespaces="$(kubectl get namespace "${owned[@]}" --ignore-not-found -o name)" || return 1
+  [[ -z "$namespaces" ]] || return 1
+  deadline=$((SECONDS + 120))
+  while (( SECONDS < deadline )); do
+    volumes="$(kubectl get pv -o json | jq -r --arg ns "$NAMESPACE" --arg operator "$OPERATOR_NAMESPACE" '
+      .items[] | select(.spec.claimRef.namespace == $ns or .spec.claimRef.namespace == $operator)
+      | .metadata.name
+    ')" || return 1
+    [[ -z "$volumes" ]] && return 0
+    sleep 2
+  done
+  die "Sift persistent volumes remained after namespace deletion: $volumes"
+}
+
+delete_cluster() {
+  local node nodes volumes="" mounted remaining_clusters remaining_nodes remaining_volumes inspect_failed=0
+  nodes="$(docker ps -aq --filter "label=io.x-k8s.kind.cluster=$CLUSTER_NAME")" || inspect_failed=1
+  for node in $nodes; do
+    mounted="$(docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' "$node")" \
+      || inspect_failed=1
+    volumes="$volumes"$'\n'"$mounted"
+  done
+  kind delete cluster --name "$CLUSTER_NAME" || return 1
+  remaining_clusters="$(kind get clusters)" || return 1
+  remaining_nodes="$(docker ps -aq --filter "label=io.x-k8s.kind.cluster=$CLUSTER_NAME")" || return 1
+  if [[ -n "$remaining_nodes" ]] || grep -Fxq "$CLUSTER_NAME" <<< "$remaining_clusters"; then
+    die "kind cluster or its Docker nodes remained after deletion"
+    return 1
+  fi
+  remaining_volumes="$(docker volume ls --format '{{.Name}}')" || return 1
+  for mounted in $volumes; do
+    if grep -Fxq "$mounted" <<< "$remaining_volumes"; then
+      die "kind Docker node volume remained after deletion: $mounted"
+      return 1
+    fi
+  done
+  [[ "$inspect_failed" == "0" ]]
+}
+
+delete_image() {
+  local found
+  found="$(docker image ls --filter "reference=$IMAGE" --format '{{.ID}}')" || return 1
+  if [[ -n "$found" ]]; then
+    docker image rm "$IMAGE" || return 1
+  fi
+  found="$(docker image ls --filter "reference=$IMAGE" --format '{{.ID}}')" || return 1
+  [[ -z "$found" ]]
+}
+
 cleanup() {
   local ec=$?
   trap - EXIT INT TERM
-  stop_forwards
-  if [[ "$ec" -ne 0 ]]; then
-    capture_diagnostics
-  fi
-  if [[ "$CLUSTER_CREATED" == "1" && "${SIFT_KIND_KEEP_CLUSTER:-0}" != "1" ]]; then
-    if ! kind delete cluster --name "$CLUSTER_NAME" >/dev/null 2>&1; then
-      echo "!! failed to delete kind cluster $CLUSTER_NAME" >&2
-      (( ec != 0 )) || ec=1
-    elif kind get clusters | grep -Fxq "$CLUSTER_NAME"; then
-      echo "!! kind cluster still exists after deletion: $CLUSTER_NAME" >&2
-      (( ec != 0 )) || ec=1
+  stop_forwards || ec=1
+  if [[ "$CLUSTER_CREATED" == "1" ]]; then
+    if [[ "$ec" -ne 0 ]]; then
+      capture_diagnostics || true
     fi
-  elif [[ "$CLUSTER_CREATED" == "1" ]]; then
-    echo ">> preserving kind cluster $CLUSTER_NAME"
+    if [[ "$ec" -ne 0 && "${SIFT_KIND_KEEP_CLUSTER:-0}" == "1" ]]; then
+      step "preserving failed kind cluster $CLUSTER_NAME"
+    else
+      if ! delete_namespaces; then
+        echo "!! could not verify namespace and persistent volume cleanup" >&2
+        ec=1
+      fi
+      if ! delete_cluster; then
+        echo "!! could not verify kind cluster, node, and Docker volume cleanup" >&2
+        ec=1
+      fi
+    fi
+  fi
+  if [[ "$IMAGE_OWNED" == "1" ]] && ! delete_image; then
+    echo "!! could not remove the test image tag $IMAGE" >&2
+    ec=1
   fi
   case "$WORK_DIR" in
     "${TMPDIR:-/tmp}"/sift-kind.*|/tmp/sift-kind.*|/private/tmp/sift-kind.*)
-      rm -rf -- "$WORK_DIR"
+      rm -rf -- "$WORK_DIR" || ec=1
       ;;
     *)
       echo "!! refusing to remove unexpected work directory: $WORK_DIR" >&2
       (( ec != 0 )) || ec=1
       ;;
   esac
-  echo ">> evidence: $EVIDENCE_DIR"
+  [[ ! -e "$WORK_DIR" ]] || ec=1
+  if [[ "$ec" == "0" && "$EVIDENCE_READY" == "1" ]]; then
+    jq --argjson elapsed "$((SECONDS - STARTED))" \
+      '. + {result:"passed",duration_seconds:$elapsed,cleanup:{port_forwards:"passed",
+        namespaces:"passed",persistent_volumes:"passed",cluster:"passed",
+        docker_nodes_and_volumes:"passed",image_tag:"passed",scratch:"passed"}}' \
+      "$EVIDENCE_DIR/kind-checks.json" > "$EVIDENCE_DIR/kind-result.json" || ec=1
+    if [[ "$ec" == "0" ]]; then
+      step "Sift kind preflight passed"
+      cat "$EVIDENCE_DIR/kind-result.json"
+    fi
+  fi
+  [[ "$EVIDENCE_READY" == "0" ]] || step "evidence: $EVIDENCE_DIR"
   exit "$ec"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-for command in awk cargo curl date docker gzip jq kind kubectl openssl rg sed shasum; do
+for command in awk cargo curl date docker git gzip jq kind kubectl openssl rg sed shasum; do
   require "$command"
 done
 
@@ -161,25 +251,51 @@ done
   exit 2
 }
 
-mkdir -p "$EVIDENCE_DIR/kubernetes" "$EVIDENCE_DIR/protocol" "$PEER_DIR"
+[[ "$NAMESPACE" != "$OPERATOR_NAMESPACE" ]] || die "Sift and operator namespaces must differ"
+[[ "$NAMESPACE" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || die "invalid Sift namespace"
+[[ "$PROJECT" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || die "invalid protocol project"
+[[ "$PROJECT" != "$COLLECTOR_PROJECT" ]] || die "protocol and collector projects must differ"
+[[ "${SIFT_KIND_SKIP_BUILD:-0}" != "1" ]] || die "this gate requires a fresh image owned by this run"
+[[ -z "$(git status --porcelain=v1)" ]] || die "this gate requires a clean committed source tree"
+SOURCE_REVISION="$(git rev-parse HEAD)"
+mkdir -p "$(dirname "$EVIDENCE_DIR")" "$PEER_DIR"
+mkdir "$EVIDENCE_DIR" || die "refusing to overwrite existing evidence: $EVIDENCE_DIR"
+EVIDENCE_READY=1
+mkdir "$EVIDENCE_DIR/kubernetes" "$EVIDENCE_DIR/protocol"
 chmod 0700 "$PEER_DIR"
 
-if kind get clusters | grep -Fxq "$CLUSTER_NAME"; then
+existing_clusters="$(kind get clusters)"
+if grep -Fxq "$CLUSTER_NAME" <<< "$existing_clusters"; then
   echo "refusing to reuse existing kind cluster $CLUSTER_NAME" >&2
   exit 1
 fi
 
 step "build the current Sift CLI and Linux image"
-cargo build --locked -p sift --bin sift
-if [[ "${SIFT_KIND_SKIP_BUILD:-0}" != "1" ]]; then
-  case "$(uname -m)" in
-    arm64|aarch64) platform="linux/arm64" ;;
-    x86_64|amd64) platform="linux/amd64" ;;
-    *) echo "unsupported host architecture: $(uname -m)" >&2; exit 1 ;;
-  esac
-  docker build --platform "$platform" -f "$SIFT_DIR/Dockerfile" -t "$IMAGE" "$REPO_ROOT"
-fi
+{
+  printf 'source %s\ncommand bash %q\n' "$SOURCE_REVISION" "$SCRIPT_DIR/kind-mvp.sh"
+  kind version
+  kubectl version --client
+  docker version --format '{{.Client.Version}} {{.Server.Version}}'
+  cargo --version
+} > "$EVIDENCE_DIR/run-environment.txt"
+SIFT_SOURCE_REVISION="$SOURCE_REVISION" cargo build --locked -p sift --bin sift
+"$SIFT_CLI" acceptance-build-info > "$EVIDENCE_DIR/cli-build-info.json"
+jq -e --arg sha "$SOURCE_REVISION" '.git_sha == $sha' "$EVIDENCE_DIR/cli-build-info.json" >/dev/null \
+  || die "host CLI did not bind the exact source revision"
+case "$(uname -m)" in
+  arm64|aarch64) platform="linux/arm64" ;;
+  x86_64|amd64) platform="linux/amd64" ;;
+  *) echo "unsupported host architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+existing_image="$(docker image ls --filter "reference=$IMAGE" --format '{{.ID}}')"
+[[ -z "$existing_image" ]] || die "refusing to overwrite existing image $IMAGE"
+IMAGE_OWNED=1
+git archive "$SOURCE_REVISION" | docker build --platform "$platform" --provenance=false \
+  --build-arg "SIFT_SOURCE_REVISION=$SOURCE_REVISION" -t "$IMAGE" -
 docker image inspect "$IMAGE" --format '{{.Id}}' > "$EVIDENCE_DIR/image-id.txt"
+docker run --rm --network none "$IMAGE" acceptance-build-info > "$EVIDENCE_DIR/image-build-info.json"
+jq -e --arg sha "$SOURCE_REVISION" '.git_sha == $sha' "$EVIDENCE_DIR/image-build-info.json" >/dev/null \
+  || die "container image did not bind the exact source revision"
 
 step "create one control plane and three kind workers"
 CLUSTER_CREATED=1
@@ -237,15 +353,18 @@ step "render and install the Sift CRD and operator"
   --namespace "$OPERATOR_NAMESPACE" --image "$IMAGE" --out "$WORK_DIR/operator.yaml"
 kubectl apply -f "$WORK_DIR/crd.yaml"
 kubectl wait --for=condition=Established crd/sifts.sift.axiom.dev --timeout=90s
+existing_namespace="$(kubectl get namespace "$OPERATOR_NAMESPACE" --ignore-not-found -o name)"
+[[ -z "$existing_namespace" ]] || die "refusing to reuse operator namespace $OPERATOR_NAMESPACE"
+OPERATOR_NAMESPACE_OWNED=1
 kubectl apply -f "$WORK_DIR/operator.yaml"
 kubectl -n "$OPERATOR_NAMESPACE" rollout status deployment/sift-operator --timeout=300s
 
 step "create peer PKI and scoped Kubernetes authorization"
-cat > "$PEER_DIR/leaf.ext" <<'EOF'
+cat > "$PEER_DIR/leaf.ext" <<EOF
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth,clientAuth
-subjectAltName=DNS:*.sift-store-headless.sift.svc.cluster.local,DNS:*.sift-control-headless.sift.svc.cluster.local,DNS:sift-store.sift.svc.cluster.local,DNS:sift-control.sift.svc.cluster.local
+subjectAltName=DNS:*.sift-store-headless.${NAMESPACE}.svc.cluster.local,DNS:*.sift-control-headless.${NAMESPACE}.svc.cluster.local,DNS:sift-store.${NAMESPACE}.svc.cluster.local,DNS:sift-control.${NAMESPACE}.svc.cluster.local
 EOF
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
   -subj "/CN=Sift kind peer CA ${RUN_ID}" \
@@ -256,6 +375,9 @@ openssl x509 -req -days 2 -sha256 -in "$PEER_DIR/tls.csr" \
   -CA "$PEER_DIR/ca.crt" -CAkey "$PEER_DIR/ca.key" -CAcreateserial \
   -extfile "$PEER_DIR/leaf.ext" -out "$PEER_DIR/tls.crt" >/dev/null 2>&1
 
+existing_namespace="$(kubectl get namespace "$NAMESPACE" --ignore-not-found -o name)"
+[[ -z "$existing_namespace" ]] || die "refusing to reuse Sift namespace $NAMESPACE"
+SIFT_NAMESPACE_OWNED=1
 kubectl create namespace "$NAMESPACE"
 kubectl -n "$NAMESPACE" create secret generic sift-peer-tls \
   --from-file=tls.crt="$PEER_DIR/tls.crt" \
@@ -271,7 +393,7 @@ metadata:
 rules:
   - apiGroups: ["sift.axiom.dev"]
     resources: ["projects"]
-    resourceNames: ["${PROJECT}"]
+    resourceNames: ["${PROJECT}", "${COLLECTOR_PROJECT}"]
     verbs: ["get", "create", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -290,30 +412,15 @@ subjects:
 EOF
 
 step "create the Sift three-voter instance"
-kubectl apply -f - <<EOF
-apiVersion: sift.axiom.dev/v1alpha1
-kind: Sift
-metadata:
-  name: sift
-  namespace: ${NAMESPACE}
-spec:
-  image: ${IMAGE}
-  peerTlsSecret: sift-peer-tls
-  replicasPerShard: 3
-  voterCount: 3
-  storage:
-    storeSize: 1Gi
-    controlSize: 1Gi
-    gatewaySize: 1Gi
-    querySize: 1Gi
-  ingest:
-    maxItemsPerMinute: 720000
-    maxConcurrentRequests: 32
-  auth: kubernetes
-  gcpProjectId: local-kind
-  gkeClusterName: ${CLUSTER_NAME}
-  gkeLocation: local
-EOF
+"$SIFT_CLI" k8s instance render --profile dev --out "$WORK_DIR/instance.yaml"
+instance_patch="$(jq -nc --arg namespace "$NAMESPACE" --arg image "$IMAGE" --arg cluster "$CLUSTER_NAME" '
+  {metadata:{namespace:$namespace},spec:{image:$image,peerTlsSecret:"sift-peer-tls",
+    storage:{storeSize:"1Gi",controlSize:"1Gi",gatewaySize:"1Gi",querySize:"1Gi"},
+    auth:"kubernetes",gcpProjectId:"local-kind",gkeClusterName:$cluster,gkeLocation:"local"}}
+')"
+kubectl patch --local --type merge -f "$WORK_DIR/instance.yaml" --patch "$instance_patch" -o yaml \
+  > "$EVIDENCE_DIR/kubernetes/instance.yaml"
+kubectl apply -f "$EVIDENCE_DIR/kubernetes/instance.yaml"
 
 wait_role_ready() {
   local kind="$1" name="$2" want="$3" deadline=$((SECONDS + 600)) ready
@@ -400,8 +507,12 @@ start_gateway_forward() {
   kubectl -n "$NAMESPACE" port-forward service/sift "${GATEWAY_PORT}:7380" \
     >> "$EVIDENCE_DIR/kubernetes/gateway-forward.log" 2>&1 &
   FORWARD_PIDS+=("$!")
-  local deadline=$((SECONDS + 120))
+  local pid="$!" deadline=$((SECONDS + 120))
   while (( SECONDS < deadline )); do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      die "gateway port-forward exited"
+      return 1
+    fi
     if curl -fsS --max-time 3 "${SIFT_URL}/readyz" >/dev/null 2>&1; then
       return 0
     fi
@@ -436,9 +547,15 @@ refresh_token() {
 }
 
 auth_curl() {
-  curl --silent --show-error --fail-with-body \
+  auth_curl_for "$PROJECT" "$@"
+}
+
+auth_curl_for() {
+  local project="$1"
+  shift
+  curl --silent --show-error --fail-with-body --max-time 30 \
     -H "authorization: Bearer $(sed -n '1p' "$TOKEN_FILE")" \
-    -H "x-sift-project: ${PROJECT}" "$@"
+    -H "x-sift-project: ${project}" "$@"
 }
 
 auth_curl_status() {
@@ -500,6 +617,63 @@ wait_store_leader() {
 start_gateway_forward
 start_store_forwards
 refresh_token
+
+collector_trace="$(printf '%s' "$RUN_ID" | shasum -a 256 | cut -c1-32)"
+collector_marker="sift-kind-stdout-$RUN_ID"
+
+wait_for_collected_log() {
+  local output="$1" request deadline=$((SECONDS + 180))
+  request="$(jq -nc --arg project "$COLLECTOR_PROJECT" --arg environment "$NAMESPACE" \
+    --arg trace "$collector_trace" '
+    {version:1,project:$project,environment:$environment,signal:{kind:"logs",
+      filter:{op:"eq",field:"trace_id",value:$trace}},limit:2,mode:"sync"}
+  ')"
+  while (( SECONDS < deadline )); do
+    if auth_curl_for "$COLLECTOR_PROJECT" -X POST "${SIFT_URL}/api/v1/query" \
+        -H 'content-type: application/json' --data "$request" > "$output" 2>/dev/null \
+      && jq -e --arg trace "$collector_trace" --arg marker "$collector_marker" \
+        --arg pod "$EMITTER_POD" --arg uid "$emitter_uid" '
+        .partial == false and (.data.records | length) == 1
+        and (.data.records[0] | .trace_id == $trace and .body_text == $marker
+          and .resource["k8s.pod.name"] == $pod and .resource["k8s.pod.uid"] == $uid
+          and .resource["k8s.container.name"] == $pod
+          and .attributes["collector.stream"].value == "stdout")
+      ' "$output" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  die "one complete CRI stdout record did not reach the query API"
+}
+
+collector_integrity_to() {
+  local query_file="$1" output="$2"
+  auth_curl_for "$COLLECTOR_PROJECT" "${SIFT_URL}/admin/integrity?project=${COLLECTOR_PROJECT}" \
+    > "$output"
+  jq -e --slurpfile query "$query_file" '
+    .signals.logs.count > 0 and .signals.logs.watermark >= $query[0].data.records[0].cursor
+    and (.event_id_sha256 | test("^[0-9a-f]{64}$"))
+  ' "$output" >/dev/null || die "the collected log is outside the durable log inventory"
+}
+
+step "collect one structured stdout record through the Sift agent, gateway, store, and query"
+emitter_record="$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg trace "$collector_trace" --arg marker "$collector_marker" '
+  {schema:"axiom.service.log.v1",timestamp:$ts,severity:"INFO",service:{name:"kind-emitter",version:"1"},
+    event:"sift.kind.collector",message:$marker,trace_id:$trace,span_id:"b7ad6b7169203331"}
+')"
+kubectl -n "$NAMESPACE" run "$EMITTER_POD" --image=busybox:1.36.1 --restart=Never \
+  --overrides='{"spec":{"automountServiceAccountToken":false}}' \
+  --command -- printf '%s\n' "$emitter_record"
+kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$EMITTER_POD" --timeout=120s
+kubectl -n "$NAMESPACE" logs "pod/$EMITTER_POD" > "$EVIDENCE_DIR/protocol/collector-stdout.json"
+jq -e --argjson expected "$emitter_record" '. == $expected' \
+  "$EVIDENCE_DIR/protocol/collector-stdout.json" >/dev/null || die "emitter stdout did not match the fixture"
+emitter_uid="$(kubectl -n "$NAMESPACE" get "pod/$EMITTER_POD" -o jsonpath='{.metadata.uid}')"
+[[ -n "$emitter_uid" ]] || die "emitter pod UID is missing"
+wait_for_collected_log "$EVIDENCE_DIR/protocol/collector-before-restart.json"
+collector_integrity_to "$EVIDENCE_DIR/protocol/collector-before-restart.json" \
+  "$EVIDENCE_DIR/kubernetes/collector-integrity-before-restart.json"
 
 step "verify the initial three-voter Raft group"
 initial_leader="$(wait_store_leader)"
@@ -750,8 +924,30 @@ auth_curl -X POST "${SIFT_URL}/api/v1/query" -H 'content-type: application/json'
   > "$EVIDENCE_DIR/kubernetes/query-job-create.json"
 query_id="$(jq -r '.query_id // empty' "$EVIDENCE_DIR/kubernetes/query-job-create.json")"
 [[ -n "$query_id" ]] || die "async query did not return a query ID"
+
+wait_query_result() {
+  local output="$1" deadline=$((SECONDS + 180))
+  while (( SECONDS < deadline )); do
+    if auth_curl "${SIFT_URL}/api/v1/queries/${query_id}?project=${PROJECT}" \
+        > "$output" 2>/dev/null; then
+      if jq -e '.status == "succeeded" and .result.partial == false
+        and (.result.data.records | map(select(.event_id == "smoke-log")) | length) == 1' \
+        "$output" >/dev/null; then
+        return 0
+      fi
+      if jq -e '.status == "succeeded" or .status == "failed"' "$output" >/dev/null; then
+        die "async query completed without the expected log"
+        return 1
+      fi
+    fi
+    sleep 2
+  done
+  die "async query did not return the expected log"
+}
+
+wait_query_result "$EVIDENCE_DIR/kubernetes/query-job-before-restart.json"
 kubectl -n "$NAMESPACE" get pvc -o json \
-  | jq '[.items[] | {name:.metadata.name,uid:.metadata.uid}] | sort_by(.name)' \
+  | jq '[.items[] | {name:.metadata.name,uid:.metadata.uid,volume:.spec.volumeName}] | sort_by(.name)' \
   > "$EVIDENCE_DIR/kubernetes/pvc-before-restart.json"
 integrity_to "$EVIDENCE_DIR/kubernetes/integrity-before-restart.json"
 gateway_pod="$(kubectl -n "$NAMESPACE" get pod -l sift.axiom.dev/role=gateway -o jsonpath='{.items[0].metadata.name}')"
@@ -773,23 +969,22 @@ jq -e --slurpfile before "$EVIDENCE_DIR/kubernetes/integrity-before-restart.json
 ' "$EVIDENCE_DIR/kubernetes/integrity-after-restart.json" >/dev/null \
   || die "pod replacement changed acknowledged data"
 kubectl -n "$NAMESPACE" get pvc -o json \
-  | jq '[.items[] | {name:.metadata.name,uid:.metadata.uid}] | sort_by(.name)' \
+  | jq '[.items[] | {name:.metadata.name,uid:.metadata.uid,volume:.spec.volumeName}] | sort_by(.name)' \
   > "$EVIDENCE_DIR/kubernetes/pvc-after-restart.json"
 jq -e --slurpfile before "$EVIDENCE_DIR/kubernetes/pvc-before-restart.json" '. == $before[0]' \
   "$EVIDENCE_DIR/kubernetes/pvc-after-restart.json" >/dev/null || die "pod replacement changed a PVC"
-query_deadline=$((SECONDS + 180))
-while (( SECONDS < query_deadline )); do
-  if auth_curl "${SIFT_URL}/api/v1/queries/${query_id}?project=${PROJECT}" \
-      > "$EVIDENCE_DIR/kubernetes/query-job-after-restart.json" 2>/dev/null \
-    && jq -e '.status == "succeeded" or .status == "failed"' \
-      "$EVIDENCE_DIR/kubernetes/query-job-after-restart.json" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 2
-done
-jq -e '.status == "succeeded" or .status == "failed"' \
-  "$EVIDENCE_DIR/kubernetes/query-job-after-restart.json" >/dev/null \
-  || die "async query state disappeared after query restart"
+wait_query_result "$EVIDENCE_DIR/kubernetes/query-job-after-restart.json"
+jq -e --slurpfile before "$EVIDENCE_DIR/kubernetes/query-job-before-restart.json" '. == $before[0]' \
+  "$EVIDENCE_DIR/kubernetes/query-job-after-restart.json" >/dev/null || die "pod replacement changed the query job"
+wait_for_collected_log "$EVIDENCE_DIR/protocol/collector-after-restart.json"
+collector_integrity_to "$EVIDENCE_DIR/protocol/collector-after-restart.json" \
+  "$EVIDENCE_DIR/kubernetes/collector-integrity-after-restart.json"
+jq -e --slurpfile before "$EVIDENCE_DIR/protocol/collector-before-restart.json" \
+  '.data.records[0] == $before[0].data.records[0]' \
+  "$EVIDENCE_DIR/protocol/collector-after-restart.json" >/dev/null \
+  || die "pod replacement changed the complete CRI stdout record"
+collector_record_sha="$(jq -Sc '.data.records[0]' "$EVIDENCE_DIR/protocol/collector-after-restart.json" \
+  | shasum -a 256 | awk '{print $1}')"
 
 step "delete the live Raft leader and prove acknowledged writes continue"
 leader_before="$(wait_store_leader)"
@@ -838,15 +1033,14 @@ jq -e 'all(.items[];
 
 jq -n \
   --arg run_id "$RUN_ID" --arg cluster "$CLUSTER_NAME" --arg image "$IMAGE" \
+  --arg source_revision "$SOURCE_REVISION" --arg collector_record_sha256 "$collector_record_sha" \
   --arg image_id "$(sed -n '1p' "$EVIDENCE_DIR/image-id.txt")" \
   --argjson leader_before "$leader_before" --argjson leader_after "$leader_after" \
   --argjson final_count "$(jq -r '.event_count' "$EVIDENCE_DIR/kubernetes/integrity-after-failover.json")" \
-  '{version:1,result:"passed",scope:"kind-preflight-not-gke-acceptance",run_id:$run_id,
-    cluster:$cluster,image:$image,image_id:$image_id,
+  '{version:1,scope:"kind-preflight-not-gke-acceptance",run_id:$run_id,
+    cluster:$cluster,image:$image,image_id:$image_id,source_revision:$source_revision,
     checks:{topology:"passed",network_policy:"passed",kubernetes_auth:"passed",
       protocols:"passed",mcp:"passed",pvc_restart:"passed",query_job_restart:"passed",
+      collector_stdout_restart:{status:"passed",record_count:1,record_sha256:$collector_record_sha256},
       raft_leader_replacement:{status:"passed",leader_before:$leader_before,leader_after:$leader_after}},
-    final_event_count:$final_count}' > "$EVIDENCE_DIR/kind-result.json"
-
-step "Sift kind preflight passed"
-jq . "$EVIDENCE_DIR/kind-result.json"
+    final_event_count:$final_count}' > "$EVIDENCE_DIR/kind-checks.json"
