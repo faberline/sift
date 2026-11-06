@@ -142,6 +142,58 @@ async fn tail_correlate_and_services_share_the_phase_one_model() {
 }
 
 #[tokio::test]
+async fn log_tail_reconnects_after_its_cursor_without_crossing_projects() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(ServiceState::open(temp.path()).unwrap());
+    state.journal().append(log("first", "trace-1")).unwrap();
+    let app = router(Arc::clone(&state));
+
+    let tail_page = async |after_cursor: Option<&str>| {
+        let response = post(
+            &app,
+            "/api/v1/logs/tail",
+            serde_json::json!({
+                "version": 1,
+                "project": "project-a",
+                "environment": "prod",
+                "filter": {"op": "eq", "field": "trace_id", "value": "trace-1"},
+                "after_cursor": after_cursor,
+                "wait_ms": 0,
+                "limit": 2
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let page = body_json(response).await;
+        assert_eq!(page["partial"], false);
+        page
+    };
+
+    let first = tail_page(None).await;
+    assert_eq!(first["data"]["records"].as_array().unwrap().len(), 1);
+    assert_eq!(first["data"]["records"][0]["event_id"], "first");
+    let first_cursor = first["next_cursor"].as_str().expect("first tail cursor");
+
+    let mut foreign = log("foreign", "trace-1");
+    foreign.project = "project-b".into();
+    state.journal().append(foreign).unwrap();
+    state.journal().append(log("filtered", "trace-2")).unwrap();
+    state.journal().append(log("new", "trace-1")).unwrap();
+
+    let resumed = tail_page(Some(first_cursor)).await;
+    assert_eq!(resumed["data"]["records"].as_array().unwrap().len(), 1);
+    assert_eq!(resumed["data"]["records"][0]["event_id"], "new");
+    let resumed_cursor = resumed["next_cursor"]
+        .as_str()
+        .expect("resumed tail cursor");
+    assert_ne!(resumed_cursor, first_cursor);
+
+    let empty = tail_page(Some(resumed_cursor)).await;
+    assert!(empty["data"]["records"].as_array().unwrap().is_empty());
+    assert_eq!(empty["next_cursor"], resumed_cursor);
+}
+
+#[tokio::test]
 async fn async_query_job_is_persisted_and_read_after_restart() {
     let temp = tempfile::tempdir().unwrap();
     let query_id;

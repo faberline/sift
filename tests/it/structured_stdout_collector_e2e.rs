@@ -159,7 +159,7 @@ fn run_collector(source: &Path, checkpoint: &Path, quarantine: &Path, endpoint: 
     serde_json::from_slice(&output.stdout).expect("collector terminal JSON")
 }
 
-async fn query_logs(client: &reqwest::Client, base: &str, trace_id: Option<&str>) -> Value {
+fn logs_request(trace_id: Option<&str>) -> Value {
     let mut query = json!({
         "version": 1,
         "project": "local",
@@ -175,9 +175,13 @@ async fn query_logs(client: &reqwest::Client, base: &str, trace_id: Option<&str>
             "value": trace_id
         });
     }
+    query
+}
+
+async fn query_logs(client: &reqwest::Client, base: &str, trace_id: Option<&str>) -> Value {
     let response = client
         .post(format!("{base}/api/v1/query"))
-        .json(&query)
+        .json(&logs_request(trace_id))
         .send()
         .await
         .expect("query Sift logs");
@@ -300,5 +304,30 @@ async fn real_file_collector_ingests_queries_and_resumes() {
     wait_ready(&mut restarted, &client, &base).await;
     let recovered = wait_for_records(&client, &base, None, 2).await;
     assert_eq!(recovered["records"], all["records"]);
+
+    let request_path = temp.path().join("query.json");
+    std::fs::write(
+        &request_path,
+        serde_json::to_vec(&logs_request(None)).unwrap(),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_sift"))
+        .arg("query")
+        .arg(&request_path)
+        .args(["--endpoint", &base, "--request-timeout-secs", "3"])
+        .env_remove("SIFT_TOKEN")
+        .output()
+        .expect("query the restarted Sift server with its CLI");
+    assert!(
+        output.status.success(),
+        "Sift query failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let queried: Value = serde_json::from_slice(&output.stdout).expect("query terminal JSON");
+    assert_eq!(queried["next"], "done");
+    assert_eq!(queried["partial"], false);
+    assert_eq!(queried["stats"]["returned"], 2);
+    assert_eq!(queried["data"]["records"], all["records"]);
 }
 // HANDWRITE-END
