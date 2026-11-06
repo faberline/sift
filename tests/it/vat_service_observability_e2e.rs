@@ -1,17 +1,25 @@
 // HANDWRITE-BEGIN gap="missing-generator:unit-test:vat-service-observability-e2e" tracker="pending-tracker" reason="Prove Lumen, Tape, Relay, and Defer compose with VAT capture and the Sift-owned collector through the shared stdout contract."
 #![cfg(unix)]
 
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 const SERVICES: [&str; 4] = ["lumen", "tape", "relay", "defer"];
+const PARENT_SPAN: &str = "b7ad6b7169203331";
+const CANARY: &str = "sift-vat-synthetic-authorization-canary";
 
 fn debug_binary(name: &str) -> PathBuf {
     if name == "sift" {
         return PathBuf::from(env!("CARGO_BIN_EXE_sift"));
+    }
+    if let Some(directory) = std::env::var_os("SIFT_VAT_BIN_DIR") {
+        let directory = PathBuf::from(directory);
+        assert!(directory.is_absolute(), "SIFT_VAT_BIN_DIR must be absolute");
+        return directory.join(name);
     }
     // The other services come from their own repositories, installed on PATH.
     std::env::var_os("PATH")
@@ -42,10 +50,6 @@ fn jsonl(stdout: &[u8]) -> Vec<Value> {
 #[test]
 #[ignore = "needs vat, lumen, tape, relay and defer installed on PATH"]
 fn vat_managed_service_stdout_reaches_real_sift_query() {
-    if std::env::var_os("VAT_SERVICE_OBSERVABILITY_PROBE").is_some() {
-        return;
-    }
-
     let vat = debug_binary("vat");
     let lumen = debug_binary("lumen");
     let tape = debug_binary("tape");
@@ -67,7 +71,7 @@ name = "service-sift-observability"
 [workspace]
 base = "."
 workdir = "."
-keep = "always"
+keep = "never"
 
 [env]
 LUMEN_AUTH = "off"
@@ -76,34 +80,39 @@ RELAY_AUTH = "off"
 DEFER_AUTH = "off"
 SIFT_AUTH = "off"
 VAT_SERVICE_OBSERVABILITY_PROBE = "1"
+RUST_LOG = "info"
 
 [[services]]
 id = "lumen"
 cmd = [{lumen}, "serve", "--host", "127.0.0.1", "--port", "{{port}}", "--wal", "embedded", "--log-format", "json"]
 ready_http = "http://127.0.0.1:{{port}}/readyz"
+export = {{ LUMEN_URL = "http://{{host}}:{{port}}" }}
 timeout_s = 30
 
 [[services]]
 id = "tape"
 cmd = [{tape}, "serve", "--bind", "127.0.0.1:{{port}}", "--store", "tape.json", "--log-format", "json"]
 ready_http = "http://127.0.0.1:{{port}}/readyz"
+export = {{ TAPE_URL = "http://{{host}}:{{port}}" }}
 timeout_s = 30
 
 [[services]]
 id = "relay"
 cmd = [{relay}, "--bind", "127.0.0.1:{{port}}", "--data-dir", "relay-data", "--log-format", "json"]
 ready_http = "http://127.0.0.1:{{port}}/readyz"
+export = {{ RELAY_URL = "http://{{host}}:{{port}}" }}
 timeout_s = 30
 
 [[services]]
 id = "defer"
 cmd = [{defer}, "serve", "--bind", "127.0.0.1:{{port}}", "--data-dir", "defer-data", "--log-format", "json"]
 ready_http = "http://127.0.0.1:{{port}}/readyz"
+export = {{ DEFER_URL = "http://{{host}}:{{port}}" }}
 timeout_s = 30
 
 [[services]]
 id = "sift"
-cmd = [{sift}, "serve", "--host", "127.0.0.1", "--port", "{{port}}", "--data-dir", "sift-data", "--log-level", "warn", "--log-format", "json"]
+cmd = [{sift}, "serve", "--host", "127.0.0.1", "--port", "{{port}}", "--grpc-port", "0", "--data-dir", "sift-data", "--log-level", "warn", "--log-format", "json"]
 ready_http = "http://127.0.0.1:{{port}}/readyz"
 export = {{ SIFT_URL = "http://{{host}}:{{port}}" }}
 timeout_s = 30
@@ -112,8 +121,7 @@ timeout_s = 30
 id = "observability"
 requires = ["lumen", "tape", "relay", "defer", "sift"]
 cmd = [{probe}, "--exact", {probe_test}, "--nocapture"]
-timeout_s = 60
-artifacts = ["observability-proof.json"]
+timeout_s = 90
 "#,
         lumen = serde_json::to_string(&lumen.to_string_lossy()).unwrap(),
         tape = serde_json::to_string(&tape.to_string_lossy()).unwrap(),
@@ -131,14 +139,10 @@ artifacts = ["observability-proof.json"]
 
     let output = Command::new(&vat)
         .current_dir(project.path())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", project.path())
         .env("VAT_HOME", vat_home.path())
-        .env_remove("RUST_LOG")
-        .env_remove("LUMEN_OTLP_ENDPOINT")
-        .env_remove("TAPE_OTLP_ENDPOINT")
-        .env_remove("RELAY_OTLP_ENDPOINT")
-        .env_remove("DEFER_OTLP_ENDPOINT")
-        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .env_remove("SIFT_TOKEN")
         .args(["run", "observability"])
         .output()
         .expect("run real VAT service observability journey");
@@ -150,26 +154,49 @@ artifacts = ["observability-proof.json"]
         .find(|event| event["type"] == "result")
         .expect("VAT result event");
     let vat_id = result["id"].as_str().expect("VAT id");
-    if !output.status.success() {
-        let logs = Command::new(&vat)
-            .env("VAT_HOME", vat_home.path())
-            .args(["logs", vat_id, "runner"])
-            .output()
-            .expect("read failed VAT runner logs");
-        panic!(
-            "VAT journey failed: stdout=\n{}\nstderr=\n{}\nrunner stdout=\n{}\nrunner stderr=\n{}",
-            stdout,
-            String::from_utf8_lossy(&output.stderr),
-            String::from_utf8_lossy(&logs.stdout),
-            String::from_utf8_lossy(&logs.stderr)
+    assert!(
+        !vat_home.path().join("vats").join(vat_id).exists(),
+        "VAT workspace survived the run"
+    );
+    let endpoint_file = project.path().join("owned-endpoints.json");
+    if let Ok(bytes) = std::fs::read(&endpoint_file) {
+        let endpoints: Vec<SocketAddr> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(endpoints.len(), SERVICES.len() + 1);
+        for endpoint in endpoints {
+            assert!(endpoint.ip().is_loopback());
+            let error = TcpStream::connect_timeout(&endpoint, Duration::from_millis(300))
+                .expect_err("VAT service still listening");
+            assert_eq!(error.kind(), std::io::ErrorKind::ConnectionRefused);
+        }
+    } else {
+        assert!(
+            !output.status.success(),
+            "runner did not report owned endpoints"
         );
     }
     assert!(
-        !stdout.contains("axiom.service.log.v1"),
-        "VAT must not replay child telemetry into its own stdout: {stdout}"
+        output.status.success(),
+        "VAT journey failed: {}\n{}\n{}",
+        stdout.replace(CANARY, "[redacted]"),
+        String::from_utf8_lossy(&output.stderr).replace(CANARY, "[redacted]"),
+        std::fs::read_to_string(project.path().join("runner-failure.txt")).unwrap_or_default()
     );
+    assert!(
+        !stdout.contains("axiom.service.log.v1"),
+        "VAT replayed child telemetry into its own stdout"
+    );
+    assert!(!stdout.contains(CANARY), "VAT stdout leaked authorization");
     assert_eq!(result["ok"], true);
-    assert_eq!(result["state"], "kept");
+    assert_eq!(result["state"], "removed");
+    let proof = std::fs::read_to_string(project.path().join("observability-proof.json")).unwrap();
+    assert!(!proof.contains(CANARY));
+    let mut proof: Value = serde_json::from_str(&proof).unwrap();
+    assert_eq!(proof["records"].as_array().unwrap().len(), 16);
+    project.close().expect("remove isolated VAT fixture");
+    vat_home.close().expect("remove isolated VAT home");
+    proof["result"] = json!("passed");
+    println!("{proof}");
+    println!("VAT workspace removed and all five loopback listeners closed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -178,146 +205,366 @@ async fn vat_runner_collects_every_service() {
         return;
     }
 
-    let sift_url = std::env::var("SIFT_URL").expect("VAT Sift endpoint export");
-    let logs_dir = PathBuf::from(std::env::var("VAT_LOGS_DIR").expect("VAT logs directory"));
-    let mut sources = Vec::new();
-    for service in SERVICES {
-        let key = format!("VAT_SERVICE_{}_STDOUT_LOG", service.to_ascii_uppercase());
-        let source = PathBuf::from(std::env::var(&key).unwrap_or_else(|_| panic!("missing {key}")));
-        assert!(source.starts_with(&logs_dir));
-        assert!(source.is_file());
-        wait_for_structured_event(&source, service).await;
-        sources.push((service, source));
-    }
-
-    let mut summaries = serde_json::Map::new();
-    for (service, source) in &sources {
-        let checkpoint = format!("{service}.collector.checkpoint.json");
-        let quarantine = format!("{service}.collector.rejected.jsonl");
-        let source_id = format!("vat:{service}:stdout");
-        let collector = Command::new(env!("CARGO_BIN_EXE_sift"))
-            .args([
-                "collect",
-                "--source",
-                source.to_str().unwrap(),
-                "--source-id",
-                &source_id,
-                "--endpoint",
-                &sift_url,
-                "--project",
-                "local",
-                "--environment",
-                "test",
-                "--checkpoint",
-                &checkpoint,
-                "--quarantine",
-                &quarantine,
-                "--max-retries",
-                "2",
-            ])
-            .env_remove("SIFT_TOKEN")
-            .output()
-            .unwrap_or_else(|error| panic!("run Sift collector for {service}: {error}"));
-        assert!(
-            collector.status.success(),
-            "collector for {service} failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&collector.stdout),
-            String::from_utf8_lossy(&collector.stderr)
+    let proof_root = PathBuf::from(std::env::var_os("VAT_CONFIG_ROOT").unwrap());
+    let failure_path = proof_root.join("runner-failure.txt");
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = std::fs::write(
+            &failure_path,
+            info.to_string().replace(CANARY, "[redacted]"),
         );
-        let summary: Value = serde_json::from_slice(&collector.stdout).unwrap();
-        assert!(
-            summary["accepted"].as_u64().unwrap_or(0) >= 1,
-            "{summary:#}"
-        );
-        assert_eq!(summary["rejected"], 0, "{service}: {summary:#}");
-        summaries.insert((*service).to_string(), summary);
-    }
+    }));
+    let sift_url = local_endpoint("SIFT");
+    let logs = PathBuf::from(std::env::var_os("VAT_LOGS_DIR").unwrap())
+        .canonicalize()
+        .unwrap();
+    let producers: Vec<_> = SERVICES
+        .into_iter()
+        .map(|name| Producer {
+            name,
+            endpoint: local_endpoint(name),
+            stdout: capture_path(&logs, name, "STDOUT"),
+            stderr: capture_path(&logs, name, "STDERR"),
+        })
+        .collect();
+    let endpoints: std::collections::BTreeSet<_> = producers
+        .iter()
+        .map(|producer| loopback_addr(&producer.endpoint))
+        .chain(std::iter::once(loopback_addr(&sift_url)))
+        .collect();
+    assert_eq!(endpoints.len(), SERVICES.len() + 1);
+    write_json(&proof_root.join("owned-endpoints.json"), json!(endpoints));
 
     let client = reqwest::Client::builder()
         .http1_only()
+        .no_proxy()
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    let records = wait_for_all_services(&client, &sift_url).await;
-    let proof = json!({
-        "schema": "sift.local-service-observability-proof.v1",
-        "services": SERVICES,
-        "collector": summaries,
-        "records": records,
-    });
-    std::fs::write(
-        "observability-proof.json",
-        serde_json::to_vec_pretty(&proof).unwrap(),
-    )
-    .unwrap();
+    let baseline = exercise_producers(&client, &producers, 0).await;
+    let offsets: Vec<_> = producers
+        .iter()
+        .map(|producer| {
+            let summary = collect(producer, &sift_url);
+            assert!(summary["accepted"].as_u64().unwrap() >= 2);
+            assert_eq!(summary["start_offset"], 0);
+            assert_eq!(summary["rejected"], 0);
+            summary["final_offset"].as_u64().unwrap()
+        })
+        .collect();
+    let mut proof = Vec::new();
+    for request in &baseline {
+        proof.push(verify_sift_record(&client, &sift_url, request).await);
+    }
+
+    let backlog = exercise_producers(&client, &producers, 1).await;
+    // Reserve an endpoint that never acknowledges a batch.
+    let stalled = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let stalled_url = format!("http://{}", stalled.local_addr().unwrap());
+    for producer in &producers {
+        let checkpoint = checkpoint_path(producer);
+        let before = std::fs::read(&checkpoint).expect("baseline checkpoint");
+        let failed = run_collector(producer, &checkpoint, &stalled_url, "1");
+        let stderr = String::from_utf8_lossy(&failed.stderr);
+        assert!(
+            !failed.status.success(),
+            "{} outage returned success",
+            producer.name
+        );
+        assert!(!stderr.contains(CANARY), "collector logged authorization");
+        assert!(
+            stderr.contains("Sift ingest transport error"),
+            "{} did not hit stalled receiver",
+            producer.name
+        );
+        assert_eq!(std::fs::read(&checkpoint).unwrap(), before);
+    }
+    drop(stalled);
+    for request in &backlog {
+        assert!(query_by_trace(&client, &sift_url, &request.trace)
+            .await
+            .is_empty());
+    }
+
+    for (producer, offset) in producers.iter().zip(offsets) {
+        let resumed = collect(producer, &sift_url);
+        assert_eq!(resumed["start_offset"], offset);
+        assert!(resumed["accepted"].as_u64().unwrap() >= 2);
+        assert!(resumed["final_offset"].as_u64().unwrap() > offset);
+        assert_eq!(resumed["rejected"], 0);
+        for capture in [&producer.stdout, &producer.stderr] {
+            let text = std::fs::read_to_string(capture).expect("read VAT capture");
+            assert!(
+                !text.contains(CANARY),
+                "{} capture leaked authorization",
+                producer.name
+            );
+        }
+    }
+    for request in &backlog {
+        proof.push(verify_sift_record(&client, &sift_url, request).await);
+    }
+    for producer in &producers {
+        // A separate checkpoint replays the same source with the same event IDs.
+        let replay_checkpoint = PathBuf::from(format!("{}.replay.checkpoint.json", producer.name));
+        let replay = collect_from(producer, &replay_checkpoint, &sift_url);
+        assert_eq!(replay["start_offset"], 0);
+        assert!(replay["lines"].as_u64().unwrap() >= 4);
+        assert_eq!(replay["rejected"], 0);
+    }
+    for (request, original) in baseline.iter().chain(&backlog).zip(&proof) {
+        assert_eq!(
+            &verify_sift_record(&client, &sift_url, request).await,
+            original
+        );
+    }
+    write_json(
+        &proof_root.join("observability-proof.json"),
+        json!({
+            "schema": "sift.local-service-observability-proof.v1",
+            "producers": SERVICES.len(),
+            "successful_requests": proof.iter().filter(|event| event["status"] == 200).count(),
+            "rejected_requests": proof.iter().filter(|event| event["status"].as_u64().unwrap() >= 400).count(),
+            "unchanged_checkpoints_after_outage": SERVICES.len(),
+            "replayed_sources": SERVICES.len(),
+            "records": proof,
+        }),
+    );
 }
 
-async fn wait_for_structured_event(path: &Path, service: &str) -> Value {
+struct Producer {
+    name: &'static str,
+    endpoint: String,
+    stdout: PathBuf,
+    stderr: PathBuf,
+}
+
+struct ObservedRequest {
+    service: &'static str,
+    trace: String,
+    span: String,
+    status: u16,
+}
+
+fn local_endpoint(service: &str) -> String {
+    let endpoint = std::env::var(format!("{}_URL", service.to_ascii_uppercase())).unwrap();
+    loopback_addr(&endpoint);
+    endpoint
+}
+
+fn loopback_addr(endpoint: &str) -> SocketAddr {
+    let address: SocketAddr = endpoint.strip_prefix("http://").unwrap().parse().unwrap();
+    assert!(
+        address.ip().is_loopback(),
+        "unexpected non-loopback VAT endpoint"
+    );
+    address
+}
+
+fn capture_path(logs: &Path, service: &str, channel: &str) -> PathBuf {
+    let key = format!("VAT_SERVICE_{}_{channel}_LOG", service.to_ascii_uppercase());
+    let path = PathBuf::from(std::env::var_os(&key).unwrap_or_else(|| panic!("missing {key}")));
+    let path = path.canonicalize().expect("resolve VAT capture path");
+    assert!(path.starts_with(logs) && path.is_file());
+    path
+}
+
+fn write_json(path: &Path, value: Value) {
+    std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+}
+
+async fn exercise_producers(
+    client: &reqwest::Client,
+    producers: &[Producer],
+    phase: usize,
+) -> Vec<ObservedRequest> {
+    use reqwest::Method;
+
+    let defer_policy = r#"{"max_in_flight":1,"max_dispatch_per_tick":1,"max_dispatches_per_second":1,"max_burst_size":1,"lease_ttl_ms":30000,"retry_backoff_ms":1000}"#;
+    let mut observed = Vec::new();
+    for (index, producer) in producers.iter().enumerate() {
+        let (method, path, body) = match producer.name {
+            "lumen" => (Method::GET, "/collections", ""),
+            "tape" => (Method::GET, "/topics/vat-producer/replay", ""),
+            "relay" => (Method::GET, "/v1/vat-producer/len", ""),
+            "defer" => (Method::PUT, "/v1/queues/vat-producer", defer_policy),
+            _ => unreachable!("unexpected producer"),
+        };
+        for (outcome, status) in [200, 401].into_iter().enumerate() {
+            let trace = format!("{:032x}", 1 + phase * 16 + index * 2 + outcome);
+            let mut request = client
+                .request(method.clone(), format!("{}{}", producer.endpoint, path))
+                .header("traceparent", format!("00-{trace}-{PARENT_SPAN}-01"));
+            if status == 401 {
+                request = request.bearer_auth(CANARY);
+            }
+            if !body.is_empty() {
+                request = request
+                    .header("content-type", "application/json")
+                    .body(body);
+            }
+            let response = request.send().await.unwrap();
+            assert_eq!(
+                response.status().as_u16(),
+                status,
+                "{} {path}",
+                producer.name
+            );
+            assert!(!response.text().await.unwrap().contains(CANARY));
+            let span = wait_for_access_log(producer, &trace, status).await;
+            observed.push(ObservedRequest {
+                service: producer.name,
+                trace,
+                span,
+                status,
+            });
+        }
+    }
+    observed
+}
+
+async fn wait_for_access_log(producer: &Producer, trace: &str, status: u16) -> String {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let source = std::fs::read_to_string(path).unwrap_or_default();
+        let source = std::fs::read_to_string(&producer.stdout).expect("read VAT stdout");
+        assert!(
+            !source.contains(CANARY),
+            "{} stdout leaked authorization",
+            producer.name
+        );
         if let Some(event) = source
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
             .find(|event| {
-                event["schema"] == "axiom.service.log.v1" && event["service"]["name"] == service
+                event["trace_id"] == trace && event["attributes"]["target"] == "http.access"
             })
         {
-            return event;
+            assert_eq!(event["schema"], "axiom.service.log.v1");
+            assert_eq!(event["service"]["name"], producer.name);
+            assert_eq!(event["attributes"]["status"], status);
+            assert_eq!(event["parent_span_id"], PARENT_SPAN);
+            assert_eq!(event["trace_flags"], "01");
+            let span = event["span_id"].as_str().expect("local response span");
+            assert!(span.len() == 16 && span != PARENT_SPAN && span != "0000000000000000");
+            return span.to_owned();
         }
         assert!(
             Instant::now() < deadline,
-            "missing structured {service} event in {}: {source}",
-            path.display()
+            "missing {} access log for trace {trace}",
+            producer.name
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
-async fn wait_for_all_services(
+fn checkpoint_path(producer: &Producer) -> PathBuf {
+    PathBuf::from(format!("{}.collector.checkpoint.json", producer.name))
+}
+
+fn run_collector(producer: &Producer, checkpoint: &Path, endpoint: &str, timeout: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_sift"))
+        .args(["collect", "--source"])
+        .arg(&producer.stdout)
+        .args([
+            "--source-id",
+            &format!("vat:{}:stdout", producer.name),
+            "--endpoint",
+            endpoint,
+            "--project",
+            "local",
+            "--environment",
+            "test",
+            "--checkpoint",
+        ])
+        .arg(checkpoint)
+        .args([
+            "--quarantine",
+            &format!("{}.collector.rejected.jsonl", producer.name),
+            "--max-retries",
+            "0",
+            "--request-timeout-secs",
+            timeout,
+        ])
+        .output()
+        .unwrap_or_else(|error| panic!("start {} collector: {error}", producer.name))
+}
+
+fn collect(producer: &Producer, endpoint: &str) -> Value {
+    collect_from(producer, &checkpoint_path(producer), endpoint)
+}
+
+fn collect_from(producer: &Producer, checkpoint: &Path, endpoint: &str) -> Value {
+    let output = run_collector(producer, checkpoint, endpoint, "3");
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(CANARY));
+    assert!(
+        output.status.success(),
+        "{} collector did not deliver",
+        producer.name
+    );
+    serde_json::from_slice(&output.stdout).expect("collector summary")
+}
+
+async fn query_by_trace(client: &reqwest::Client, endpoint: &str, trace: &str) -> Vec<Value> {
+    let page: Value = client
+        .post(format!("{endpoint}/api/v1/query"))
+        .json(&json!({
+            "version": 1,
+            "project": "local",
+            "environment": "test",
+            "signal": {"kind": "logs", "filter": {"op": "eq", "field": "trace_id", "value": trace}},
+            "limit": 10
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .expect("Sift accepts trace-filtered logs query")
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !page.to_string().contains(CANARY),
+        "Sift query leaked authorization"
+    );
+    assert_eq!(page["partial"], false);
+    page["data"]["records"]
+        .as_array()
+        .expect("Sift log records")
+        .clone()
+}
+
+async fn verify_sift_record(
     client: &reqwest::Client,
-    sift_url: &str,
-) -> serde_json::Map<String, Value> {
+    endpoint: &str,
+    request: &ObservedRequest,
+) -> Value {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let response = client
-            .post(format!("{sift_url}/api/v1/query"))
-            .json(&json!({
-                "version": 1,
-                "project": "local",
-                "environment": "test",
-                "signal": {"kind": "logs"},
-                "limit": 100
-            }))
-            .send()
-            .await
-            .expect("query real Sift logging API");
-        assert!(
-            response.status().is_success(),
-            "Sift query failed: {response:?}"
-        );
-        let page: Value = response.json().await.unwrap();
-        let mut found = serde_json::Map::new();
-        if let Some(records) = page["data"]["records"].as_array() {
-            for service in SERVICES {
-                if let Some(record) = records
-                    .iter()
-                    .find(|record| record["resource"]["service.name"] == service)
-                {
-                    assert!(record["json_payload"].is_object());
-                    assert!(record["body_text"]
-                        .as_str()
-                        .is_some_and(|body| !body.is_empty()));
-                    found.insert(service.to_string(), record.clone());
-                }
-            }
-        }
-        if found.len() == SERVICES.len() {
-            return found;
+        let records = query_by_trace(client, endpoint, &request.trace).await;
+        let mut access = records
+            .iter()
+            .filter(|record| record["attributes"]["target"]["value"] == "http.access");
+        if let Some(record) = access.next() {
+            assert!(
+                access.next().is_none(),
+                "duplicate access log for {}",
+                request.trace
+            );
+            assert_eq!(record["trace_id"], request.trace);
+            assert_eq!(record["span_id"], request.span);
+            assert_eq!(record["resource"]["service.name"], request.service);
+            assert_eq!(record["attributes"]["parent_span_id"]["value"], PARENT_SPAN);
+            assert_eq!(record["attributes"]["trace.flags"]["value"], "01");
+            assert_eq!(record["attributes"]["status"]["value"], request.status);
+            assert_eq!(record["attributes"]["target"]["value"], "http.access");
+            let event = record["event_id"].as_str().expect("durable Sift event id");
+            assert!(!event.is_empty());
+            return json!({"service": request.service, "trace_id": request.trace, "event_id": event, "status": request.status});
         }
         assert!(
             Instant::now() < deadline,
-            "Sift query did not contain every service: {page:#}"
+            "Sift did not project {} trace {}",
+            request.service,
+            request.trace
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
