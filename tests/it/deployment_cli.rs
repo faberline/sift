@@ -872,6 +872,15 @@ fn mvp_crd_and_operator_render_archive_restore_limits_and_role_storage() {
         spec_schema["placement"]["properties"]["nodeSelector"]["type"],
         "object"
     );
+    assert_eq!(
+        spec_schema["alerting"]["properties"]["allowedHosts"],
+        json!({
+            "type": "array",
+            "maxItems": 32,
+            "x-kubernetes-list-type": "set",
+            "items": {"type": "string", "maxLength": 253, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"}
+        })
+    );
 
     let sift: Sift = serde_json::from_value(json!({
         "apiVersion": "sift.axiom.dev/v1alpha1",
