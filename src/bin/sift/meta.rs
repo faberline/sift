@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
+use serde_json::Value;
 
 use crate::terminal_output::print_json_terminal;
 
@@ -159,8 +160,50 @@ pub(super) fn spec(args: SpecArgs) -> Result<()> {
             Ok(())
         }
         SpecFormat::JsonSchema => {
-            print_json_terminal(serde_json::json!({"components": document.components}))
+            let mut definitions = serde_json::Map::new();
+            for (name, schema) in document.components.unwrap_or_default().schemas {
+                let mut schema = serde_json::to_value(schema)?;
+                convert_schema(&mut schema);
+                definitions.insert(name, schema);
+            }
+            print_json_terminal(serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$defs": definitions,
+            }))
         }
+    }
+}
+
+fn convert_schema(schema: &mut Value) {
+    let Value::Object(object) = schema else {
+        return;
+    };
+
+    if let Some(Value::String(reference)) = object.get_mut("$ref") {
+        if let Some(name) = reference.strip_prefix("#/components/schemas/") {
+            *reference = format!("#/$defs/{name}");
+        }
+    }
+    object.remove("discriminator");
+    let nullable = object.remove("nullable") == Some(Value::Bool(true));
+
+    // Only visit schema keywords. Other objects can contain literal data.
+    if let Some(Value::Object(properties)) = object.get_mut("properties") {
+        properties.values_mut().for_each(convert_schema);
+    }
+    for keyword in ["items", "additionalProperties", "not"] {
+        if let Some(child) = object.get_mut(keyword) {
+            convert_schema(child);
+        }
+    }
+    for keyword in ["allOf", "anyOf", "oneOf"] {
+        if let Some(Value::Array(children)) = object.get_mut(keyword) {
+            children.iter_mut().for_each(convert_schema);
+        }
+    }
+
+    if nullable {
+        *schema = serde_json::json!({"anyOf": [std::mem::take(schema), {"type": "null"}]});
     }
 }
 

@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "jsonschema==4.26.0",
+#     "pydantic==2.13.4",
+#     "PyYAML==6.0.3",
+# ]
+# ///
 """Verify Sift's OpenAPI JSON and three generated HTTP clients on loopback."""
 
 import argparse
@@ -13,8 +21,13 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import time
+import tomllib
 from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
+
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+import yaml
 
 
 PROJECT = "codegen-smoke"
@@ -113,21 +126,41 @@ def check_public_formats(binary, spec):
         try:
             output = capture([binary, "spec", "--format", format_name])
             if format_name == "openapi-yaml":
-                import yaml
                 require(output.splitlines()[-1:] == ["# next: done"], "OpenAPI YAML did not report completion")
                 require(yaml.safe_load(output) == spec, "OpenAPI YAML differs from OpenAPI JSON")
             else:
-                terminal = json.loads(output)
-                require(terminal.get("next") == "done", "JSON Schema did not report completion")
-                schemas = terminal["components"]["schemas"]
-                require(schemas and schemas == spec["components"]["schemas"],
-                        "JSON Schema definitions differ from OpenAPI JSON")
-        except (ImportError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                check_json_schema(json.loads(output), spec)
+        except (RuntimeError, ValueError, KeyError, SchemaError, ValidationError,
+                yaml.YAMLError, subprocess.SubprocessError) as error:
             print(f"FAIL {format_name}: {error}", file=sys.stderr)
             passed = False
         else:
             print(f"PASS {format_name} contents and terminal output", flush=True)
     return passed
+
+
+def check_json_schema(catalog, spec):
+    require(catalog.get("next") == "done", "JSON Schema did not report completion")
+    require(catalog.get("$schema") == Draft202012Validator.META_SCHEMA["$id"],
+            "JSON Schema does not declare Draft 2020-12")
+    definitions = catalog["$defs"]
+    require(definitions and definitions.keys() == spec["components"]["schemas"].keys(),
+            "JSON Schema definition names differ from OpenAPI JSON")
+    Draft202012Validator.check_schema(catalog)
+
+    scope = Draft202012Validator({**catalog, "$ref": "#/$defs/InstrumentationScope"})
+    scope.validate({"name": "codegen-smoke", "version": None})
+    scope.validate({"name": "codegen-smoke", "version": "1.0"})
+    require(not scope.is_valid({"name": "codegen-smoke", "version": 1}),
+            "JSON Schema accepted a non-string InstrumentationScope version")
+
+    span_scope = Draft202012Validator({
+        **catalog, "$ref": "#/$defs/SpanRecordV1/properties/instrumentation_scope",
+    })
+    span_scope.validate(None)
+    span_scope.validate({"name": "codegen-smoke", "version": None})
+    require(not span_scope.is_valid({"name": 1}),
+            "JSON Schema accepted a non-string name in the referenced InstrumentationScope")
 
 
 def seed_trace(url):
@@ -200,6 +233,25 @@ with Client(url) as client:
 """, url, PROJECT, TRACE_ID], directory)
 
 
+def locked_rust_probe_dependencies(directory):
+    def external_packages(lockfile):
+        return {
+            (package["name"], package["version"], package["source"], package.get("checksum"))
+            for package in tomllib.loads(lockfile)["package"]
+            if "source" in package
+        }
+
+    sift_lock = Path("Cargo.lock").read_text()
+    scratch_lock = directory / "Cargo.lock"
+    scratch_lock.write_text(sift_lock)
+    # Replace the Sift root package and keep the locked registry versions.
+    subprocess.run(["cargo", "update", "--offline", "--workspace", "--quiet"],
+                   cwd=directory, check=True, timeout=30)
+    packages = external_packages(scratch_lock.read_text())
+    require(packages and packages <= external_packages(sift_lock),
+            "Rust probe resolved packages outside Sift's Cargo.lock")
+
+
 def rust_probe(directory, url):
     (directory / "Cargo.toml").write_text("""[package]
 name = "sift_codegen_probe"
@@ -218,7 +270,6 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 """)
-    (directory / "Cargo.lock").write_bytes(Path("Cargo.lock").read_bytes())
     (directory / "probe.rs").write_text("""use sift_codegen_probe::client::Client;
 
 fn main() {
@@ -235,15 +286,17 @@ fn main() {
     client.get_api_v1_traces_trace_id(trace_id, project, Some(report.signals.traces.watermark)).unwrap();
 }
 """)
+    locked_rust_probe_dependencies(directory)
     return probe("Rust client build and runtime (4 assertions and trace lookup)",
-                 ["cargo", "run", "--quiet", "--target-dir", "target", "--bin", "probe", "--", url, PROJECT, TRACE_ID],
+                 ["cargo", "run", "--locked", "--quiet", "--target-dir", "target", "--bin", "probe",
+                  "--", url, PROJECT, TRACE_ID],
                  directory, timeout=300)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        "Run from the Sift repository root. The build stamp must match HEAD. "
-        "Requires TypeScript tsc, Node.js with fetch, Python with Pydantic 2 and PyYAML, and Cargo."
+        "Run uv run --script scripts/verify-cli-codegen.py from the Sift repository root. "
+        "The build stamp must match HEAD. Requires TypeScript tsc, Node.js with fetch, and Cargo."
     ))
     default_binary = Path(os.getenv("CARGO_TARGET_DIR", "target")) / "debug" / "sift"
     parser.add_argument("--sift-bin", type=Path, default=os.getenv("SIFT_BIN", default_binary))
