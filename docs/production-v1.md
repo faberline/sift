@@ -130,9 +130,11 @@ next capacity tier passes.
 
 Run `./test.sh --candidate` from a clean checkout of the candidate commit.
 The gate builds Sift with the lock file. It runs the full suite, all 24 required
-environment tests, Clippy, and the strict architecture check. It also runs the
-official Prometheus 3.5.0 oracle, Remote Write compliance, and Docker volume
-replacement. External service versions are in `tests/environment.lock.json`.
+environment tests, named capability checks, Clippy, and the strict architecture
+check. It also runs the official Prometheus 3.5.0 oracle, Remote Write compliance,
+and Docker volume replacement. External service versions are in
+`tests/environment.lock.json`.
+The capability check writes `target/sift-capability-evidence.json`.
 These local checks do not prove GKE load or recovery.
 The final check writes `target/sift-candidate-check.json` for the exact clean
 source. The CI job retains this report. Test filters are refused in candidate mode.

@@ -71,6 +71,8 @@ if [[ "${1:-}" == "--candidate" ]]; then
   bash scripts/faberline-core-test.sh build-stamp
   cargo test --locked -p sift "$@"
   cargo test --locked -p sift --test it -- --ignored --test-threads=1
+  python3 -B scripts/verify-capability-evidence.py \
+    > "${CARGO_TARGET_DIR:-$repo_root/target}/sift-capability-evidence.json"
   cargo clippy --locked -p sift --all-targets -- -D warnings
   bash scripts/check-architecture.sh
   python3 -B scripts/release/verify-release-contract.py --self-test
@@ -102,7 +104,7 @@ if git('rev-parse','HEAD')!=revision or git('status','--porcelain'):
 report={'schema':'sift.local-candidate-check/v1','result':'passed','production_accepted':False,
     'source_commit':revision,'completed_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
     'checks':{name:'passed' for name in ['format','locked_build','pinned_core_build_stamp','full_rust_suite',
-        'required_environment_tests','clippy','strict_architecture','release_contract',
+        'required_environment_tests','capability_evidence','clippy','strict_architecture','release_contract',
         'production_receipt_controls','production_preparation_controls','production_runtime_controls',
         'production_comparison_controls','production_load_driver','production_pilot_controls','official_prometheus_oracle',
         'remote_write_compliance','docker_named_volume']}}
