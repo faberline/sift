@@ -42,6 +42,7 @@ IMAGE_OWNED=0
 EVIDENCE_READY=0
 SIFT_NAMESPACE_OWNED=0
 OPERATOR_NAMESPACE_OWNED=0
+SIFT_INSTANCE_OWNED=0
 STARTED="$SECONDS"
 FORWARD_PIDS=()
 TOKEN_FILE="$WORK_DIR/sift-rig.token"
@@ -125,14 +126,20 @@ capture_diagnostics() {
 }
 
 delete_namespaces() {
-  local namespaces volumes deadline
+  local namespace namespaces volumes deadline
   local owned=()
   [[ "$SIFT_NAMESPACE_OWNED" == "0" ]] || owned+=("$NAMESPACE")
   [[ "$OPERATOR_NAMESPACE_OWNED" == "0" ]] || owned+=("$OPERATOR_NAMESPACE")
   if [[ "$SIFT_NAMESPACE_OWNED" == "0" && "$OPERATOR_NAMESPACE_OWNED" == "0" ]]; then
     return 0
   fi
-  kubectl delete namespace "${owned[@]}" --ignore-not-found --wait=true --timeout=180s || return 1
+  # The operator must finish the instance's cluster-scoped cleanup while it is running.
+  if [[ "$SIFT_INSTANCE_OWNED" == "1" ]]; then
+    kubectl -n "$NAMESPACE" delete sift/sift --ignore-not-found --wait=true --timeout=180s || return 1
+  fi
+  for namespace in "${owned[@]}"; do
+    kubectl delete namespace "$namespace" --ignore-not-found --wait=true --timeout=180s || return 1
+  done
   namespaces="$(kubectl get namespace "${owned[@]}" --ignore-not-found -o name)" || return 1
   [[ -z "$namespaces" ]] || return 1
   deadline=$((SECONDS + 120))
@@ -220,7 +227,7 @@ cleanup() {
   if [[ "$ec" == "0" && "$EVIDENCE_READY" == "1" ]]; then
     jq --argjson elapsed "$((SECONDS - STARTED))" \
       '. + {result:"passed",duration_seconds:$elapsed,cleanup:{port_forwards:"passed",
-        namespaces:"passed",persistent_volumes:"passed",cluster:"passed",
+        instance:"passed",namespaces:"passed",persistent_volumes:"passed",cluster:"passed",
         docker_nodes_and_volumes:"passed",image_tag:"passed",scratch:"passed"}}' \
       "$EVIDENCE_DIR/kind-checks.json" > "$EVIDENCE_DIR/kind-result.json" || ec=1
     if [[ "$ec" == "0" ]]; then
@@ -420,6 +427,7 @@ instance_patch="$(jq -nc --arg namespace "$NAMESPACE" --arg image "$IMAGE" --arg
 ')"
 kubectl patch --local --type merge -f "$WORK_DIR/instance.yaml" --patch "$instance_patch" -o yaml \
   > "$EVIDENCE_DIR/kubernetes/instance.yaml"
+SIFT_INSTANCE_OWNED=1
 kubectl apply -f "$EVIDENCE_DIR/kubernetes/instance.yaml"
 
 wait_role_ready() {
