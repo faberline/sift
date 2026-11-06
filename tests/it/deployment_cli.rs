@@ -320,7 +320,7 @@ fn role_egress_has_no_world_wide_dns_or_https_rule() {
 }
 
 #[tokio::test]
-async fn reconcile_limits_kubernetes_reviews_to_the_discovered_api_endpoint() {
+async fn reconcile_limits_egress_to_the_discovered_api_endpoint() {
     let service = tower::service_fn(
         |request: axum::http::Request<kube::client::Body>| async move {
             assert_eq!(
@@ -346,37 +346,37 @@ async fn reconcile_limits_kubernetes_reviews_to_the_discovered_api_endpoint() {
         },
     );
     let client = kube::Client::new(service, "default");
-    let plan = sift_resource(3, 3)
-        .reconcile_plan(client)
-        .await
-        .expect("discover the Kubernetes API endpoint");
+    let api_rule = json!({
+        "to": [{"ipBlock": {"cidr": "10.20.30.40/32"}}],
+        "ports": [{"protocol": "TCP", "port": 6443}]
+    });
+    for auth in [AuthMode::Off, AuthMode::Required, AuthMode::Kubernetes] {
+        let mut sift = sift_resource(3, 3);
+        sift.spec.auth = auth.clone();
+        let offline = sift.render();
+        let plan = sift
+            .reconcile_plan(client.clone())
+            .await
+            .expect("discover the Kubernetes API endpoint");
 
-    for role in ["gateway", "query", "store", "control"] {
-        let policy = object(
-            &plan.children,
-            "NetworkPolicy",
-            &format!("events-{role}-network"),
-        );
-        assert!(policy["spec"]["egress"]
-            .as_array()
-            .expect("egress rules")
-            .iter()
-            .any(|rule| {
-                rule["ports"]
-                    .as_array()
-                    .is_some_and(|ports| ports.iter().any(|port| port["port"] == 6443))
-                    && rule["to"].as_array().is_some_and(|peers| {
-                        peers
-                            .iter()
-                            .any(|peer| peer["ipBlock"]["cidr"] == "10.20.30.40/32")
-                    })
-            }));
+        for role in ["agent", "gateway", "query", "store", "control", "backup"] {
+            let name = format!("events-{role}-network");
+            let mut expected = object(&offline, "NetworkPolicy", &name).clone();
+            assert!(!expected.to_string().contains("10.20.30.40/32"));
+            assert!(!expected.to_string().contains("0.0.0.0/0"));
+            if role == "agent" || (matches!(auth, AuthMode::Kubernetes) && role != "backup") {
+                expected["spec"]["egress"]
+                    .as_array_mut()
+                    .expect("egress rules")
+                    .push(api_rule.clone());
+            }
+            assert_eq!(
+                object(&plan.children, "NetworkPolicy", &name),
+                &expected,
+                "{auth:?} auth, {role} egress"
+            );
+        }
     }
-    let agent_policy = object(&plan.children, "NetworkPolicy", "events-agent-network");
-    assert!(agent_policy.to_string().contains("10.20.30.40/32"));
-    assert!(!agent_policy.to_string().contains("0.0.0.0/0"));
-    let backup_policy = object(&plan.children, "NetworkPolicy", "events-backup-network");
-    assert!(!backup_policy.to_string().contains("10.20.30.40/32"));
 }
 
 #[tokio::test]
@@ -398,17 +398,19 @@ async fn reconcile_fails_closed_when_the_kubernetes_api_has_no_ready_endpoint() 
             )
         },
     );
-    let error = match sift_resource(3, 3)
-        .reconcile_plan(kube::Client::new(service, "default"))
-        .await
-    {
-        Ok(_) => panic!("Kubernetes auth must not start without a bounded API endpoint"),
-        Err(error) => error,
-    };
-    assert!(
-        error.to_string().contains("has no ready addresses"),
-        "unexpected error: {error:#}"
-    );
+    let client = kube::Client::new(service, "default");
+    for auth in [AuthMode::Off, AuthMode::Required, AuthMode::Kubernetes] {
+        let mut sift = sift_resource(3, 3);
+        sift.spec.auth = auth.clone();
+        let error = match sift.reconcile_plan(client.clone()).await {
+            Ok(_) => panic!("{auth:?} auth must not start without a bounded API endpoint"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("has no ready addresses"),
+            "unexpected error with {auth:?} auth: {error:#}"
+        );
+    }
 }
 
 #[test]
