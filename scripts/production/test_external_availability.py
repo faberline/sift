@@ -61,8 +61,22 @@ class ExternalAvailabilityTests(unittest.TestCase):
 
     def test_refuses_private_check(self):
         self.config["checkerType"] = "VPC_CHECKERS"
-        with self.assertRaisesRegex(ValueError, "named public check"):
+        with self.assertRaisesRegex(ValueError, "named active public check"):
             self.collect()
+
+    def test_refuses_disabled_check(self):
+        self.config["disabled"] = True
+        with self.assertRaisesRegex(ValueError, "named active public check"):
+            self.collect()
+
+    def test_refuses_authenticated_check(self):
+        self.config["httpCheck"]["serviceAgentAuthentication"] = {"type": "OIDC_TOKEN"}
+        with self.assertRaisesRegex(ValueError, "HTTPS GET"):
+            self.collect()
+
+    def test_accepts_documented_default_get(self):
+        self.config["httpCheck"]["requestMethod"] = "METHOD_UNSPECIFIED"
+        self.assertEqual(self.collect()["successful_checks"], 1)
 
     def test_refuses_other_host(self):
         self.config["monitoredResource"]["labels"]["host"] = "other.example.com"
@@ -95,9 +109,12 @@ class ExternalAvailabilityTests(unittest.TestCase):
             self.collect()
 
     def test_refuses_incomplete_response(self):
-        self.pages[0]["executionErrors"] = [{"message": "partial response"}]
-        with self.assertRaisesRegex(ValueError, "incomplete observations"):
-            self.collect()
+        for field, value in (("executionErrors", [{"message": "partial response"}]),
+                             ("unreachable", ["fixture-region"])):
+            with self.subTest(field=field):
+                self.pages = [{"timeSeries": [self.series], field: value}]
+                with self.assertRaisesRegex(ValueError, "incomplete observations"):
+                    self.collect()
 
 
 if __name__ == "__main__":

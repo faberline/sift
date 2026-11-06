@@ -197,8 +197,8 @@ python3 -B scripts/production/verify_runtime.py \
 
 Read the existing public HTTPS `/readyz` check in the same GCP project.
 Set the UTC window after the runtime observation. Wait at least 35 seconds
-after its end so Monitoring can publish the points. Verify that the chosen
-hostname routes to this candidate for the full window.
+after its end so Monitoring can publish the points. Use an unauthenticated
+public check with TLS certificate validation.
 
 ```sh
 python3 -B scripts/production/capture_external_availability.py \
@@ -207,7 +207,7 @@ python3 -B scripts/production/capture_external_availability.py \
   --runtime-check /private/tmp/sift-production/runtime-check.json \
   --endpoint "$SIFT_PROBE_ENDPOINT" --check-id "$SIFT_UPTIME_CHECK_ID" \
   --start "$SIFT_PROBE_START_UTC" --end "$SIFT_PROBE_END_UTC" \
-  --output /private/tmp/sift-production/evidence/external_availability.json
+  --output /private/tmp/sift-production/evidence/external-availability-observation.json
 ```
 
 Expose log collector metrics with `sift collect --metrics-port 9318`.
@@ -293,6 +293,16 @@ migration. Live generated-input exporters and fault evidence still need verifica
 Put each measured gate record in `evidence/GATE.json` beside `acceptance.json`.
 The acceptance document must contain the exact SHA-256 of each gate file.
 Use `scripts/release/production_receipt.py` as the gate field contract.
+The external check command records observations for review. An independent
+reviewer must prove that the HTTPS route reached only ready gateway Pods with
+the candidate image for the full window. The reviewer must also check all
+expected probe locations and sampling intervals against Monitoring.
+Record the reviewed route in `evidence/external-route.json` under
+`sift.external-route-evidence/v1`. It binds the source, image, cluster,
+endpoint, gateway Pod IDs, observation bytes, and complete window. Put its
+SHA-256 in the `external_availability` gate. The hashes protect the record
+bytes. The production release relies on the independent review of their source.
+
 The release receipt generator requires `--production-acceptance` for 0.2.0.
 Missing tests, changed images, missing raw gate records, and exceeded limits
 refuse release. Synthetic self-tests never qualify a production release.

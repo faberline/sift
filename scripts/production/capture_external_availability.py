@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read an existing public Cloud Monitoring check for the candidate's HTTPS endpoint."""
+"""Collect public Cloud Monitoring observations for separate route review."""
 
 import argparse
 from datetime import datetime, timedelta, timezone
@@ -69,14 +69,16 @@ def collect(get, project, check_id, endpoint, start, end):
     resource = config["monitoredResource"]
     http = config["httpCheck"]
     require(config.get("name") == check_name and config.get("checkerType") == "STATIC_IP_CHECKERS"
-            and not config.get("isInternal"), "uptime check is not the named public check")
+            and not config.get("isInternal") and not config.get("disabled"),
+            "uptime check is not the named active public check")
     resource_labels = {"host": host, "project_id": project}
     require(resource["type"] == "uptime_url" and
             resource["labels"] in ({"host": host}, resource_labels),
             "uptime check targets a different endpoint or project")
     require(http.get("useSsl") is True and http.get("validateSsl") is True
             and http.get("port", 443) == 443 and http.get("path") == "/readyz"
-            and http.get("requestMethod", "GET") == "GET"
+            and http.get("requestMethod", "GET") in ("GET", "METHOD_UNSPECIFIED")
+            and not (http.get("headers") or http.get("authInfo") or http.get("serviceAgentAuthentication"))
             and http.get("acceptedResponseStatusCodes", []) in (
                 [], [{"statusValue": 200}], [{"statusClass": "STATUS_CLASS_2XX"}],
             ),
@@ -95,7 +97,8 @@ def collect(get, project, check_id, endpoint, start, end):
     page_tokens, points = set(), {}
     for _ in range(32):
         page = get(f"projects/{project}/timeSeries", query)
-        require(not page.get("executionErrors"), "Monitoring returned incomplete observations")
+        require(not page.get("executionErrors") and not page.get("unreachable"),
+                "Monitoring returned incomplete observations")
         for series in page.get("timeSeries", []):
             metric = series["metric"]
             labels = metric["labels"]
@@ -128,6 +131,9 @@ def collect(get, project, check_id, endpoint, start, end):
         "endpoint_sha256": hashlib.sha256(endpoint.encode()).hexdigest(),
         "successful_checks": len(points),
         "failed_checks": 0,
+        "checker_locations": sorted({location for location, _ in points}),
+        "window_start": start,
+        "window_end": end,
     }
 
 
@@ -157,8 +163,9 @@ def main():
     require(not args.output.exists(), "output must be new")
     report = collect(cloud_reader(), resource["spec"]["gcpProjectId"], args.check_id,
                      args.endpoint, args.start, args.end)
-    write(args.output, {"result": "passed", **identity, **report})
-    print("External availability observations passed.")
+    write(args.output, {"schema": "sift.external-availability-observation/v1", "result": "observed",
+                        "production_accepted": False, **identity, **report})
+    print("Collected external observations. Route and window coverage still require review.")
 
 
 if __name__ == "__main__":

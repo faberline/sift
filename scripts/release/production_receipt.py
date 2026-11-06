@@ -12,7 +12,7 @@ COMMON={'result','source_commit','image','cluster_identity_sha256','evidence_sha
 FIELDS={
  'functional':{},
  'external_availability':{'metric_type':str,'uptime_check_sha256':str,'endpoint_sha256':str,
-    'successful_checks':int,'failed_checks':int},
+    'successful_checks':int,'failed_checks':int,'route_evidence_sha256':str},
  'promql_oracle':{'prometheus_version':str,'expressions_compared':int},
  'control_failover':{'control_state_differences':int,'leader_changes':int},
  'node_failure':{'lost_acknowledged_events':int},
@@ -99,26 +99,57 @@ def validate(proof,candidate,image):
     require(g.get('unknown_recovery_notifications')==0 and g.get('mute_verified') is True and g.get('hold_verified') is True,'notification state semantics')
     g=proof['gates']['external_availability']
     require(g['metric_type']=='monitoring.googleapis.com/uptime_check/check_passed','Cloud Monitoring uptime metric')
-    require(digest(g['uptime_check_sha256']) and digest(g['endpoint_sha256']),'uptime check and endpoint bindings')
+    require(all(digest(g[key]) for key in ('uptime_check_sha256','endpoint_sha256','route_evidence_sha256')),
+        'uptime check, endpoint, and route evidence bindings')
     require(g['successful_checks']>0 and g['failed_checks']==0,'successful external uptime observations')
     g=proof['gates']['promql_oracle']
     require(g.get('prometheus_version')=='3.5.0' and g.get('expressions_compared',0)>=22,'pinned Prometheus oracle')
     require(proof.get('cleanup',{}).get('status')=='clean','acceptance cleanup')
     return proof
 
+def evidence_bytes(path, name):
+    require(path.is_file() and not path.is_symlink(), name+' evidence file is missing')
+    raw=path.read_bytes()
+    require(0<len(raw)<=1_048_576, name+' evidence size')
+    return raw
+
+
+def verify_external_route(gate, evidence_dir):
+    route_raw=evidence_bytes(evidence_dir/'external-route.json', 'external route')
+    require(hashlib.sha256(route_raw).hexdigest()==gate['route_evidence_sha256'], 'external route bytes differ')
+    route=json.loads(route_raw)
+    identity=('source_commit','image','cluster_identity_sha256','endpoint_sha256')
+    exact_keys(route, (*identity,'schema','result','observation_sha256','gateway_pod_uids_sha256',
+        'complete_window'), 'external route')
+    require(route['schema']=='sift.external-route-evidence/v1' and route['result']=='passed'
+        and route['complete_window'] is True and digest(route['gateway_pod_uids_sha256']),
+        'external route and complete window review required')
+    observation_raw=evidence_bytes(evidence_dir/'external-availability-observation.json', 'external observation')
+    require(hashlib.sha256(observation_raw).hexdigest()==route['observation_sha256'],
+        'external observation bytes differ')
+    observation=json.loads(observation_raw)
+    require(observation.get('schema')=='sift.external-availability-observation/v1'
+        and observation.get('result')=='observed' and observation.get('production_accepted') is False,
+        'external observation contract differs')
+    require(all(route[key]==gate[key]==observation.get(key) for key in identity),
+        'external route or observation identity differs')
+    require(all(observation.get(key)==gate[key] for key in (
+        'metric_type','uptime_check_sha256','successful_checks','failed_checks')),
+        'external observation results differ from the reviewed gate')
+
+
 def load_proof(path,candidate,image):
     require(path is not None,'--production-acceptance is required for 0.2.0')
     path=Path(path);require(path.is_file() and not path.is_symlink(),'regular acceptance file')
     raw=path.read_bytes();require(0<len(raw)<=32768,'acceptance size')
     proof=json.loads(raw);validate(proof,candidate,image)
+    evidence_dir=path.parent/'evidence'
     for name in GATES:
-        evidence_path=path.parent/'evidence'/(name+'.json')
-        require(evidence_path.is_file() and not evidence_path.is_symlink(),name+' evidence file is missing')
-        evidence_raw=evidence_path.read_bytes()
-        require(0<len(evidence_raw)<=1_048_576,name+' evidence size')
+        evidence_raw=evidence_bytes(evidence_dir/(name+'.json'), name)
         require(hashlib.sha256(evidence_raw).hexdigest()==proof['gates'][name]['evidence_sha256'],name+' evidence bytes differ')
         evidence=json.loads(evidence_raw)
         require(evidence=={k:v for k,v in proof['gates'][name].items() if k!='evidence_sha256'},name+' evidence data differs')
+    verify_external_route(proof['gates']['external_availability'], evidence_dir)
     return proof,hashlib.sha256(raw).hexdigest()
 
 def validate_release_receipt(receipt,candidate,image):
@@ -161,7 +192,7 @@ def self_test():
     p['gates']['promql_oracle'].update({'prometheus_version':'3.5.0','expressions_compared':22})
     p['gates']['external_availability'].update({
         'metric_type':'monitoring.googleapis.com/uptime_check/check_passed','uptime_check_sha256':'e'*64,
-        'endpoint_sha256':'f'*64,'successful_checks':3,'failed_checks':0})
+        'endpoint_sha256':'f'*64,'successful_checks':3,'failed_checks':0,'route_evidence_sha256':'7'*64})
     validate(p,c,image)
     migration=copy.deepcopy(p)
     migration['gates']['source_fidelity'].update({'reference_origin':'gcp','gcp_rollback_configured':True})
@@ -219,6 +250,21 @@ def self_test():
         candidate=generator.validate_candidate('sift',raw,manifest)
         image='ghcr.io/faberline/sift@'+candidate['root_digest']
         p['image']=image
+        external=p['gates']['external_availability']
+        external['image']=image
+        identity={key:external[key] for key in ('source_commit','image','cluster_identity_sha256','endpoint_sha256')}
+        observation={'schema':'sift.external-availability-observation/v1','result':'observed','production_accepted':False,
+            **identity, **{key:external[key] for key in (
+                'metric_type','uptime_check_sha256','successful_checks','failed_checks')}}
+        observation_raw=json.dumps(observation).encode()
+        (root/'evidence'/'external-availability-observation.json').write_bytes(observation_raw)
+        route={'schema':'sift.external-route-evidence/v1','result':'passed',**identity,
+            'observation_sha256':hashlib.sha256(observation_raw).hexdigest(),
+            'gateway_pod_uids_sha256':'8'*64,'complete_window':True}
+        route_raw=json.dumps(route).encode()
+        route_path=root/'evidence'/'external-route.json'
+        route_path.write_bytes(route_raw)
+        external['route_evidence_sha256']=hashlib.sha256(route_raw).hexdigest()
         for name,gate in p['gates'].items():
             gate['image']=image
             data=(json.dumps({k:v for k,v in gate.items() if k!='evidence_sha256'},sort_keys=True)+'\n').encode()
@@ -227,6 +273,11 @@ def self_test():
         proof_path=root/'acceptance.json';proof_path.write_text(json.dumps(p)+'\n')
         receipt=generator.make_receipt('sift','gcp',manifest_path,root/'sift-gke-receipt.json',production_acceptance=proof_path)
         validate_release_receipt(receipt,candidate,image)
+        route_path.write_bytes(route_raw+b' ')
+        try:load_proof(proof_path,candidate,image)
+        except ValueError:negative+=1
+        else:raise AssertionError('changed external route evidence accepted')
+        route_path.write_bytes(route_raw)
         for field,value in [('schema','sift.gke-release-receipt/v1'),('complete',1),('result','failed')]:
             bad=copy.deepcopy(receipt);bad[field]=value
             try:validate_release_receipt(bad,candidate,image)
