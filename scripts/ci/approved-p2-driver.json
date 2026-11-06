@@ -1,12 +1,12 @@
 {
   "schema": "sift.approved-p2-driver/v1",
-  "reviewed_source_base": "9fcd578c54950a7fa1af16cad6f7a2c982dd0b3f",
-  "reviewed_candidate_patch_sha256": "f3eccd381e564a4aeba986d1066f7e649ce9276e853893b239e2d84178b13a7d",
+  "reviewed_source_base": "cec6d9d94a8fe05cf168198dc046d91ef3bedef6",
+  "reviewed_candidate_patch_sha256": "3a00f7bc2248eacd31cfb8523219cfac1b1fed97e873f0802748952a3dd6829d",
   "trust_status": "proposed-bootstrap-requires-independent-review",
   "blobs": {
     ".github/workflows/sift-pr-verify.yml": "ee53e08febc30ba1454714a180ffb19379f96c33",
-    "Dockerfile": "697d322f99d4defb625142a64c83063c6426c2f4",
-    "test.sh": "32f60cac75d1f42c5ff979097bd62bb7dab386be",
+    "Dockerfile": "32dd214fdd4cdf2e749ee4b07824321d83091960",
+    "test.sh": "ed08a16b6dc98375e2ccf87221f6e6309b22927d",
     "tests/candidate_root.sh": "17cdec72f27cd076ef38db6375f02069af792633",
     "tests/prometheus_compliance.sh": "e031214c7304edac0a2679e3c1c528f6e859c498",
     "tests/docker_named_volume.sh": "740a2b9736292964159d1daed057d39d80ebad7e",
