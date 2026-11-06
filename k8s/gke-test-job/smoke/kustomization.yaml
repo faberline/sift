@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sift
+resources:
+  - job.yaml
+configMapGenerator:
+  - name: sift-smoke-scripts
+    files:
+      - smoke.py

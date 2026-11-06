@@ -25,6 +25,10 @@ fi
 if [[ "${1:-}" == "--candidate" ]]; then
   shift
   [[ $# == 0 ]] || { echo 'candidate mode does not accept test filters' >&2; exit 1; }
+  if [[ -n "${VAT_OBSERVABILITY_PROBE+x}" || -n "${VAT_SERVICE_OBSERVABILITY_PROBE+x}" ]]; then
+    echo 'candidate mode refuses inherited VAT_OBSERVABILITY_PROBE or VAT_SERVICE_OBSERVABILITY_PROBE' >&2
+    exit 1
+  fi
   if [[ -n "${SIFT_BIN:-}" ]]; then
     echo "Sift candidate mode does not accept a caller-supplied SIFT_BIN" >&2
     exit 1
@@ -55,6 +59,15 @@ if [[ "${1:-}" == "--candidate" ]]; then
   cargo build --locked -p sift --bins
   source scripts/prepare-test-environment.sh
   prepare_sift_test_environment
+  for binary in vat lumen tape relay defer; do
+    binary_path="$(command -v "$binary")"
+    [[ -f "$binary_path" && -x "$binary_path" ]] || {
+      echo "candidate requires $binary from its pinned source" >&2
+      exit 1
+    }
+    printf 'candidate oracle %s: ' "$binary"
+    shasum -a 256 "$binary_path"
+  done
   bash scripts/faberline-core-test.sh build-stamp
   cargo test --locked -p sift "$@"
   cargo test --locked -p sift --test it -- --ignored --test-threads=1

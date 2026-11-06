@@ -403,7 +403,6 @@ async fn stdio_query_retries_a_detailed_retryable_response() {
             );
         }
     }
-
     assert!(
         query_started.elapsed() >= Duration::from_millis(900),
         "sift_query did not honor Retry-After"

@@ -1,0 +1,5 @@
+# CPython 3.13 / Linux x86-64 wheels from the pinned AW uv.lock.
+# Sources: https://pypi.org/pypi/tree-sitter/0.26.0/json
+#          https://pypi.org/pypi/tree-sitter-rust/0.24.2/json
+tree-sitter @ https://files.pythonhosted.org/packages/66/e7/f7e04cd9dff6b6ac0adf23922796fbc76accd4cf4bcda50542748d485679/tree_sitter-0.26.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl --hash=sha256:7075ef857ef86f327dbb72d1e2574dda78db5754b3a1fca6506acd7fe5d561a7
+tree-sitter-rust @ https://files.pythonhosted.org/packages/ca/45/a051bbd3045a61182dde25b93ae9a33d2677c935b16952283e12eaf46051/tree_sitter_rust-0.24.2-cp39-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl --hash=sha256:e033c5a93b57c88e0a835880de39fc802909ff69f57aaff6000211c196ea5190
