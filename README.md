@@ -196,6 +196,10 @@ promise after six hours. This limit does not change telemetry retention.
 Telemetry stays queryable for up to 180 days under the fixed hot and archive
 policy.
 
+The in-memory trace view keeps the latest 100,000 spans by default. It evicts
+the oldest spans and their lookup entries as it fills. It applies the same cap
+when restoring a snapshot. The durable journal has its own retention policy.
+
 ## Deployment model
 
 The one Sift binary supports these roles:
