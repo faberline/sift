@@ -277,6 +277,7 @@ Production acceptance for 0.2.0 is pending. These limits remain:
 - Local store and control voters pass mutual-TLS leader-loss tests. GKE fault and recovery drills remain required.
 - The fixed 30-day hot and 180-day total retention worker is implemented. It keeps WAL during a GCS outage, rewrites mixed-age segments, removes expired blobs, and resumes safe cleanup after restart. Exact event-ID idempotency is a separate six-hour window.
 - The 10,000-item-per-second target needs both 30-minute and 24-hour GKE evidence. Neither gate has run. The later 100,000-item-per-second target remains outside this release.
+- The 128-event drain and reopen test covers `baseline-ingest-and-restart-resilience`. The sustained load claim `ingest-query-replay-soak` stays pending.
 - Error groups, alerts, and saved queries are implemented. Live Webhook delivery and a complete source comparison remain required. A fresh installation can compare generated input with Sift output. Seven-day dual-write is optional for an existing-service migration. SLOs, incidents, on-call, runbooks, synthetics, RUM, profiles, and cost analysis are later work.
 
 Do not use a green unit or local integration test as evidence for a live GKE or
