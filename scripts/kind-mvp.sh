@@ -811,7 +811,13 @@ run_mcp_smoke() {
     -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
     --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' > "$tools_sse"
   extract_sse_json "$tools_sse" "$tools"
-  jq -e '[.result.tools[].name] | sort == ["sift_correlate","sift_get_trace","sift_list_services","sift_query","sift_tail_logs"]' \
+  jq -e '
+    ([.result.tools[].name] | sort) == [
+      "sift_correlate", "sift_get_trace", "sift_list_alert_rules", "sift_list_alerts",
+      "sift_list_error_groups", "sift_list_saved_queries", "sift_list_services", "sift_query",
+      "sift_tail_logs"
+    ] and all(.result.tools[]; .annotations.readOnlyHint == true)
+  ' \
     "$tools" >/dev/null || die "MCP tool list drifted"
   bad_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
     -X POST "${SIFT_URL}/mcp" -H "host: ${allowed_host}" -H 'origin: https://evil.example' \
