@@ -6,24 +6,34 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
+use serde_json::Value;
+
+use crate::terminal_output::print_json_terminal;
 
 #[derive(Args)]
 pub(super) struct SpecArgs {
     /// Generate a typed API client rather than print the OpenAPI document.
     #[command(subcommand)]
-    pub(super) command: Option<SpecCommand>,
-    #[arg(long, default_value = "openapi-json", value_parser = ["openapi-json"])]
-    pub(super) format: String,
+    command: Option<SpecCommand>,
+    #[arg(long, default_value = "openapi-json", value_enum)]
+    format: SpecFormat,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum SpecFormat {
+    OpenapiJson,
+    OpenapiYaml,
+    JsonSchema,
 }
 
 #[derive(Subcommand)]
-pub(super) enum SpecCommand {
+enum SpecCommand {
     /// Generate a typed client from Sift's own OpenAPI document.
     Gen(GenArgs),
 }
 
 #[derive(Args)]
-pub(super) struct GenArgs {
+struct GenArgs {
     /// Target language for the generated client.
     #[arg(long, value_enum)]
     lang: GenLang,
@@ -136,7 +146,68 @@ pub(super) const LLM_TOPICS: &[cli_std::llm::Topic] = &[
     },
 ];
 
-pub(super) fn spec_gen(args: GenArgs) -> Result<()> {
+pub(super) fn spec(args: SpecArgs) -> Result<()> {
+    if let Some(SpecCommand::Gen(args)) = args.command {
+        return spec_gen(args);
+    }
+
+    let document = sift::openapi();
+    match args.format {
+        SpecFormat::OpenapiJson => print_json_terminal(serde_json::json!({"openapi": document})),
+        SpecFormat::OpenapiYaml => {
+            print!("{}", serde_yaml::to_string(&document)?);
+            println!("# next: done");
+            Ok(())
+        }
+        SpecFormat::JsonSchema => {
+            let mut definitions = serde_json::Map::new();
+            for (name, schema) in document.components.unwrap_or_default().schemas {
+                let mut schema = serde_json::to_value(schema)?;
+                convert_schema(&mut schema);
+                definitions.insert(name, schema);
+            }
+            print_json_terminal(serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$defs": definitions,
+            }))
+        }
+    }
+}
+
+fn convert_schema(schema: &mut Value) {
+    let Value::Object(object) = schema else {
+        return;
+    };
+
+    if let Some(Value::String(reference)) = object.get_mut("$ref") {
+        if let Some(name) = reference.strip_prefix("#/components/schemas/") {
+            *reference = format!("#/$defs/{name}");
+        }
+    }
+    object.remove("discriminator");
+    let nullable = object.remove("nullable") == Some(Value::Bool(true));
+
+    // Only visit schema keywords. Other objects can contain literal data.
+    if let Some(Value::Object(properties)) = object.get_mut("properties") {
+        properties.values_mut().for_each(convert_schema);
+    }
+    for keyword in ["items", "additionalProperties", "not"] {
+        if let Some(child) = object.get_mut(keyword) {
+            convert_schema(child);
+        }
+    }
+    for keyword in ["allOf", "anyOf", "oneOf"] {
+        if let Some(Value::Array(children)) = object.get_mut(keyword) {
+            children.iter_mut().for_each(convert_schema);
+        }
+    }
+
+    if nullable {
+        *schema = serde_json::json!({"anyOf": [std::mem::take(schema), {"type": "null"}]});
+    }
+}
+
+fn spec_gen(args: GenArgs) -> Result<()> {
     use openapi_codegen::{generate, GenOptions, HttpClient, Lang};
 
     let lang = match args.lang {

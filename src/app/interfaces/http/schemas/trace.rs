@@ -9,7 +9,6 @@ pub struct SpanLinkV1 {
     pub trace_id: String,
     pub span_id: String,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
 }
 
@@ -19,7 +18,6 @@ pub struct SpanEventV1 {
     pub name: String,
     pub time_unix_nano: u64,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
 }
 

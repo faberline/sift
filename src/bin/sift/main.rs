@@ -20,7 +20,6 @@ mod terminal_output;
 
 use anyhow::Result;
 use clap::Parser;
-use serde_json::Value;
 
 use crate::acceptance_grpc::acceptance_grpc;
 use crate::acceptance_payload::acceptance_payload;
@@ -30,7 +29,7 @@ use crate::collect::collect;
 use crate::connect::connect;
 use crate::k8s::{dockerfile, k8s};
 use crate::mcp::mcp;
-use crate::meta::{issue, spec_gen, SpecCommand, LLM_TOPICS, TOOL};
+use crate::meta::{issue, spec, LLM_TOPICS, TOOL};
 use crate::query::query;
 use crate::restore::restore;
 use crate::serve::serve;
@@ -54,15 +53,7 @@ async fn main() -> Result<()> {
         Command::Dockerfile(args) => dockerfile(args),
         Command::K8s(args) => k8s(args).await,
         Command::Connect(args) => connect(args).await,
-        Command::Spec(args) => match args.command {
-            Some(SpecCommand::Gen(args)) => spec_gen(args),
-            None => {
-                let _ = args.format;
-                print_json_terminal(serde_json::json!({
-                    "openapi": serde_json::from_str::<Value>(&sift::openapi_json()?)?
-                }))
-            }
-        },
+        Command::Spec(args) => spec(args),
         Command::Llm(args) => {
             let output = cli_std::llm::render(
                 "sift",
