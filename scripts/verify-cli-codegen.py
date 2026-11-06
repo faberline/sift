@@ -269,7 +269,10 @@ def main():
             py = python_probe(args.python, directory, url)
             rust = rust_probe(directory, url)
     print("Removed scratch output and stopped the local server", flush=True)
-    return 0 if all((openapi, formats, ts, py, rust)) else 1
+    if not all((openapi, formats, ts, py, rust)):
+        return 1
+    print("passed")
+    return 0
 
 
 if __name__ == "__main__":
