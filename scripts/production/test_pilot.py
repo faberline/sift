@@ -1,23 +1,27 @@
 """Offline controls for a bounded trial and its durable input records."""
 import http.client
+import io
 import json
 import ssl
+import subprocess
 import tempfile
 import unittest
+from contextlib import ExitStack, redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 from load_client import Api
 from load_data import encoded, timestamp
-from pilot_runtime import Receiver
+from pilot_runtime import RECEIVER_LABEL, Receiver
 from pilot_workflow import collected
 from pilot_readback import readback
-from run_pilot import input_block, limits
+from run_pilot import input_block, limits, run
 
 
 class Pilot(unittest.TestCase):
     def test_receiver_certificate_passes_strict_https_validation(self):
         with tempfile.TemporaryDirectory() as temp:
-            receiver = Receiver(Path(temp) / 'receiver', port=0)
+            receiver = Receiver(Path(temp) / 'receiver')
+            receiver.start(port=0)
             context = ssl.create_default_context(cafile=str(receiver.cert))
             context.verify_flags |= ssl.VERIFY_X509_STRICT
             connection = http.client.HTTPSConnection(
@@ -90,6 +94,114 @@ class Pilot(unittest.TestCase):
                 return {'data': {'records': []}, 'next_cursor': 'repeated'}
         with self.assertRaisesRegex(ValueError, 'cursor did not advance'):
             collected(Pages(), 'source', [])
+
+    def test_docker_cleanup_retries_only_the_owned_id_and_verifies_absence(self):
+        receiver = Receiver('unused')
+        receiver.container = 'sift-pilot-receiver-test'
+        identity = 'a' * 64
+        present = f'{identity} {receiver.container}\n'
+        remove = ['docker', 'rm', '--force', identity]
+        with patch('pilot_runtime.subprocess.check_output', side_effect=[present, present, '']) as inventory, \
+                patch('pilot_runtime.subprocess.run', side_effect=[subprocess.TimeoutExpired(remove, 15), None]) as command:
+            receiver.close()
+        self.assertIsNone(receiver.container)
+        self.assertEqual(inventory.call_count, 3)
+        for invoked in inventory.call_args_list:
+            self.assertIn('label=' + RECEIVER_LABEL + '=sift-pilot-receiver-test', invoked.args[0])
+        self.assertEqual(command.call_args_list, [
+            call(remove, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15),
+        ] * 2)
+
+    def test_docker_cleanup_does_not_claim_success_if_owned_container_remains(self):
+        receiver = Receiver('unused')
+        receiver.container = 'sift-pilot-receiver-test'
+        present = f'{"a" * 64} {receiver.container}\n'
+        with patch('pilot_runtime.subprocess.check_output', return_value=present), \
+                patch('pilot_runtime.subprocess.run') as command:
+            with self.assertRaisesRegex(ValueError, 'still exists'):
+                receiver.close()
+        self.assertEqual(command.call_count, 2)
+        self.assertEqual(receiver.container, 'sift-pilot-receiver-test')
+
+
+class PilotCleanup(unittest.TestCase):
+    def prepare(self, stack, temp, primary=None, cleanup_failures=None, receiver_start_error=None):
+        binary, output = Path(temp) / 'sift', Path(temp) / 'run'
+        binary.write_bytes(b'pilot test binary')
+        stack.enter_context(patch('run_pilot.subprocess.check_output', return_value=json.dumps({
+            'version': '0.2.0', 'git_sha': 'a' * 40})))
+        receiver = stack.enter_context(patch('run_pilot.Receiver')).return_value
+        receiver.start.side_effect = receiver_start_error
+        service = stack.enter_context(patch('run_pilot.LocalSift')).return_value
+        api = stack.enter_context(patch('run_pilot.Api')).return_value
+        stack.enter_context(patch('run_pilot.setup', return_value={'expected': ['native log']}))
+        stack.enter_context(patch('run_pilot.restart', return_value={}))
+        stack.enter_context(patch('run_pilot.records', return_value=[]))
+        stack.enter_context(patch('run_pilot.stream', side_effect=primary, return_value={'verified_items': 10}))
+        stdout = stack.enter_context(redirect_stdout(io.StringIO()))
+        cleaned = []
+        def cleanup(name):
+            def attempt():
+                self.assertFalse((output / 'result.json').exists())
+                cleaned.append(name)
+                if cleanup_failures and name in cleanup_failures:
+                    raise cleanup_failures[name]
+            return attempt
+        api.close.side_effect = cleanup('api')
+        service.stop.side_effect = cleanup('service')
+        receiver.close.side_effect = cleanup('receiver')
+        return binary, output, cleaned, stdout
+
+    def test_pass_is_published_only_after_all_three_cleanup_actions(self):
+        with tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
+            binary, output, cleaned, stdout = self.prepare(stack, temp)
+            result = run(binary, output, seconds=1, rate=10)
+            self.assertEqual(cleaned, ['api', 'service', 'receiver'])
+            self.assertEqual(result['result'], 'passed')
+            self.assertEqual(json.loads((output / 'result.json').read_text()), result)
+            self.assertEqual(json.loads(stdout.getvalue()), result)
+            self.assertFalse((output / 'failure.json').exists())
+
+    def test_receiver_cleanup_failure_cannot_publish_pass(self):
+        with tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
+            binary, output, cleaned, stdout = self.prepare(stack, temp, cleanup_failures={
+                'receiver': subprocess.TimeoutExpired(['docker', 'rm'], 15)})
+            with self.assertRaisesRegex(ValueError, 'pilot cleanup failed'):
+                run(binary, output, seconds=1, rate=10)
+            self.assertEqual(cleaned, ['api', 'service', 'receiver'])
+            self.assertFalse((output / 'result.json').exists())
+            self.assertEqual(stdout.getvalue(), '')
+            failure = json.loads((output / 'failure.json').read_text())
+            self.assertEqual(failure['result'], 'failed')
+            self.assertEqual(failure['cleanup_errors'][0]['resource'], 'receiver')
+            self.assertEqual(failure['cleanup_errors'][0]['error_type'], 'TimeoutExpired')
+
+    def test_cleanup_errors_do_not_mask_primary_failure_or_skip_later_cleanup(self):
+        with tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
+            primary = ValueError('read-back failed: ' + 'x' * 600)
+            binary, output, cleaned, stdout = self.prepare(stack, temp, primary, {
+                'api': OSError('close failed'), 'receiver': subprocess.TimeoutExpired(['docker', 'rm'], 15)})
+            with self.assertRaises(ValueError) as raised:
+                run(binary, output, seconds=1, rate=10)
+            self.assertIs(raised.exception, primary)
+            self.assertEqual(cleaned, ['api', 'service', 'receiver'])
+            self.assertFalse((output / 'result.json').exists())
+            self.assertEqual(stdout.getvalue(), '')
+            failure = json.loads((output / 'failure.json').read_text())
+            self.assertEqual(failure['error_type'], 'ValueError')
+            self.assertEqual(failure['error_message'], str(primary)[:512])
+            self.assertEqual([entry['resource'] for entry in failure['cleanup_errors']], ['api', 'receiver'])
+
+    def test_partially_started_receiver_is_still_cleaned_up(self):
+        with tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
+            startup = subprocess.TimeoutExpired(['docker', 'run'], 30)
+            binary, output, cleaned, _ = self.prepare(stack, temp, receiver_start_error=startup)
+            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                run(binary, output, seconds=1, rate=10)
+            self.assertIs(raised.exception, startup)
+            self.assertEqual(cleaned, ['receiver'])
+            self.assertFalse((output / 'result.json').exists())
+            self.assertEqual(json.loads((output / 'failure.json').read_text())['cleanup_errors'], [])
 
 
 class ReadbackApi:

@@ -1,9 +1,12 @@
 """Private local processes for a small Sift trial. No cloud resources are changed."""
-import http.client, json, os, re, secrets, socket, ssl, subprocess, threading, time
+import http.client, json, os, re, secrets, socket, ssl, subprocess, threading, time, uuid
+from contextlib import closing
 from pathlib import Path
 from load_client import Api
 from pilot_receiver import server
 from run_load import require, write
+
+RECEIVER_LABEL = 'com.faberline.sift.pilot.receiver'
 
 
 def private(path, data):
@@ -18,9 +21,11 @@ def available_port():
 
 
 class Receiver:
-    def __init__(self, root, port=443, docker_image=None):
+    def __init__(self, root):
         self.root, self.token = Path(root), secrets.token_urlsafe(32)
         self.container, self.server, self.thread = None, None, None
+
+    def start(self, port=443, docker_image=None):
         self.root.mkdir(mode=0o700)
         cert, ca_key = self.root / 'ca.pem', self.root / 'ca-key.pem'
         key, csr, leaf = self.root / 'key.pem', self.root / 'server.csr', self.root / 'server.pem'
@@ -46,28 +51,29 @@ class Receiver:
             require(re.fullmatch(r'(?:sha256:|[a-z0-9][a-z0-9/_.:-]*@sha256:)[0-9a-f]{64}', docker_image),
                 'receiver image must use an immutable local ID or registry digest')
             script = Path(__file__).with_name('pilot_receiver.py').resolve()
-            self.container = subprocess.check_output(['docker', 'run', '--detach', '--rm', '--pull=never',
+            # Record ownership before starting Docker so startup errors can still be cleaned up.
+            self.container = 'sift-pilot-receiver-' + uuid.uuid4().hex
+            subprocess.run(['docker', 'run', '--detach', '--rm', '--pull=never',
+                '--name', self.container, '--label', RECEIVER_LABEL + '=' + self.container,
                 '--user', str(os.getuid()) + ':' + str(os.getgid()), '--read-only', '--cap-drop=ALL',
                 '--security-opt=no-new-privileges', '--memory=128m', '--cpus=.2',
                 '--publish', '127.0.0.1:' + str(port) + ':8443',
                 '--mount', 'type=bind,src=' + str(self.root.resolve()) + ',dst=/state',
                 '--mount', 'type=bind,src=' + str(script) + ',dst=/receiver.py,readonly',
                 '--entrypoint', 'python3', docker_image, '/receiver.py', '--root', '/state'],
-                text=True, stderr=subprocess.DEVNULL, timeout=30).strip()
-            try:
-                until = time.monotonic() + 30
-                while time.monotonic() < until:
-                    try:
-                        connection = http.client.HTTPSConnection('localhost', port, timeout=1,
-                            context=ssl.create_default_context(cafile=str(cert)))
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            until = time.monotonic() + 30
+            context = ssl.create_default_context(cafile=str(cert))
+            while time.monotonic() < until:
+                try:
+                    with closing(http.client.HTTPSConnection('localhost', port, timeout=1,
+                            context=context)) as connection:
                         connection.request('GET', '/readyz'); response = connection.getresponse()
-                        response.read(); connection.close()
+                        response.read()
                         if response.status == 200: break
-                    except OSError: pass
-                    time.sleep(.1)
-                else: raise ValueError('Docker HTTPS receiver did not become ready')
-            except BaseException:
-                self.close(); raise
+                except OSError: pass
+                time.sleep(.1)
+            else: raise ValueError('Docker HTTPS receiver did not become ready')
         else:
             self.server = server(self.root, port, host='127.0.0.1')
             self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -81,12 +87,40 @@ class Receiver:
         return [json.loads(line) for line in raw[:raw.rfind(b'\n') + 1].splitlines()]
 
     def close(self):
-        if self.server:
-            self.server.shutdown(); self.server.server_close(); self.thread.join(timeout=5)
-        if self.container:
-            subprocess.run(['docker', 'rm', '--force', self.container], check=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-            self.container = None
+        if self.server is not None:
+            try:
+                if self.thread is not None and self.thread.is_alive():
+                    self.server.shutdown()
+            finally:
+                self.server.server_close()
+            if self.thread is not None and self.thread.is_alive():
+                self.thread.join(timeout=5)
+                require(not self.thread.is_alive(), 'local HTTPS receiver thread did not stop')
+            self.server, self.thread = None, None
+        if self.container is not None:
+            for attempt in range(3):
+                try:
+                    identity = self.container_id()
+                    if identity is None:
+                        self.container = None
+                        return
+                    if attempt < 2:
+                        subprocess.run(['docker', 'rm', '--force', identity], check=True,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+                except (OSError, subprocess.SubprocessError):
+                    if attempt == 2:
+                        raise
+            raise ValueError('Docker HTTPS receiver still exists after cleanup: ' + self.container)
+
+    def container_id(self):
+        inventory = subprocess.check_output(['docker', 'ps', '--all', '--no-trunc',
+            '--filter', 'label=' + RECEIVER_LABEL + '=' + self.container,
+            '--format', '{{.ID}} {{.Names}}'], text=True, stderr=subprocess.DEVNULL, timeout=10).strip()
+        if not inventory:
+            return None
+        found = re.fullmatch(r'([0-9a-f]{64}) ' + re.escape(self.container), inventory)
+        require(found is not None, 'Docker HTTPS receiver ownership is ambiguous: ' + self.container)
+        return found[1]
 
 
 class LocalSift:
@@ -121,22 +155,24 @@ class LocalSift:
         while time.monotonic() < until:
             require(self.process.poll() is None, 'Sift exited before readiness; inspect the private server log')
             try:
-                connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=1)
-                connection.request('GET', '/readyz'); response = connection.getresponse()
-                last_status = response.status
-                response.read(16_385); connection.close()
-                if last_status == 200: return
+                with closing(http.client.HTTPConnection('127.0.0.1', self.port, timeout=1)) as connection:
+                    connection.request('GET', '/readyz'); response = connection.getresponse()
+                    last_status = response.status
+                    response.read(16_385)
+                    if last_status == 200: return
             except OSError: pass
             time.sleep(.1)
         raise ValueError('Sift readiness timed out with HTTP ' + str(last_status))
 
     def stop(self):
-        if self.process:
-            self.process.terminate()
-            try: self.process.wait(timeout=25)
-            except subprocess.TimeoutExpired: self.process.kill(); self.process.wait(timeout=5)
-            self.process = None
-        if self.log: self.log.close(); self.log = None
+        try:
+            if self.process:
+                self.process.terminate()
+                try: self.process.wait(timeout=25)
+                except subprocess.TimeoutExpired: self.process.kill(); self.process.wait(timeout=5)
+                self.process = None
+        finally:
+            if self.log: self.log.close(); self.log = None
 
     def collect(self, source, state, source_id, retries=2):
         env = dict(self.env, SIFT_TOKEN=self.collector_token)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run a small local trial. A passed trial is not rated GKE production acceptance."""
-import argparse, hashlib, json, os, re, signal, subprocess, time, uuid
+import argparse, hashlib, json, os, re, signal, subprocess, sys, time, uuid
+from contextlib import suppress
 from pathlib import Path
 from load_client import Api
 from load_data import build, digest, encoded
@@ -80,6 +81,10 @@ def stream(api, service, receiver, context, root, run, seconds, rate):
         'query_p95_seconds': {name: percentile(values) for name, values in api.timings.items()}}
 
 
+def error_details(error):
+    return {'error_type': type(error).__name__, 'error_message': str(error)[:512]}
+
+
 def run(binary, output, seconds=1800, rate=100, receiver_image=None):
     limits(seconds, rate)
     binary = Path(binary).resolve()
@@ -94,42 +99,64 @@ def run(binary, output, seconds=1800, rate=100, receiver_image=None):
         'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'run_id': run_id,
         'environment': 'local', 'seconds': seconds, 'rate': rate, 'production_accepted': False})
     receiver, service, api = None, None, None
+    cleanup_errors, diagnostic_error = [], None
     began = time.time()
     try:
-        receiver = Receiver(output / 'receiver', docker_image=receiver_image)
-        service = LocalSift(binary, output / 'server', project, receiver); service.start()
-        api = Api(service.endpoint, project, service.token_file)
-        context = setup(api, service, receiver, output, run_id)
-        # Check mute and restart before sustained writes too.
-        initial_restart = restart(api, service, receiver, context)
-        result = stream(api, service, receiver, context, output, run_id, seconds, rate)
+        try:
+            receiver = Receiver(output / 'receiver')
+            receiver.start(docker_image=receiver_image)
+            service = LocalSift(binary, output / 'server', project, receiver); service.start()
+            api = Api(service.endpoint, project, service.token_file)
+            context = setup(api, service, receiver, output, run_id)
+            # Check mute and restart before sustained writes too.
+            initial_restart = restart(api, service, receiver, context)
+            result = stream(api, service, receiver, context, output, run_id, seconds, rate)
+        except BaseException:
+            if api is not None:
+                try:
+                    diagnostic = {}
+                    for collection in ('error-groups', 'alert-rules', 'alerts', 'saved-queries'):
+                        try: diagnostic[collection] = records(api, collection)
+                        except (ValueError, OSError): diagnostic[collection] = {'read': 'failed'}
+                    write(output / 'diagnostic-control.json', diagnostic)
+                except BaseException as error:
+                    diagnostic_error = error_details(error)
+            raise
+        finally:
+            for name, resource, method in (('api', api, 'close'),
+                    ('service', service, 'stop'), ('receiver', receiver, 'close')):
+                if resource is not None:
+                    try:
+                        getattr(resource, method)()
+                    except BaseException as error:
+                        cleanup_errors.append({'resource': name, **error_details(error)})
+        require(not cleanup_errors, 'pilot cleanup failed')
         result.update({'schema': 'sift.pilot-result/v1', 'result': 'passed', 'environment': 'local',
             'source_commit': build_info['git_sha'], 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
             'production_accepted': False, 'rated_items_per_second': None, 'initial_restart': initial_restart,
             'native_logs_verified': len(context['expected']), 'error_recurrence_verified': True,
             'https_firing_and_recovery_verified': True, 'notification_retry_identity_verified': True,
             'wall_seconds': time.time() - began})
-        api.close(); service.stop()
         files = [path for path in (output / 'server' / 'data').rglob('*') if path.is_file() and not path.is_symlink()]
         result['measured_local_data_bytes'] = sum(path.stat().st_size for path in files)
         result['stored_data_files'] = len(files)
-        write(output / 'result.json', result)
-        print(json.dumps(result, sort_keys=True), flush=True)
-        return result
+        pending = output / '.result-pending.json'
+        write(pending, result)
+        pending.rename(output / 'result.json')
     except BaseException as error:
-        if api:
-            diagnostic = {}
-            for collection in ('error-groups', 'alert-rules', 'alerts', 'saved-queries'):
-                try: diagnostic[collection] = records(api, collection)
-                except (ValueError, OSError): diagnostic[collection] = {'read': 'failed'}
-            write(output / 'diagnostic-control.json', diagnostic)
-        write(output / 'failure.json', {'schema': 'sift.pilot-result/v1', 'result': 'failed',
-            'production_accepted': False, 'source_commit': build_info['git_sha'], 'error_type': type(error).__name__})
+        failure = {'schema': 'sift.pilot-result/v1', 'result': 'failed', 'production_accepted': False,
+            'source_commit': build_info['git_sha'], **error_details(error), 'cleanup_errors': cleanup_errors}
+        if diagnostic_error is not None:
+            failure['diagnostic_error'] = diagnostic_error
+        try:
+            write(output / 'failure.json', failure)
+        except OSError as write_error:
+            with suppress(OSError):
+                print('could not write pilot failure evidence: ' + error_details(write_error)['error_message'],
+                    file=sys.stderr, flush=True)
         raise
-    finally:
-        if api: api.close()
-        if service: service.stop()
-        if receiver: receiver.close()
+    print(json.dumps(result, sort_keys=True), flush=True)
+    return result
 
 
 def main():
