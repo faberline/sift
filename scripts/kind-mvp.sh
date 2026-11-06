@@ -46,6 +46,7 @@ SIFT_INSTANCE_OWNED=0
 STARTED="$SECONDS"
 FORWARD_PIDS=()
 TOKEN_FILE="$WORK_DIR/sift-rig.token"
+ADMIN_TOKEN_FILE="$WORK_DIR/sift-rig-admin.token"
 SIFT_URL="http://127.0.0.1:${GATEWAY_PORT}"
 
 step() {
@@ -391,6 +392,7 @@ kubectl -n "$NAMESPACE" create secret generic sift-peer-tls \
   --from-file=tls.key="$PEER_DIR/tls.key" \
   --from-file=ca.crt="$PEER_DIR/ca.crt"
 kubectl -n "$NAMESPACE" create serviceaccount sift-rig
+kubectl -n "$NAMESPACE" create serviceaccount sift-rig-admin
 kubectl apply -f - <<EOF
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -415,6 +417,30 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: sift-rig
+    namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sift-rig-admin
+  namespace: ${NAMESPACE}
+rules:
+  - apiGroups: ["sift.axiom.dev"]
+    resources: ["projects"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sift-rig-admin
+  namespace: ${NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sift-rig-admin
+subjects:
+  - kind: ServiceAccount
+    name: sift-rig-admin
     namespace: ${NAMESPACE}
 EOF
 
@@ -550,8 +576,10 @@ start_store_forwards() {
 refresh_token() {
   kubectl -n "$NAMESPACE" create token sift-rig \
     --audience=sift.axiom.dev --duration=1800s > "$TOKEN_FILE"
-  chmod 0600 "$TOKEN_FILE"
-  [[ -s "$TOKEN_FILE" ]] || die "Kubernetes did not issue a projected token"
+  kubectl -n "$NAMESPACE" create token sift-rig-admin \
+    --audience=sift.axiom.dev --duration=1800s > "$ADMIN_TOKEN_FILE"
+  chmod 0600 "$TOKEN_FILE" "$ADMIN_TOKEN_FILE"
+  [[ -s "$TOKEN_FILE" && -s "$ADMIN_TOKEN_FILE" ]] || die "Kubernetes did not issue both scoped tokens"
 }
 
 auth_curl() {
@@ -573,7 +601,10 @@ auth_curl_status() {
 }
 
 integrity_to() {
-  auth_curl "${SIFT_URL}/admin/integrity?project=${PROJECT}" > "$1"
+  local output="$1" project="${2:-$PROJECT}"
+  curl --silent --show-error --fail-with-body --max-time 30 \
+    -H "authorization: Bearer $(sed -n '1p' "$ADMIN_TOKEN_FILE")" \
+    -H "x-sift-project: ${project}" "${SIFT_URL}/admin/integrity?project=${project}" > "$output"
 }
 
 wait_for_integrity_count() {
@@ -625,6 +656,9 @@ wait_store_leader() {
 start_gateway_forward
 start_store_forwards
 refresh_token
+scoped_admin_status="$(auth_curl_status --max-time 30 --write-out '%{http_code}' \
+  --output "$EVIDENCE_DIR/protocol/scoped-admin-denied.json" "${SIFT_URL}/admin/integrity?project=${PROJECT}")"
+[[ "$scoped_admin_status" == "403" ]] || die "named project token unexpectedly accessed the admin endpoint"
 
 collector_trace="$(printf '%s' "$RUN_ID" | shasum -a 256 | cut -c1-32)"
 collector_marker="sift-kind-stdout-$RUN_ID"
@@ -656,8 +690,7 @@ wait_for_collected_log() {
 
 collector_integrity_to() {
   local query_file="$1" output="$2"
-  auth_curl_for "$COLLECTOR_PROJECT" "${SIFT_URL}/admin/integrity?project=${COLLECTOR_PROJECT}" \
-    > "$output"
+  integrity_to "$output" "$COLLECTOR_PROJECT"
   jq -e --slurpfile query "$query_file" '
     .signals.logs.count > 0 and .signals.logs.watermark >= $query[0].data.records[0].cursor
     and (.event_id_sha256 | test("^[0-9a-f]{64}$"))
@@ -778,7 +811,13 @@ run_mcp_smoke() {
     -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
     --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' > "$tools_sse"
   extract_sse_json "$tools_sse" "$tools"
-  jq -e '[.result.tools[].name] | sort == ["sift_correlate","sift_get_trace","sift_list_services","sift_query","sift_tail_logs"]' \
+  jq -e '
+    ([.result.tools[].name] | sort) == [
+      "sift_correlate", "sift_get_trace", "sift_list_alert_rules", "sift_list_alerts",
+      "sift_list_error_groups", "sift_list_saved_queries", "sift_list_services", "sift_query",
+      "sift_tail_logs"
+    ] and all(.result.tools[]; .annotations.readOnlyHint == true)
+  ' \
     "$tools" >/dev/null || die "MCP tool list drifted"
   bad_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
     -X POST "${SIFT_URL}/mcp" -H "host: ${allowed_host}" -H 'origin: https://evil.example' \
