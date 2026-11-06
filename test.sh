@@ -70,6 +70,16 @@ if [[ "${1:-}" == "--candidate" ]]; then
   done
   bash scripts/faberline-core-test.sh build-stamp
   cargo test --locked -p sift "$@"
+  cargo test --locked -p sift --test it -- --ignored --list | python3 -B -c '
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts/ci"))
+from online import ignored_inventory, load_lock
+expected = load_lock(root / "scripts/ci/online-dependencies.lock.json")["ignored_cases"]
+if not ignored_inventory(sys.stdin.buffer.read(), expected):
+    raise SystemExit("Required ignored-test inventory differs")
+print(f"Required ignored tests: {sum(expected.values())}")
+' "$repo_root"
   cargo test --locked -p sift --test it -- --ignored --test-threads=1
   python3 -B scripts/verify-capability-evidence.py \
     > "${CARGO_TARGET_DIR:-$repo_root/target}/sift-capability-evidence.json"
