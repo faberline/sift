@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, fs::OpenOptions, io::Write};
 
 use sift::{
-    storage::{RawStorage, StorageConfig, VIRTUAL_BUCKETS},
+    journal::{RawStorage, StorageConfig, VIRTUAL_BUCKETS},
     EventEnvelope, SignalKind, StoredEvent,
 };
 

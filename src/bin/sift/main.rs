@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     peer_tls::install_default_crypto_provider();
     match Cli::parse().command {
         Command::Serve(args) => serve(args).await,
-        Command::Collect(args) => collect(args).await,
+        Command::Collect(args) => collect(*args).await,
         Command::Query(args) => query(args).await,
         Command::Mcp(args) => mcp(args).await,
         Command::Snapshot(args) => snapshot(args),

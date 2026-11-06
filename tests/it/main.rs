@@ -36,6 +36,7 @@ mod prometheus_api;
 mod raft_batch;
 mod raft_dedupe_determinism;
 mod raft_failover;
+mod refactor_compatibility;
 mod remote_write_library_boundary;
 mod role_routing;
 mod role_surface;

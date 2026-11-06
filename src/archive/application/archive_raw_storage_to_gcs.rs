@@ -1,31 +1,50 @@
 //! Archiving raw storage to GCS after checking the local archive prefix.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use anyhow::{bail, Context, Result};
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
 use crate::archive::application::upload_archive_snapshot::archive_gcs_captured_streaming;
-use crate::journal::infrastructure::storage::raw_storage::RawStorage;
-use crate::storage::SegmentManifest;
+use crate::journal::application::raw_event_service::RawEventService as RawStorage;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 /// Upload every immutable object first. The manifest upload is the commit point.
-pub fn archive_gcs(storage: &RawStorage, destination_uri: &str) -> Result<ArchiveReceipt> {
+pub(crate) fn archive_gcs(
+    services: &ArchiveServices,
+    storage: &RawStorage,
+    destination_uri: &str,
+) -> Result<ArchiveReceipt> {
     let segments = storage.seal_all_with_signal()?;
     let captured_cursor = segments
         .iter()
         .map(|(_, manifest)| manifest.last_cursor)
         .max()
         .unwrap_or_default();
-    archive_gcs_captured(storage, destination_uri, captured_cursor, segments)
+    archive_gcs_captured(
+        services,
+        storage,
+        destination_uri,
+        captured_cursor,
+        segments,
+    )
 }
 
 pub(super) fn archive_gcs_captured(
+    services: &ArchiveServices,
     storage: &RawStorage,
     destination_uri: &str,
     captured_cursor: u64,
     captured_segments: Vec<(SignalKind, SegmentManifest)>,
 ) -> Result<ArchiveReceipt> {
-    archive_gcs_captured_streaming(storage, destination_uri, captured_cursor, captured_segments)
+    archive_gcs_captured_streaming(
+        services,
+        storage,
+        destination_uri,
+        captured_cursor,
+        captured_segments,
+    )
 }
 
 pub(super) fn verify_local_archive_prefix(

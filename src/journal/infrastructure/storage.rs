@@ -21,3 +21,9 @@ pub(crate) mod segment_rewrite;
 pub(crate) mod segment_store;
 pub(crate) mod shard_router;
 pub(crate) mod wal;
+
+pub(crate) mod event_store_adapter;
+
+pub(crate) mod dedupe_store_adapter;
+
+pub(crate) mod wal_store_adapter;

@@ -4,3 +4,11 @@
 
 pub(crate) mod domain;
 pub(crate) mod infrastructure;
+
+pub use crate::node::{
+    domain::storage_role::StorageRole,
+    infrastructure::{
+        data_layout::{DataLayout, LayoutManifest, DEFAULT_DATA_DIR},
+        local_capacity::{CapacityLevel, LocalCapacity, LocalCapacityError},
+    },
+};

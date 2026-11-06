@@ -11,7 +11,8 @@ use anyhow::{bail, Context, Result};
 
 use crate::projection::domain::metric::{MetricChunkV1, ResidentMetricChunk};
 use crate::projection::domain::metric_memory_size::metric_chunk_memory_bytes;
-use crate::projection::domain::metric_series::{sha256, validate_series_id, SealedMetricChunk};
+use crate::projection::domain::metric_series::{validate_series_id, SealedMetricChunk};
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub(super) struct MetricChunkStore {
     root: PathBuf,
@@ -51,7 +52,7 @@ impl MetricChunkStore {
         let last = chunk.points.last().context("metric chunk lost its tail")?;
         validate_series_id(series_id)?;
         let bytes = serde_json::to_vec(&chunk.chunk).context("encode sealed metric chunk")?;
-        let digest = sha256(&bytes);
+        let digest = sha256_hex(&bytes);
         let key = format!(
             "{series_id}/{:020}-{:020}-{digest}.json",
             first.cursor, last.cursor
@@ -81,7 +82,7 @@ impl MetricChunkStore {
         let path = self.path_for(&sealed.key)?;
         let bytes = fs::read(&path)
             .with_context(|| format!("read sealed metric chunk {}", path.display()))?;
-        if sha256(&bytes) != sealed.sha256 {
+        if sha256_hex(&bytes) != sealed.sha256 {
             bail!("sealed metric chunk {} checksum mismatch", sealed.key);
         }
         let chunk: MetricChunkV1 =

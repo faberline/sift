@@ -3,7 +3,7 @@
 
 use chrono::Utc;
 
-use crate::event::EventEnvelope;
+use crate::shared_kernel::event::EventEnvelope;
 use crate::shared_kernel::retention_boundary::retention_rejection_at;
 
 pub(crate) fn retention_rejection(event: &EventEnvelope) -> Option<String> {

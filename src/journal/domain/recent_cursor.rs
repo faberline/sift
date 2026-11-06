@@ -3,8 +3,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
+use thiserror::Error;
 
 use crate::shared_kernel::stored_event::StoredEvent;
 
@@ -14,18 +14,28 @@ pub(in crate::journal) struct RecentCursor {
     pub(in crate::journal) acknowledged_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Error)]
+#[error("stored event acknowledged_at must be RFC3339")]
+pub(in crate::journal) struct InvalidAcknowledgedAt(#[source] chrono::ParseError);
+
 impl RecentCursor {
-    pub(in crate::journal) fn from_stored(event: &StoredEvent) -> Result<Self> {
+    pub(in crate::journal) fn from_stored(
+        event: &StoredEvent,
+    ) -> Result<Self, InvalidAcknowledgedAt> {
         Ok(Self {
             cursor: event.cursor,
             acknowledged_at: DateTime::parse_from_rfc3339(&event.acknowledged_at)
-                .context("stored event acknowledged_at must be RFC3339")?
+                .map_err(InvalidAcknowledgedAt)?
                 .with_timezone(&Utc),
         })
     }
 
     fn active_at(&self, now: DateTime<Utc>) -> bool {
-        self.acknowledged_at >= now - Duration::seconds(crate::storage::IDEMPOTENCY_WINDOW_SECONDS)
+        self.acknowledged_at
+            >= now
+                - Duration::seconds(
+                    crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+                )
     }
 }
 
@@ -52,7 +62,7 @@ pub(in crate::journal) fn recent_receipt_at(
 
 pub(in crate::journal) fn recent_cursor_map(
     events: &VecDeque<StoredEvent>,
-) -> Result<HashMap<(String, String), RecentCursor>> {
+) -> Result<HashMap<(String, String), RecentCursor>, InvalidAcknowledgedAt> {
     events
         .iter()
         .map(|event| {

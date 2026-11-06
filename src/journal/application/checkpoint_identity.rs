@@ -2,13 +2,13 @@
 
 use anyhow::{bail, Context, Result};
 
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
-use crate::journal::domain::event_query::EventQuery;
 use crate::journal::domain::journal_limits::RECOVERY_PAGE_EVENTS;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::shared_kernel::event_content_digest::xor_digest;
+use crate::shared_kernel::event_query::EventQuery;
 
-impl DurableJournal {
+impl JournalRuntime {
     pub(crate) fn checkpoint_identity(&self, raw_cursor: u64) -> Result<(u64, [u8; 32], u64)> {
         let (last_cursor, total_events, total_digest, retention_generation) = {
             let state = self.state.read().expect("journal state lock poisoned");

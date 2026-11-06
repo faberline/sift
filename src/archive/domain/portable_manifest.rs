@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::storage::SegmentManifest;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 pub(in crate::archive) fn portable_manifest(

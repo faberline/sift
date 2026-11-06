@@ -4,34 +4,16 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 
-use crate::archive::infrastructure::archive_control_paths::{
-    LOCAL_COMMIT_FORMAT_VERSION, LOCAL_COMMIT_PATH,
-};
+use crate::archive::domain::control_paths::{LOCAL_COMMIT_FORMAT_VERSION, LOCAL_COMMIT_PATH};
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
-use crate::storage::SegmentManifest;
+use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::SignalKind;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::archive) struct LocalSegmentCommitState {
-    pub(in crate::archive) format_version: u16,
-    pub(in crate::archive) committed_at: String,
-    pub(in crate::archive) snapshot_index: u64,
-    pub(in crate::archive) watermarks: ArchiveWatermarks,
-    pub(in crate::archive) segments: Vec<LocalCommittedSegment>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::archive) struct LocalCommittedSegment {
-    pub(in crate::archive) signal: SignalKind,
-    pub(in crate::archive) manifest: SegmentManifest,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::LocalSegmentCommitState;
 
 pub(in crate::archive) fn read_local_commit_state(
     root: &Path,
@@ -54,7 +36,7 @@ pub(in crate::archive) fn read_local_commit_state(
     }
     let mut watermarks = ArchiveWatermarks::default();
     for segment in &state.segments {
-        if segment.manifest.state != crate::storage::SegmentState::Sealed {
+        if segment.manifest.state != crate::shared_kernel::segment_manifest::SegmentState::Sealed {
             bail!("local segment commit contains a non-sealed segment");
         }
         watermarks.include(segment.signal, segment.manifest.last_cursor);

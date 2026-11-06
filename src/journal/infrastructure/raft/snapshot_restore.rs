@@ -4,7 +4,8 @@ use std::io::{Read, Seek, SeekFrom};
 
 use anyhow::{bail, Context, Result};
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::domain::journal_api::JournalApi;
+type DurableJournal<'a> = dyn JournalApi<Error = anyhow::Error> + 'a;
 use crate::journal::infrastructure::raft::archive_checkpoint::{
     read_archive_checkpoint, restore_archive_checkpoint, ARCHIVE_CHECKPOINT_MAGIC,
 };
@@ -27,13 +28,10 @@ use crate::shared_kernel::stored_event::StoredEvent;
 ///
 /// This prevents a corrupt or truncated snapshot from partially filling an
 /// empty Sift data directory.
-pub(crate) fn restore_seekable_snapshot<R>(
-    journal: &DurableJournal,
-    reader: &mut R,
-) -> Result<SnapshotMetadata>
-where
-    R: Read + Seek,
-{
+pub(crate) fn restore_seekable_snapshot(
+    journal: &DurableJournal<'_>,
+    reader: &mut dyn crate::journal::domain::snapshot_ports::ReadSeek,
+) -> Result<SnapshotMetadata> {
     if journal.last_cursor() != 0 {
         bail!("snapshot restore requires an empty Sift data directory");
     }
@@ -73,7 +71,7 @@ where
 /// then restore it in bounded pages. The temporary file stays on the same file
 /// system as all other Sift atomic work.
 pub(super) fn restore_streamed_snapshot(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     current_applied_index: u64,
     reader: &mut dyn Read,
     staged_archive: Option<ValidatedArchiveStage>,
@@ -122,7 +120,7 @@ pub(super) fn restore_streamed_snapshot(
 /// journal. A full archive restore is staged in `tmp` so the later durable
 /// Raft install never discovers a bad manifest or segment after compaction.
 pub(super) fn validate_streamed_snapshot(
-    journal: &DurableJournal,
+    journal: &DurableJournal<'_>,
     reader: &mut dyn Read,
 ) -> Result<Option<ValidatedArchiveStage>> {
     let tmp_dir = journal.data_dir().join("tmp");
@@ -156,9 +154,8 @@ pub(super) fn validate_streamed_snapshot(
     read_snapshot(&mut spool, |_| Ok(())).map(|_| None)
 }
 
-fn read_snapshot<R, F>(reader: &mut R, mut on_event: F) -> Result<SnapshotMetadata>
+fn read_snapshot<F>(reader: &mut dyn Read, mut on_event: F) -> Result<SnapshotMetadata>
 where
-    R: Read,
     F: FnMut(StoredEvent) -> Result<()>,
 {
     let metadata = read_snapshot_header(reader)?;

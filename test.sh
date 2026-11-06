@@ -24,6 +24,11 @@ fi
 
 if [[ "${1:-}" == "--candidate" ]]; then
   shift
+  [[ $# == 0 ]] || { echo 'candidate mode does not accept test filters' >&2; exit 1; }
+  if [[ -n "${VAT_OBSERVABILITY_PROBE+x}" || -n "${VAT_SERVICE_OBSERVABILITY_PROBE+x}" ]]; then
+    echo 'candidate mode refuses inherited VAT_OBSERVABILITY_PROBE or VAT_SERVICE_OBSERVABILITY_PROBE' >&2
+    exit 1
+  fi
   if [[ -n "${SIFT_BIN:-}" ]]; then
     echo "Sift candidate mode does not accept a caller-supplied SIFT_BIN" >&2
     exit 1
@@ -44,10 +49,31 @@ if [[ "${1:-}" == "--candidate" ]]; then
   }
   export SIFT_SOURCE_REVISION="$candidate_revision"
   bash tests/candidate_root.sh
-  cargo build --locked \
-    -p vat -p lumen -p tape -p relay -p defer -p sift --bins
+  # These are real-service oracles used by the two VAT stdout journeys.
+  # They belong to independent repositories, not this Cargo workspace.
+  missing_binary=0
+  for binary in vat lumen tape relay defer; do
+    if ! binary_path="$(command -v "$binary")" || [[ ! -f "$binary_path" || ! -x "$binary_path" ]]; then
+      echo "candidate requires $binary from its faberline repository on PATH" >&2
+      missing_binary=1
+      continue
+    fi
+    python3 - "$binary" "$binary_path" <<'PY'
+import hashlib, pathlib, sys
+path = pathlib.Path(sys.argv[2]).resolve(strict=True)
+digest = hashlib.sha256()
+with path.open('rb') as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+print(f'candidate oracle {sys.argv[1]}: {path} sha256={digest.hexdigest()}')
+PY
+  done
+  [[ "$missing_binary" == 0 ]] || exit 1
+  cargo build --locked -p sift --bins
   bash scripts/faberline-core-test.sh build-stamp
   cargo test --locked -p sift "$@"
+  cargo test --locked -p sift --test it -- vat_lumen_observability_e2e:: --ignored
+  cargo test --locked -p sift --test it -- vat_service_observability_e2e:: --ignored
   candidate_bin="${CARGO_TARGET_DIR:-$repo_root/target}/debug/sift"
   [[ -x "$candidate_bin" ]] || {
     echo "candidate Sift binary was not produced at $candidate_bin" >&2
@@ -59,4 +85,4 @@ if [[ "${1:-}" == "--candidate" ]]; then
   exit 0
 fi
 
-exec cargo test -p sift "$@"
+exec cargo test --locked -p sift "$@"

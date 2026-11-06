@@ -4,12 +4,10 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use axum::http::{HeaderMap, HeaderValue};
-use service_auth::{AuthError, Role};
 use tonic::Status;
 
-use crate::access::infrastructure::sift_verifier::SiftVerifier;
-use crate::access::interfaces::http::project_authorization::authorize_project;
+use crate::access::application::authorization_service::AuthorizationService;
+use crate::app::grpc_authorization::authorize;
 use crate::app::service_state::ServiceState;
 use crate::ingest::application::retention_admission::retention_rejection;
 use crate::ingest::interfaces::otlp::otlp_codec::normalize_payload;
@@ -21,19 +19,19 @@ struct SiftGrpcConsumer {
 
 #[derive(Clone)]
 struct SiftGrpcAuthorizer {
-    verifier: Arc<SiftVerifier>,
+    verifier: Arc<AuthorizationService>,
 }
 
 pub async fn serve<F>(
     listener: tokio::net::TcpListener,
     state: Arc<ServiceState>,
-    verifier: Arc<SiftVerifier>,
+    verifier: Arc<AuthorizationService>,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let maximum = state.admission.limits().max_decoded_body_bytes;
+    let maximum = state.admission().limits().max_decoded_body_bytes;
     transport_otlp::serve_grpc(
         listener,
         Arc::new(SiftGrpcConsumer { state }),
@@ -65,7 +63,7 @@ impl transport_otlp::OtlpConsumer for SiftGrpcConsumer {
         })?;
         let _permit = self
             .state
-            .admission
+            .admission()
             .acquire(project, decoded.item_count(), self.state.is_draining())
             .map_err(|error| transport_otlp::TransportError::Consumer {
                 message: error.message,
@@ -97,7 +95,7 @@ impl transport_otlp::OtlpConsumer for SiftGrpcConsumer {
             let event_bytes = serde_json::to_vec(&event)
                 .map(|bytes| bytes.len())
                 .unwrap_or(usize::MAX);
-            if let Err(error) = self.state.admission.validate_event_bytes(event_bytes) {
+            if let Err(error) = self.state.admission().validate_event_bytes(event_bytes) {
                 rejected += 1;
                 push_message(&mut messages, error.message);
                 continue;
@@ -130,46 +128,8 @@ impl transport_otlp::OtlpConsumer for SiftGrpcConsumer {
     }
 }
 
-pub(crate) async fn authorize(
-    metadata: &tonic::metadata::MetadataMap,
-    verifier: &SiftVerifier,
-) -> Result<String, Status> {
-    let project = metadata
-        .get("x-sift-project")
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| Status::invalid_argument("x-sift-project metadata is required"))?
-        .to_string();
-    let mut headers = HeaderMap::new();
-    if let Some(authorization) = metadata
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-    {
-        headers.insert(
-            "authorization",
-            HeaderValue::from_str(authorization)
-                .map_err(|_| Status::unauthenticated("authorization metadata is invalid"))?,
-        );
-    }
-    let principal = verifier
-        .authenticate_project(&headers, &project, Role::Write)
-        .await
-        .map_err(auth_status)?;
-    authorize_project(Some(&principal), &project)
-        .map_err(|error| Status::permission_denied(error.message))?;
-    Ok(project)
-}
-
 fn push_message(messages: &mut Vec<String>, message: String) {
     if messages.len() < 8 {
         messages.push(message);
-    }
-}
-
-fn auth_status(error: AuthError) -> Status {
-    match error {
-        AuthError::Unauthenticated => Status::unauthenticated("valid bearer token required"),
-        AuthError::Forbidden(message) => Status::permission_denied(message),
-        AuthError::Unavailable(message) => Status::unavailable(message),
     }
 }

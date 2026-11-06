@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::extract::DefaultBodyLimit;
-use sift::{auth::SiftVerifier, ServiceState};
+use sift::{access::SiftVerifier, ServiceState};
 
 use crate::serve_args::{LogFormat, RunRole, ServeArgs};
 
@@ -45,7 +45,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
     if matches!(args.role, RunRole::All | RunRole::Store) {
         if let Ok(manifest_uri) = std::env::var("SIFT_BOOTSTRAP_ARCHIVE_MANIFEST_URI") {
             if !manifest_uri.trim().is_empty() {
-                match sift::storage::archive::bootstrap_gcs_if_needed(&manifest_uri, data_dir)? {
+                match sift::archive::bootstrap_gcs_if_needed(&manifest_uri, data_dir)? {
                     Some(manifest) => tracing::info!(
                         source_manifest = manifest_uri,
                         source_cluster_id = manifest.source_cluster_id,
@@ -189,7 +189,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
         tracing::info!(%address, "sift serving OTLP/gRPC");
         let task = tokio::spawn(async move {
             if let Some(store) = grpc_store {
-                sift::grpc::serve_proxy(
+                sift::operations::serve_otlp_grpc_proxy(
                     listener,
                     &store,
                     grpc_verifier,
@@ -200,7 +200,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
                 )
                 .await
             } else {
-                sift::grpc::serve(listener, grpc_state, grpc_verifier, async {
+                sift::ingest::serve_otlp_grpc(listener, grpc_state, grpc_verifier, async {
                     let _ = shutdown_rx.await;
                 })
                 .await
@@ -219,18 +219,21 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
             let store = std::env::var("SIFT_STORE_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
             let query = std::env::var("SIFT_QUERY_ENDPOINT").unwrap_or_else(|_| store.clone());
-            sift::proxy::gateway_router(&store, &query, config.body_limit_bytes)?
-                .merge(sift::mcp::http_router(&internal_endpoint)?)
+            sift::operations::gateway_router(&store, &query, config.body_limit_bytes)?
+                .merge(sift::query::mcp_http_router(&internal_endpoint)?)
                 .layer(axum::middleware::from_fn_with_state(
-                    verifier,
-                    sift::auth::auth_middleware,
+                    Arc::new(sift::access::AuthorizationService::from_verifier(verifier)),
+                    sift::access::auth_middleware,
                 ))
         }
         RunRole::Query => {
             let store = std::env::var("SIFT_STORE_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
             sift::query_role_router(state.clone(), &store, config.body_limit_bytes)?.layer(
-                axum::middleware::from_fn_with_state(verifier, sift::auth::auth_middleware),
+                axum::middleware::from_fn_with_state(
+                    Arc::new(sift::access::AuthorizationService::from_verifier(verifier)),
+                    sift::access::auth_middleware,
+                ),
             )
         }
         _ => sift::protected_router_with_mcp(state.clone(), verifier, &internal_endpoint)?,

@@ -4,30 +4,18 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
-use crate::archive::domain::archive_manifest::{ArchiveManifest, ARCHIVE_FORMAT_VERSION};
-use crate::archive::domain::archive_manifest_validator::validate_archive_manifest;
+use crate::archive::domain::control_paths::{ARCHIVE_COMMIT_FORMAT_VERSION, ARCHIVE_COMMIT_PATH};
 use crate::archive::infrastructure::archive_catalog::catalog_for_uri;
-use crate::archive::infrastructure::archive_control_paths::{
-    ARCHIVE_COMMIT_FORMAT_VERSION, ARCHIVE_COMMIT_PATH,
-};
+use crate::archive::infrastructure::manifest_validation::validate_archive_manifest;
+use crate::shared_kernel::archive_manifest::ARCHIVE_FORMAT_VERSION;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::archive) struct ArchiveCommitState {
-    pub(in crate::archive) format_version: u16,
-    pub(in crate::archive) manifest_uri: String,
-    pub(in crate::archive) manifest_sha256: String,
-    pub(in crate::archive) committed_at: String,
-    pub(in crate::archive) watermarks: ArchiveWatermarks,
-    pub(in crate::archive) manifest: ArchiveManifest,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::ArchiveCommitState;
 
 pub(in crate::archive) fn read_commit_state(root: &Path) -> Result<Option<ArchiveCommitState>> {
     let path = root.join(ARCHIVE_COMMIT_PATH);
@@ -93,7 +81,7 @@ pub(crate) fn adopt_verified_archive_receipt(
 ) -> Result<ArchiveWatermarks> {
     validate_archive_manifest(&receipt.manifest)?;
     let catalog = catalog_for_uri(&receipt.manifest.catalog_uri)?;
-    let mut reader = catalog.reader(&receipt.manifest.catalog_root)?;
+    let mut reader = catalog.reader(&(&receipt.manifest.catalog_root).into())?;
     let _ = reader.next().transpose()?;
     record_archive_commit(root, receipt)
 }

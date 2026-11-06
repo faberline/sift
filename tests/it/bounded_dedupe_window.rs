@@ -1,5 +1,5 @@
 use chrono::{Duration, TimeZone, Utc};
-use sift::{storage::DedupeIndex, EventEnvelope, SignalKind, StoredEvent};
+use sift::{journal::DedupeIndex, EventEnvelope, SignalKind, StoredEvent};
 
 fn copy_tree(source: &std::path::Path, target: &std::path::Path) {
     std::fs::create_dir(target).unwrap();
@@ -278,23 +278,37 @@ fn replacement_recovers_after_backup_rename_and_validates_every_record() {
     assert!(!indexes.join(".dedupe-replace.json").exists());
     drop(recovered);
 
-    let shard = std::fs::read_dir(target)
+    let generation = std::fs::read_dir(target)
         .unwrap()
-        .find_map(|entry| {
-            let generation = entry.unwrap().path();
-            generation.is_dir().then(|| {
-                std::fs::read_dir(generation)
-                    .unwrap()
-                    .next()
-                    .unwrap()
-                    .unwrap()
-                    .path()
-            })
-        })
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.is_dir())
         .unwrap();
-    let mut bytes = std::fs::read(&shard).unwrap();
-    bytes[0] ^= 0xff;
-    std::fs::write(&shard, bytes).unwrap();
+    let shard = std::fs::read_dir(&generation)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().is_some_and(|extension| extension == "idx"))
+        .unwrap();
+    let original_shard = std::fs::read(&shard).unwrap();
+    let mut damaged_shard = original_shard.clone();
+    damaged_shard[0] ^= 0xff;
+    std::fs::write(&shard, damaged_shard).unwrap();
+
+    let (repaired, stats) = DedupeIndex::open_at(target_root.path(), now).unwrap();
+    assert!(!stats.rebuild_required);
+    assert_eq!(
+        repaired
+            .lookup_at("dedupe-window", "replacement-id", now)
+            .unwrap(),
+        Some(2)
+    );
+    assert_eq!(std::fs::read(&shard).unwrap(), original_shard);
+    drop(repaired);
+
+    let receipts = generation.join("receipts.framed");
+    let mut damaged_receipts = std::fs::read(&receipts).unwrap();
+    damaged_receipts[0] ^= 0xff;
+    std::fs::write(&receipts, damaged_receipts).unwrap();
+
     let (rebuilt, stats) = DedupeIndex::open_at(target_root.path(), now).unwrap();
     assert!(stats.rebuild_required);
     assert_eq!(

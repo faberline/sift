@@ -7,11 +7,11 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 use service_k8s::render::{self, RenderCtx};
 
-use crate::operations::infrastructure::k8s::constants::{
+use crate::operations::domain::instance_names::{
     APP, CONTROL_COMPONENT, GATEWAY_COMPONENT, HTTP_PORT, OTLP_GRPC_PORT, PEER_MTLS_PORT,
     QUERY_COMPONENT, STORE_COMPONENT,
 };
-use crate::operations::interfaces::crd::sift_spec::{AuthMode, SiftSpec};
+use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
 pub(super) fn role_name(cx: &RenderCtx<'_>, role: &str) -> String {
     format!("{}-{role}", cx.name)

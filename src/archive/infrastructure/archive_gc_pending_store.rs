@@ -4,28 +4,18 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
-use crate::archive::infrastructure::archive_commit_state::read_commit_state;
-use crate::archive::infrastructure::archive_control_paths::{
+use crate::archive::domain::control_paths::{
     ARCHIVE_GC_FORMAT_VERSION, ARCHIVE_GC_PATH, ARCHIVE_GC_STAGED_PATH,
 };
+use crate::archive::infrastructure::archive_commit_state::read_commit_state;
 use crate::archive::infrastructure::archive_upload_intent::reconcile_completed_archive_upload_intent;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(in crate::archive) struct ArchiveGcPending {
-    pub(in crate::archive) format_version: u16,
-    pub(in crate::archive) replacement_manifest_uri: String,
-    pub(in crate::archive) replacement_manifest_sha256: String,
-    pub(in crate::archive) gc_plan_uri: String,
-    pub(in crate::archive) gc_plan_root: storage_segment::CatalogRoot,
-    pub(in crate::archive) cursor: Option<String>,
-}
+pub(in crate::archive) use crate::archive::domain::control_values::ArchiveGcPending;
 
 fn archive_gc_pending_for_receipt(receipt: &ArchiveReceipt) -> Option<ArchiveGcPending> {
     let (Some(gc_plan_uri), Some(gc_plan_root)) = (

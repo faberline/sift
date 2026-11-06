@@ -6,7 +6,7 @@ use anyhow::Result;
 use serde_json::Value;
 use transport_otlp::OtlpSignal;
 
-use crate::ingest::domain::otlp_event_id::stable_id;
+use crate::ingest::application::event_identity::stable_id;
 use crate::ingest::interfaces::otlp::otlp_codec::{item_error, OtlpItemError};
 use crate::ingest::interfaces::otlp::otlp_event_builder::{apply_common_attributes, base_event};
 use crate::ingest::interfaces::otlp::otlp_json_attributes::{

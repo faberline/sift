@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::event::SignalKind;
+use crate::shared_kernel::event::SignalKind;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 #[derive(Debug, Deserialize)]

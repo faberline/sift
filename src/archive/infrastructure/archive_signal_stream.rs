@@ -18,7 +18,7 @@ use crate::SignalKind;
 
 pub(in crate::archive) struct ArchiveSignalStream {
     root: PathBuf,
-    catalog: storage_segment::CatalogReader,
+    catalog: crate::archive::domain::resource_ports::CatalogReader<storage_segment::SegmentError>,
     prefix: String,
     pub(in crate::archive) signal: SignalKind,
     events: VecDeque<StoredEvent>,
@@ -28,17 +28,11 @@ pub(in crate::archive) struct ArchiveSignalStream {
 }
 
 impl ArchiveSignalStream {
-    pub(in crate::archive) fn new(
-        root: &Path,
-        catalog: storage_segment::CatalogReader,
-        signal: SignalKind,
-    ) -> Self {
-        Self::new_after(root, catalog, signal, 0)
-    }
-
     pub(in crate::archive) fn new_after(
         root: &Path,
-        catalog: storage_segment::CatalogReader,
+        catalog: crate::archive::domain::resource_ports::CatalogReader<
+            storage_segment::SegmentError,
+        >,
         signal: SignalKind,
         after: u64,
     ) -> Self {
@@ -101,7 +95,8 @@ impl ArchiveSignalStream {
                 self.finished = true;
                 break;
             }
-            let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry)? else {
+            let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry.into())?
+            else {
                 bail!("archive segment prefix resolved to another catalog item");
             };
             if segment.signal != self.signal {

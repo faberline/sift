@@ -11,8 +11,7 @@ use axum::{
 };
 use chrono::{SecondsFormat, Utc};
 use sift::{
-    projection::PROJECTION_LOGGING_STORE, router, storage::archive, EventEnvelope, ServiceState,
-    SignalKind,
+    archive, projection::PROJECTION_LOGGING_STORE, router, EventEnvelope, ServiceState, SignalKind,
 };
 use tower::ServiceExt;
 

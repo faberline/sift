@@ -3,18 +3,18 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::journal::domain::sift_command::SiftCommandV1;
 use crate::journal::infrastructure::raft::command_codec::decode_command;
+use crate::shared_kernel::sift_command::SiftCommandV1;
 use crate::EventEnvelope;
 
 #[doc(hidden)]
 pub fn encode_raft_batch_for_diagnostics(events: Vec<EventEnvelope>) -> Result<Vec<u8>> {
-    SiftCommandV1::append_events_now(events).encoded_compressed()
+    SiftCommandV1::append_events_at(events, Utc::now()).encoded_compressed()
 }
 
 #[doc(hidden)]
 pub fn encode_default_raft_batch_for_diagnostics(events: Vec<EventEnvelope>) -> Result<Vec<u8>> {
-    SiftCommandV1::append_events_now(events).encoded()
+    SiftCommandV1::append_events_at(events, Utc::now()).encoded()
 }
 
 #[doc(hidden)]

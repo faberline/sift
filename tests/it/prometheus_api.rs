@@ -4,14 +4,12 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
-use prost::Message;
-use sift::{
-    prometheus::{
-        remote::{Label, Sample, TimeSeries, WriteRequest},
-        PROMETHEUS_STALE_NAN_BITS,
-    },
-    router, ServiceState,
+use metrics_remote_write::{
+    proto::{Label, Sample, TimeSeries, WriteRequest},
+    PROMETHEUS_STALE_NAN_BITS,
 };
+use prost::Message;
+use sift::{router, ServiceState};
 use tower::ServiceExt;
 
 async fn body_json(response: axum::response::Response) -> serde_json::Value {

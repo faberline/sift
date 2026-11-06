@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-use crate::archive::domain::archive_manifest::ArchiveSegment;
 use crate::archive::infrastructure::archive_integrity::{verify_bytes, verify_file};
+use crate::shared_kernel::archive_manifest::ArchiveSegment;
 
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
@@ -33,19 +33,18 @@ pub(super) fn cached_segment_path(root: &Path, segment: &ArchiveSegment) -> Resu
     let cache_path = root
         .join("archive-cache")
         .join(format!("{}.parquet", segment.parquet_sha256));
-    if cache_path.exists() {
-        if verify_file(
+    if cache_path.exists()
+        && verify_file(
             &cache_path,
             &segment.parquet_sha256,
             segment.parquet_bytes,
             "cached Parquet segment",
         )
         .is_ok()
-        {
-            set_private_file(&cache_path)?;
-            prune_archive_cache(root, &cache_path)?;
-            return Ok(cache_path);
-        }
+    {
+        set_private_file(&cache_path)?;
+        prune_archive_cache(root, &cache_path)?;
+        return Ok(cache_path);
     }
 
     let bytes = service_backup::fetch_backup_object(&segment.object_uri)

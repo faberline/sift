@@ -9,11 +9,11 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use service_auth::RoleMapPrincipal;
 
-use crate::access::interfaces::http::project_authorization::authorize_project;
+use crate::access::application::project_authorization::authorize_project;
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
+use crate::ingest::application::admission_failure;
 use crate::ingest::application::retention_admission::retention_rejection;
-use crate::ingest::domain::admission_error::AdmissionError;
 
 pub(crate) async fn prometheus_remote_write(
     State(state): State<Arc<ServiceState>>,
@@ -34,9 +34,9 @@ pub(crate) async fn prometheus_remote_write(
         .and_then(|value| value.to_str().ok());
     metrics_remote_write::validate_headers(content_type, content_encoding, remote_write_version)
         .map_err(|error| ApiError::unsupported_media(error.to_string()))?;
-    let limits = state.admission.limits();
+    let limits = state.admission().limits();
     if body.len() > limits.max_compressed_body_bytes {
-        return Err(ApiError::from_admission(AdmissionError::invalid(
+        return Err(ApiError::from_admission(admission_failure::invalid(
             "compressed_body_too_large",
             "compressed remote write body exceeds the configured limit",
         )));
@@ -67,7 +67,7 @@ pub(crate) async fn prometheus_remote_write(
         &decoded.project,
     )?;
     let _permit = state
-        .admission
+        .admission()
         .acquire(&decoded.project, decoded.events.len(), state.is_draining())
         .map_err(ApiError::from_admission)?;
     let written = decoded.events.len();
@@ -76,7 +76,7 @@ pub(crate) async fn prometheus_remote_write(
             .map(|bytes| bytes.len())
             .unwrap_or(usize::MAX);
         state
-            .admission
+            .admission()
             .validate_event_bytes(bytes)
             .map_err(ApiError::from_admission)?;
         if let Some(message) = retention_rejection(event) {

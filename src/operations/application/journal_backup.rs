@@ -9,7 +9,7 @@ use service_backup::{
     BackupRunResult, RetentionPolicy,
 };
 
-use crate::journal::infrastructure::durable_journal::DurableJournal;
+use crate::journal::application::journal_service::DurableJournal;
 
 /// Serialize a point-in-time Sift journal snapshot and ship it to the shared
 /// destination contract. Cloud destinations remain explicit: if this build

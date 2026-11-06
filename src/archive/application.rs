@@ -6,17 +6,17 @@
 pub(crate) mod archive_journal_local;
 pub(crate) mod archive_journal_to_gcs;
 pub(crate) mod archive_raw_storage_to_gcs;
-pub(crate) mod archive_receipts;
 pub(crate) mod archive_status_queries;
 pub(crate) mod committed_event_reader;
 pub(crate) mod compact_journal;
 pub(crate) mod evict_cold_segments;
-pub(crate) mod expire_committed_events;
 pub(crate) mod finalize_archive_gc;
 pub(crate) mod inspect_archive_catalog;
+pub(crate) mod lifecycle_checkpoint;
+pub(crate) mod lifecycle_tick;
+pub(crate) mod manifest_validation;
 pub(crate) mod prepare_retention_fence;
 pub(crate) mod reconcile_committed_retention;
-pub(crate) mod replay_cold_query;
 pub(crate) mod replay_committed_events;
 pub(crate) mod replay_recent_committed;
 pub(crate) mod restore_gcs;
@@ -24,6 +24,41 @@ pub(crate) mod restore_into_empty;
 pub(crate) mod resume_local_blob_gc;
 pub(crate) mod retention_catalog_ops;
 pub(crate) mod retention_due;
+pub(crate) mod retention_expiration;
 pub(crate) mod retention_manifest_commit;
+pub(crate) mod retention_pass;
+pub(crate) mod rewrite_retained_segment;
 pub(crate) mod run_lifecycle_attempt;
 pub(crate) mod upload_archive_snapshot;
+
+pub(crate) mod lifecycle_capacity;
+
+pub(crate) mod archive_services;
+
+pub(crate) mod resource_factory;
+
+pub(crate) mod catalog_service;
+
+pub(crate) mod object_service;
+
+pub(crate) mod spill_service;
+
+pub(crate) mod signal_service;
+
+pub(crate) mod catalog_reads;
+
+pub(crate) mod gc_plan_builder;
+
+pub(crate) mod spill_blob_reference;
+
+pub(crate) mod recover_upload;
+
+pub(crate) mod upload_referenced_blobs;
+
+pub(crate) mod lifecycle_service;
+pub(crate) mod read_service;
+
+pub(crate) mod restore_layout_service;
+
+#[cfg(test)]
+mod lifecycle_checkpoint_tests;

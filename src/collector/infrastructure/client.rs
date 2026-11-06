@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use reqwest::{StatusCode, Url};
 use serde_json::{json, Value};
 
+use crate::shared_kernel::utf8_truncate::truncate_utf8;
 use crate::{AttributeValue, OperationalEventV2};
 
 #[derive(Clone)]
@@ -96,7 +97,7 @@ impl CollectorClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            let message = format!("Sift ingest HTTP {status}: {}", truncate(&body, 512));
+            let message = format!("Sift ingest HTTP {status}: {}", truncate_utf8(&body, 512));
             let retryable = retryable_status(status)
                 && serde_json::from_str::<service_http::DetailedErrorEnvelope>(&body)
                     .map_or(true, |details| details.retryable);
@@ -124,7 +125,7 @@ impl CollectorClient {
                 .unwrap_or("Sift returned OTLP partial success");
             return Err(service_collector::DeliveryFailure::permanent(format!(
                 "Sift rejected {rejected} collector log record(s): {}; checkpoint unchanged",
-                truncate(message, 512)
+                truncate_utf8(message, 512)
             )));
         }
         Ok(service_collector::DeliveryReceipt {
@@ -269,17 +270,6 @@ fn json_any_value(value: &Value) -> Value {
 
 fn retryable_status(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
-}
-
-fn truncate(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.to_string();
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_string()
 }
 
 #[cfg(test)]

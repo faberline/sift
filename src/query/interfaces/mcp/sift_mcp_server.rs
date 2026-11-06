@@ -8,9 +8,9 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::query::infrastructure::sift_api_client::SiftApiClient;
-use crate::query::interfaces::http::phase_one::{CorrelationRequestV1, LogTailRequestV1};
-use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
+use crate::query::application::sift_api_service::SiftApiClient;
+use crate::shared_kernel::query_phase_one::{CorrelationRequestV1, LogTailRequestV1};
+use crate::shared_kernel::query_request::QueryRequestV1;
 
 #[derive(Clone)]
 pub(super) struct SiftMcpServer {

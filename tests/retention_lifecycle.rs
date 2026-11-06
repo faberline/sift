@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::{SecondsFormat, Utc};
 use raft_runtime::RaftStateMachine;
-use sift::{durability, storage::archive, DurableJournal, EventEnvelope, EventQuery, SignalKind};
+use sift::{archive, journal, DurableJournal, EventEnvelope, EventQuery, SignalKind};
 
 fn event(id: &str, signal: SignalKind, occurred_at: chrono::DateTime<Utc>) -> EventEnvelope {
     let mut event = EventEnvelope::for_project(
@@ -236,8 +236,8 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
             .map(|stored| stored.event.event_id)
             .collect::<Vec<_>>();
         assert_eq!(reopened_log_ids, ["hot-log", "suffix-log"]);
-        let reopened_machine = durability::SiftStateMachine::new(reopened.clone());
-        let reuse_command = durability::encode_raft_batch_at_for_diagnostics(
+        let reopened_machine = journal::SiftStateMachine::new(reopened.clone());
+        let reuse_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![event("expire-log", SignalKind::Log, now)],
             &expiry_time.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -294,8 +294,8 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
                 .collect::<Vec<_>>(),
             ["retry-hot"]
         );
-        let retry_machine = durability::SiftStateMachine::new(retry_journal.clone());
-        let retry_command = durability::encode_raft_batch_at_for_diagnostics(
+        let retry_machine = journal::SiftStateMachine::new(retry_journal.clone());
+        let retry_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![event("retry-expired", SignalKind::Log, now)],
             &(now + chrono::Duration::days(2)).to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -307,10 +307,10 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
 
         let reused_data = tempfile::tempdir().unwrap();
         let reused_journal = Arc::new(DurableJournal::open(reused_data.path()).unwrap());
-        let reused_machine = durability::SiftStateMachine::new(reused_journal.clone());
+        let reused_machine = journal::SiftStateMachine::new(reused_journal.clone());
         let old_acceptance = now - chrono::Duration::days(181);
         let old_event = event("retention-reused-id", SignalKind::Log, old_acceptance);
-        let old_command = durability::encode_raft_batch_at_for_diagnostics(
+        let old_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![old_event],
             &old_acceptance.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -320,7 +320,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         archive::archive_journal_gcs(&reused_journal, "gs://sift-retention/reused-id").unwrap();
 
         let recent_event = event("retention-reused-id", SignalKind::Log, now);
-        let recent_command = durability::encode_raft_batch_at_for_diagnostics(
+        let recent_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![recent_event.clone()],
             &now.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -332,7 +332,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
 
         archive::expire_committed_events_at(&reused_journal, now).unwrap();
         let retry_time = now + chrono::Duration::minutes(1);
-        let retry_command = durability::encode_raft_batch_at_for_diagnostics(
+        let retry_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![recent_event],
             &retry_time.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -348,13 +348,13 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
 
         let boundary_data = tempfile::tempdir().unwrap();
         let boundary_journal = Arc::new(DurableJournal::open(boundary_data.path()).unwrap());
-        let boundary_machine = durability::SiftStateMachine::new(boundary_journal.clone());
+        let boundary_machine = journal::SiftStateMachine::new(boundary_journal.clone());
         let boundary_event = event(
             "retention-active-receipt",
             SignalKind::Log,
             now - chrono::Duration::days(180) + chrono::Duration::minutes(1),
         );
-        let boundary_command = durability::encode_raft_batch_at_for_diagnostics(
+        let boundary_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![boundary_event.clone()],
             &now.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -371,7 +371,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         )
         .unwrap();
         assert_eq!(boundary_journal.total_event_count(), 0);
-        let boundary_retry = durability::encode_raft_batch_at_for_diagnostics(
+        let boundary_retry = journal::encode_raft_batch_at_for_diagnostics(
             vec![boundary_event],
             &(now + chrono::Duration::minutes(3)).to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -392,7 +392,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         std::fs::remove_dir_all(&boundary_dedupe).unwrap();
         std::fs::create_dir(&boundary_dedupe).unwrap();
         let rebuilt_boundary = Arc::new(DurableJournal::open(boundary_data.path()).unwrap());
-        let rebuilt_machine = durability::SiftStateMachine::new(rebuilt_boundary.clone());
+        let rebuilt_machine = journal::SiftStateMachine::new(rebuilt_boundary.clone());
         rebuilt_machine.apply_local(3, &boundary_retry).unwrap();
         let rebuilt_retry = rebuilt_machine.take_append_outcomes(3).unwrap();
         assert!(rebuilt_retry[0].duplicate);
@@ -406,7 +406,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         let boundary_restore = tempfile::tempdir().unwrap();
         archive::restore_gcs(&boundary_expiry.manifest_uri, boundary_restore.path()).unwrap();
         let restored_boundary = Arc::new(DurableJournal::open(boundary_restore.path()).unwrap());
-        let restored_machine = durability::SiftStateMachine::new(restored_boundary.clone());
+        let restored_machine = journal::SiftStateMachine::new(restored_boundary.clone());
         restored_machine.apply_local(1, &boundary_retry).unwrap();
         let restored_retry = restored_machine.take_append_outcomes(1).unwrap();
         assert!(restored_retry[0].duplicate);
@@ -420,7 +420,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         let receipt_only_data = tempfile::tempdir().unwrap();
         let receipt_only_journal =
             Arc::new(DurableJournal::open(receipt_only_data.path()).unwrap());
-        let receipt_only_machine = durability::SiftStateMachine::new(receipt_only_journal.clone());
+        let receipt_only_machine = journal::SiftStateMachine::new(receipt_only_journal.clone());
         let receipt_event = event(
             "receipt-only-expiry",
             SignalKind::Log,
@@ -428,7 +428,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         );
         let receipt_retry_event = event("receipt-only-expiry", SignalKind::Log, now);
         let receipt_acceptance = now;
-        let receipt_command = durability::encode_raft_batch_at_for_diagnostics(
+        let receipt_command = journal::encode_raft_batch_at_for_diagnostics(
             vec![receipt_event.clone()],
             &receipt_acceptance.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -455,7 +455,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         assert_eq!(receipt_manifest.event_count, 0);
         assert_eq!(receipt_manifest.dedupe_receipt_count, 1);
         assert!(!archive::retention_due_at(receipt_only_data.path(), payload_cleanup_at).unwrap());
-        let receipt_retry = durability::encode_raft_batch_at_for_diagnostics(
+        let receipt_retry = journal::encode_raft_batch_at_for_diagnostics(
             vec![receipt_retry_event.clone()],
             &payload_cleanup_at.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -483,7 +483,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
             receipt_manifest.dedupe_receipt_count, 0,
             "six-hour receipt cleanup must run even when no telemetry row reaches 180 days"
         );
-        let receipt_retry = durability::encode_raft_batch_at_for_diagnostics(
+        let receipt_retry = journal::encode_raft_batch_at_for_diagnostics(
             vec![receipt_retry_event],
             &receipt_cleanup_at.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -549,7 +549,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         let bounded_status = archive::committed_status(bounded_data.path())
             .unwrap()
             .unwrap();
-        let bounded_machine = durability::SiftStateMachine::new(bounded_journal.clone());
+        let bounded_machine = journal::SiftStateMachine::new(bounded_journal.clone());
         let fence = serde_json::to_vec(&serde_json::json!({
             "kind": "retention_fence",
             "fence": {
@@ -588,7 +588,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
         let bounded_follower_data = tempfile::tempdir().unwrap();
         let bounded_follower_journal =
             Arc::new(DurableJournal::open(bounded_follower_data.path()).unwrap());
-        let bounded_follower = durability::SiftStateMachine::new(bounded_follower_journal.clone());
+        let bounded_follower = journal::SiftStateMachine::new(bounded_follower_journal.clone());
         bounded_follower.apply_local(1, &fence).unwrap();
         bounded_follower
             .restore(&mut partial_checkpoint.as_slice())
@@ -606,7 +606,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
             )
             .unwrap();
         assert!(bounded_machine.retention_fence_pending_for_diagnostics());
-        let suffix = durability::encode_raft_batch_at_for_diagnostics(
+        let suffix = journal::encode_raft_batch_at_for_diagnostics(
             vec![event("bounded-suffix", SignalKind::Log, now)],
             &now.to_rfc3339_opts(SecondsFormat::Nanos, true),
         )
@@ -660,7 +660,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
             2,
             "the final retention checkpoint must clear the follower query fence"
         );
-        let clear = durability::encode_clear_retention_fence_for_diagnostics(
+        let clear = journal::encode_clear_retention_fence_for_diagnostics(
             final_status.retention_generation,
         )
         .unwrap();

@@ -1,11 +1,13 @@
 //! Evaluating a filter expression against an event's fields.
 
-use anyhow::{Context, Result};
 use regex::Regex;
 
-use crate::query::domain::filter_expression::QueryExpressionV1;
+use crate::query::domain::filter_expression::{FilterError, QueryExpressionV1};
 
-pub fn evaluate_filter(filter: &QueryExpressionV1, document: &serde_json::Value) -> Result<bool> {
+pub fn evaluate_filter(
+    filter: &QueryExpressionV1,
+    document: &serde_json::Value,
+) -> Result<bool, FilterError> {
     match filter {
         QueryExpressionV1::And { args } => {
             for arg in args {
@@ -57,7 +59,7 @@ pub fn evaluate_filter(filter: &QueryExpressionV1, document: &serde_json::Value)
             .and_then(value_text)
             .is_some_and(|actual| actual.to_lowercase().contains(&value.to_lowercase()))),
         QueryExpressionV1::Regex { field, pattern } => {
-            let regex = Regex::new(pattern).context("invalid regex pattern")?;
+            let regex = Regex::new(pattern).map_err(FilterError::InvalidRegex)?;
             Ok(field_value(document, field)
                 .and_then(value_text)
                 .is_some_and(|actual| regex.is_match(&actual)))

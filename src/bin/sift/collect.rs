@@ -42,7 +42,7 @@ pub(super) struct CollectArgs {
     #[arg(long, env = "SIFT_TOKEN_AUDIENCE", default_value = "sift.axiom.dev")]
     token_audience: String,
     /// Persistent Sift root used for agent checkpoints and rejected records.
-    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::storage::DEFAULT_DATA_DIR)]
+    #[arg(long, env = "SIFT_DATA_DIR", default_value = sift::node::DEFAULT_DATA_DIR)]
     data_dir: PathBuf,
     #[arg(long, default_value = "default")]
     project: String,

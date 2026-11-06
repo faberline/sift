@@ -16,6 +16,7 @@ arrow-array = "59.2.0"
 arrow-schema = "59.2.0"
 base64 = "0.22"
 bytes = "1.9"
+http-body = "=1.0.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "string", "env"] }
 crc32fast = "1"

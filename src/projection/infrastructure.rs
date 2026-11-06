@@ -11,3 +11,6 @@ pub(crate) mod metric_projection_query;
 pub(crate) mod metric_projection_scan;
 pub(crate) mod service_projection_adapter;
 pub(crate) mod trace_projection;
+
+pub(crate) mod replay_factory;
+pub(crate) mod shared_runtime_backend;

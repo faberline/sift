@@ -1,5 +1,5 @@
 use sift::{
-    storage::{DedupeIndex, RawStorage, StorageConfig},
+    journal::{DedupeIndex, RawStorage, StorageConfig},
     DurableJournal, EventEnvelope, EventQuery, ServiceState, SignalKind, StoredEvent,
 };
 

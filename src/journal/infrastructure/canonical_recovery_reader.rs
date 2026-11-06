@@ -1,15 +1,17 @@
 //! Reading the canonical WAL and segments back in pages during recovery.
 
+use crate::journal::domain::event_store::{EventReader, RawEventStore};
+use crate::journal::domain::recovery_store::RecoveryReader;
+use crate::journal::domain::wal_store::{WalReader, WalStore};
 use anyhow::{bail, Context, Result};
 
 use crate::journal::domain::journal_limits::{RECOVERY_PAGE_BYTES, RECOVERY_PAGE_EVENTS};
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(in crate::journal) struct CanonicalRecoveryReader<'a> {
-    pub(in crate::journal) storage:
-        &'a crate::journal::infrastructure::storage::raw_storage::RawStorage,
-    segments: crate::journal::infrastructure::storage::raw_storage::RawStorageReader,
-    pub(in crate::journal) wal: crate::storage::SignalWalReader,
+    pub(in crate::journal) storage: &'a dyn RawEventStore<Error = anyhow::Error>,
+    segments: Box<dyn EventReader<Error = anyhow::Error>>,
+    pub(in crate::journal) wal: Box<dyn WalReader<Error = anyhow::Error>>,
     archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
     repair_segments: bool,
     segment_next: Option<StoredEvent>,
@@ -19,8 +21,8 @@ pub(in crate::journal) struct CanonicalRecoveryReader<'a> {
 
 impl<'a> CanonicalRecoveryReader<'a> {
     pub(in crate::journal) fn open(
-        storage: &'a crate::journal::infrastructure::storage::raw_storage::RawStorage,
-        wal: &'a crate::storage::SignalWal,
+        storage: &'a dyn RawEventStore<Error = anyhow::Error>,
+        wal: &dyn WalStore<Error = anyhow::Error>,
         archived: crate::shared_kernel::archive_watermarks::ArchiveWatermarks,
         after: u64,
         repair_segments: bool,
@@ -126,5 +128,19 @@ impl<'a> CanonicalRecoveryReader<'a> {
                 }
             }
         }
+    }
+}
+
+impl RecoveryReader for CanonicalRecoveryReader<'_> {
+    type Error = anyhow::Error;
+    fn read_page(&mut self) -> Result<Vec<StoredEvent>> {
+        CanonicalRecoveryReader::read_page(self)
+    }
+    fn read_page_with_limits(
+        &mut self,
+        max_events: usize,
+        max_bytes: usize,
+    ) -> Result<(Vec<StoredEvent>, bool)> {
+        CanonicalRecoveryReader::read_page_with_limits(self, max_events, max_bytes)
     }
 }

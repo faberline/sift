@@ -6,10 +6,15 @@ use std::collections::BTreeMap;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde_json::Value;
-use service_observability::{StructuredServiceLogV1, SERVICE_LOG_SCHEMA_V1};
+use service_observability::{
+    StructuredServiceLogV1, MAX_ATTRIBUTES, MAX_ATTRIBUTE_KEY_BYTES, MAX_ATTRIBUTE_VALUE_BYTES,
+    MAX_EVENT_BYTES, MAX_REQUEST_ID_BYTES, SERVICE_LOG_SCHEMA_V1,
+};
 
 use crate::collector::domain::record::RecordEnrichment;
-use crate::collector::domain::service_log::{deterministic_event_id, trim_line_ending, validate};
+use crate::collector::domain::service_log::{
+    deterministic_event_id, trim_line_ending, validate, ServiceLogLimits, ServiceLogView,
+};
 use crate::{AttributeValue, InstrumentationScope, OperationalEventV2, SignalKind};
 
 pub fn decode_service_log(
@@ -40,12 +45,42 @@ pub(crate) fn decode_service_log_enriched(
     let json = trim_line_ending(raw_line);
     let log: StructuredServiceLogV1 =
         serde_json::from_slice(json).context("decode axiom service log JSON")?;
-    validate(&log)?;
+    validate(
+        ServiceLogView {
+            schema: &log.schema,
+            timestamp: &log.timestamp,
+            severity: &log.severity,
+            service_name: &log.service.name,
+            service_version: &log.service.version,
+            event: &log.event,
+            message: &log.message,
+            attributes: &log.attributes,
+            trace_id: log.trace_id.as_deref(),
+            span_id: log.span_id.as_deref(),
+            parent_span_id: log.parent_span_id.as_deref(),
+            trace_flags: log.trace_flags.as_deref(),
+            request_id: log.request_id.as_deref(),
+        },
+        ServiceLogLimits {
+            schema: SERVICE_LOG_SCHEMA_V1,
+            max_attributes: MAX_ATTRIBUTES,
+            max_attribute_key_bytes: MAX_ATTRIBUTE_KEY_BYTES,
+            max_attribute_value_bytes: MAX_ATTRIBUTE_VALUE_BYTES,
+            max_event_bytes: MAX_EVENT_BYTES,
+            max_request_id_bytes: MAX_REQUEST_ID_BYTES,
+        },
+    )?;
 
     let event_id = deterministic_event_id(source_id, offset, raw_line);
     let payload = serde_json::to_value(&log)?;
-    let mut event =
-        OperationalEventV2::for_project(project, environment, event_id, SignalKind::Log, payload);
+    let mut event = OperationalEventV2::for_project_at(
+        project,
+        environment,
+        event_id,
+        SignalKind::Log,
+        payload,
+        Utc::now(),
+    );
     event.occurred_at = log.timestamp.clone();
     event.observed_at = Utc::now().to_rfc3339();
     event

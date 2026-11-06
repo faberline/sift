@@ -14,7 +14,7 @@ use service_auth::{
     AuthError, Role, RoleMapPrincipal, StaticRoleMapVerifier, TokenClaims, Verifier,
 };
 
-use crate::access::domain::route_role::role_verb;
+use crate::access::domain::route_role::{role_verb, RouteRole};
 use crate::access::infrastructure::auth_config::SiftAuthConfig;
 
 #[derive(Clone)]
@@ -125,7 +125,7 @@ impl SiftVerifier {
                     namespace.as_ref(),
                     "projects",
                     Some(project.to_string()),
-                    role_verb(role),
+                    role_verb(role.into()),
                 );
                 authenticator
                     .authorize(&caller, &attributes)
@@ -143,6 +143,45 @@ impl SiftVerifier {
                     )]),
                 }))
             }
+        }
+    }
+}
+
+impl crate::access::domain::project_verifier::ProjectVerifier for SiftVerifier {
+    type Credentials = HeaderMap;
+    type Principal = RoleMapPrincipal;
+    type Error = AuthError;
+
+    fn is_kubernetes(&self) -> bool {
+        self.is_kubernetes()
+    }
+
+    fn authenticate_project<'a>(
+        &'a self,
+        headers: &'a HeaderMap,
+        project: &'a str,
+        role: RouteRole,
+    ) -> crate::shared_kernel::port_future::PortFuture<'a, RoleMapPrincipal, AuthError> {
+        Box::pin(self.authenticate_project(headers, project, role.into()))
+    }
+}
+
+impl From<Role> for RouteRole {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::Read => Self::Read,
+            Role::Write => Self::Write,
+            Role::Admin => Self::Admin,
+        }
+    }
+}
+
+impl From<RouteRole> for Role {
+    fn from(role: RouteRole) -> Self {
+        match role {
+            RouteRole::Read => Self::Read,
+            RouteRole::Write => Self::Write,
+            RouteRole::Admin => Self::Admin,
         }
     }
 }

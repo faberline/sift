@@ -6,4 +6,5 @@ pub(crate) mod config;
 pub(crate) mod cri;
 pub(crate) mod quarantine;
 pub(crate) mod record;
+pub(crate) mod record_decoder;
 pub(crate) mod service_log;

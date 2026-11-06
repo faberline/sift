@@ -1,6 +1,8 @@
-//! The archive worker handle ServiceState starts, and stopping it.
+//! The archive worker ServiceState starts: the lifecycle loop, which runs a
+//! tick on each interval while this node leads, and the handle that stops it.
 
 use crate::app::service_state::ServiceState;
+use crate::archive::application::lifecycle_tick::run_lifecycle_tick;
 
 impl ServiceState {
     /// Start the store lifecycle worker. A replicated follower stays idle.
@@ -18,6 +20,39 @@ impl ServiceState {
     /// it compacts WAL bytes.
     pub fn start_local_archive_worker(&self, interval: std::time::Duration) -> ArchiveWorker {
         self.start_lifecycle_worker(None, interval)
+    }
+
+    fn start_lifecycle_worker(
+        &self,
+        destination: Option<String>,
+        interval: std::time::Duration,
+    ) -> ArchiveWorker {
+        let ctx = self.lifecycle_context(destination);
+        let (shutdown, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move {
+            loop {
+                let leader = match &ctx.raft {
+                    Some(raft) => raft.is_leader().await,
+                    None => true,
+                };
+                if leader {
+                    run_lifecycle_tick(&ctx).await;
+                }
+
+                tokio::select! {
+                    changed = shutdown_rx.changed() => {
+                        if changed.is_err() || *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                    _ = tokio::time::sleep(interval.max(std::time::Duration::from_millis(1))) => {}
+                }
+            }
+        });
+        ArchiveWorker {
+            shutdown: Some(shutdown),
+            task,
+        }
     }
 }
 

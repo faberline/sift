@@ -10,14 +10,14 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 use crate::journal::domain::bloom_filter::{BloomLayer, MIN_BLOOM_BYTES};
-use crate::journal::domain::dedupe_stats::DedupeStats;
 use crate::journal::domain::event_digest::{shard_for, xor_digest_in_place};
-use crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS;
 use crate::journal::infrastructure::storage::dedupe_index::DedupeState;
 use crate::journal::infrastructure::storage::dedupe_shard_file::{
     generation_shard_identity, load_generation_receipts, read_entries, rebuild_generation_shards,
     set_private_dir, set_private_file, write_entries_with_policy, ENTRY_BYTES, RECEIPT_LOG_FILE,
 };
+use crate::shared_kernel::dedupe_stats::DedupeStats;
+use crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS;
 
 pub(super) const META_FILE: &str = "meta.json";
 

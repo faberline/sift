@@ -3,9 +3,7 @@
 
 use std::time::Duration;
 
-use axum::http::StatusCode;
-
-use crate::ingest::domain::admission_error::AdmissionError;
+use crate::ingest::domain::admission_error::{AdmissionError, AdmissionStatus};
 use crate::ingest::domain::ingest_limits::IngestLimits;
 
 #[derive(Debug)]
@@ -42,7 +40,7 @@ impl AdmissionController {
         }
         if item_count > self.limits.max_events_per_batch {
             return Err(AdmissionError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
+                AdmissionStatus::PayloadTooLarge,
                 "batch_too_large",
                 format!(
                     "batch contains {item_count} items; maximum is {}",
@@ -58,7 +56,7 @@ impl AdmissionController {
     pub fn validate_event_bytes(&self, bytes: usize) -> Result<(), AdmissionError> {
         if bytes > self.limits.max_event_bytes {
             return Err(AdmissionError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
+                AdmissionStatus::PayloadTooLarge,
                 "event_too_large",
                 format!(
                     "event is {bytes} bytes; maximum is {}",
@@ -88,7 +86,7 @@ impl AdmissionController {
             .acquire(project.to_string(), item_count, draining)
             .map_err(|error| match error {
                 service_http::WeightedAdmissionError::Draining => AdmissionError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
+                    AdmissionStatus::ServiceUnavailable,
                     "service_draining",
                     "Sift is draining and cannot accept new writes",
                     true,
@@ -96,7 +94,7 @@ impl AdmissionController {
                 ),
                 service_http::WeightedAdmissionError::ConcurrencyExceeded { .. } => {
                     AdmissionError::new(
-                        StatusCode::TOO_MANY_REQUESTS,
+                        AdmissionStatus::TooManyRequests,
                         "project_concurrency_exceeded",
                         "project has too many concurrent ingest requests",
                         true,
@@ -105,7 +103,7 @@ impl AdmissionController {
                 }
                 service_http::WeightedAdmissionError::QuotaExceeded { retry_after, .. } => {
                     AdmissionError::new(
-                        StatusCode::TOO_MANY_REQUESTS,
+                        AdmissionStatus::TooManyRequests,
                         "project_quota_exceeded",
                         "project ingest quota exceeded for the current window",
                         true,
@@ -118,7 +116,7 @@ impl AdmissionController {
                     )
                 }
                 service_http::WeightedAdmissionError::KeyLimitExceeded => AdmissionError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
+                    AdmissionStatus::ServiceUnavailable,
                     "admission_capacity_exceeded",
                     "too many projects are active in the ingest admission window",
                     true,

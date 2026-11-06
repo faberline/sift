@@ -25,10 +25,10 @@ pub(super) struct QueryArgs {
 
 pub(super) async fn query(args: QueryArgs) -> Result<()> {
     let source = read_json_input(&args.request)?;
-    let request: sift::api::QueryRequestV1 =
+    let request: sift::query::QueryRequestV1 =
         serde_json::from_slice(&source).context("parse QueryRequestV1 JSON")?;
     request.validate().context("validate QueryRequestV1")?;
-    let response = sift::mcp::SiftApiClient::new(
+    let response = sift::query::SiftApiClient::new(
         &args.endpoint,
         args.token,
         Duration::from_secs(args.request_timeout_secs),

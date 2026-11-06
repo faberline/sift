@@ -4,11 +4,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use thiserror::Error;
 
-use crate::event::{AttributeValue, OperationalEventV2};
+use crate::shared_kernel::event::{AttributeValue, OperationalEventV2};
+use crate::shared_kernel::event_error::EventError;
+use crate::shared_kernel::utf8_truncate;
 
 const DEFAULT_MAX_STRING_BYTES: usize = 4_096;
 
@@ -38,13 +40,35 @@ impl Default for GovernancePolicy {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum GovernanceError {
+    #[error("governance max_string_bytes must be greater than zero")]
+    ZeroMaxStringBytes,
+    #[error("governance redaction_text must not be empty")]
+    EmptyRedactionText,
+    #[error("validate default policy")]
+    DefaultPolicy(#[source] Box<GovernanceError>),
+    #[error("governance project key must not be empty")]
+    EmptyProjectKey,
+    #[error("validate policy for project {project}")]
+    ProjectPolicy {
+        project: String,
+        #[source]
+        source: Box<GovernanceError>,
+    },
+    #[error("validate event before governance")]
+    EventBeforeGovernance(#[source] EventError),
+    #[error("validate event after governance")]
+    EventAfterGovernance(#[source] EventError),
+}
+
 impl GovernancePolicy {
-    fn validate(&self) -> Result<()> {
+    fn validate(&self) -> Result<(), GovernanceError> {
         if self.max_string_bytes == 0 {
-            bail!("governance max_string_bytes must be greater than zero");
+            return Err(GovernanceError::ZeroMaxStringBytes);
         }
         if self.redaction_text.is_empty() {
-            bail!("governance redaction_text must not be empty");
+            return Err(GovernanceError::EmptyRedactionText);
         }
         Ok(())
     }
@@ -72,23 +96,31 @@ pub struct GovernancePolicySet {
 }
 
 impl GovernancePolicySet {
-    pub fn validate(&self) -> Result<()> {
-        self.default.validate().context("validate default policy")?;
+    pub fn validate(&self) -> Result<(), GovernanceError> {
+        self.default
+            .validate()
+            .map_err(|source| GovernanceError::DefaultPolicy(Box::new(source)))?;
         for (project, policy) in &self.projects {
             if project.trim().is_empty() {
-                bail!("governance project key must not be empty");
+                return Err(GovernanceError::EmptyProjectKey);
             }
             policy
                 .validate()
-                .with_context(|| format!("validate policy for project {project}"))?;
+                .map_err(|source| GovernanceError::ProjectPolicy {
+                    project: project.clone(),
+                    source: Box::new(source),
+                })?;
         }
         Ok(())
     }
 
-    pub fn govern(&self, mut event: OperationalEventV2) -> Result<OperationalEventV2> {
+    pub fn govern(
+        &self,
+        mut event: OperationalEventV2,
+    ) -> Result<OperationalEventV2, GovernanceError> {
         event
             .validate()
-            .context("validate event before governance")?;
+            .map_err(GovernanceError::EventBeforeGovernance)?;
         let policy = self.projects.get(&event.project).unwrap_or(&self.default);
         policy.validate()?;
 
@@ -107,7 +139,7 @@ impl GovernancePolicySet {
 
         event
             .validate()
-            .context("validate event after governance")?;
+            .map_err(GovernanceError::EventAfterGovernance)?;
         Ok(event)
     }
 }
@@ -217,12 +249,6 @@ fn is_base64_key(key: &str) -> bool {
 }
 
 fn truncate_utf8(value: &mut String, max_bytes: usize) {
-    if value.len() <= max_bytes {
-        return;
-    }
-    let mut boundary = max_bytes;
-    while boundary > 0 && !value.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    value.truncate(boundary);
+    let kept = utf8_truncate::truncate_utf8(value, max_bytes).len();
+    value.truncate(kept);
 }

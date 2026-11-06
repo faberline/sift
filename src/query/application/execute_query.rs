@@ -4,40 +4,39 @@
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 
 use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
-use crate::archive::application::replay_cold_query::replay_cold_query;
-use crate::event::SignalKind;
 use crate::projection;
 use crate::query::application::archive_query_status::{
     apply_archive_query_status, ArchiveQueryStatus,
 };
+use crate::query::application::query_cursor::{decode_query_cursor, encode_query_cursor};
+use crate::query::application::replay_cold_query::{replay_cold_query, ColdQueryScope};
 use crate::query::domain::filter_evaluator::evaluate_filter;
-use crate::query::domain::query_cursor::{decode_query_cursor, encode_query_cursor};
-use crate::query::domain::query_time::{cold_query_requested, parse_query_time_nanos};
-use crate::query::interfaces::http::query_request_v1::{
-    MetricFunctionV1, QueryRequestV1, QuerySignalV1,
-};
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::query::domain::query_time::{cold_query_requested_at, parse_query_time_nanos};
+use crate::shared_kernel::event::SignalKind;
+use crate::shared_kernel::query_request::{MetricFunctionV1, QueryRequestV1, QuerySignalV1};
+use crate::shared_kernel::query_response::QueryResponseV1;
 
 pub(in crate::query) fn execute_query_v1(
     state: &ServiceState,
     request: &QueryRequestV1,
 ) -> Result<QueryResponseV1, ApiError> {
     state
-        .journal
+        .journal()
         .ensure_queryable()
         .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
     let started = Instant::now();
     match &request.signal {
         QuerySignalV1::Logs { filter } => {
             state
-                .projections
+                .projections()
                 .catch_up(projection::PROJECTION_LOGGING_STORE)
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             let watermark = state
-                .projections
+                .projections()
                 .current_cursor(projection::PROJECTION_LOGGING_STORE)
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             let after_cursor = decode_query_cursor("logs", request.cursor.as_deref())?
@@ -54,21 +53,28 @@ pub(in crate::query) fn execute_query_v1(
             query.end_time = request.time_range.end.clone();
             query.after_cursor = after_cursor;
             query.limit = projection::MAX_LOG_QUERY_LIMIT;
-            let (page, archive_status) = if cold_query_requested(request) {
-                let archived = projection::LoggingProjection::new()
+            let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
+                let archived = state
+                    .projections()
+                    .new_log_replay()
                     .map_err(|error| ApiError::internal(error.to_string()))?;
-                let status = replay_cold_query(state, request, SignalKind::Log, &archived);
+                let status = replay_cold_query(
+                    state,
+                    &cold_query_scope(request),
+                    SignalKind::Log,
+                    &archived,
+                );
                 let page = match status {
                     ArchiveQueryStatus::Ready(_) => archived.query(&query),
                     ArchiveQueryStatus::NotRequired | ArchiveQueryStatus::Unavailable(_) => {
-                        state.projections.query_logs(&query)
+                        state.projections().query_logs(&query)
                     }
                 }
                 .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?;
                 (page, status)
             } else {
                 (
-                    state.projections.query_logs(&query).map_err(|error| {
+                    state.projections().query_logs(&query).map_err(|error| {
                         ApiError::bad_request("invalid_query", error.to_string())
                     })?,
                     ArchiveQueryStatus::NotRequired,
@@ -87,7 +93,9 @@ pub(in crate::query) fn execute_query_v1(
                     .map(|filter| {
                         serde_json::to_value(&record)
                             .map_err(anyhow::Error::from)
-                            .and_then(|document| evaluate_filter(filter, &document))
+                            .and_then(|document| {
+                                evaluate_filter(filter, &document).map_err(anyhow::Error::from)
+                            })
                     })
                     .transpose()
                     .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?
@@ -124,11 +132,11 @@ pub(in crate::query) fn execute_query_v1(
             ..
         } => {
             state
-                .projections
+                .projections()
                 .catch_up(projection::PROJECTION_METRIC_STORE)
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             let watermark = state
-                .projections
+                .projections()
                 .current_cursor(projection::PROJECTION_METRIC_STORE)
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             let mut query = projection::MetricQuery::for_project(&request.project);
@@ -147,20 +155,25 @@ pub(in crate::query) fn execute_query_v1(
             };
             query.after_series_id = decode_query_cursor("metrics", request.cursor.as_deref())?;
             query.limit = projection::MAX_METRIC_QUERY_LIMIT;
-            let (page, archive_status) = if cold_query_requested(request) {
-                let archived = projection::MetricProjection::new();
-                let status = replay_cold_query(state, request, SignalKind::Metric, &archived);
+            let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
+                let archived = state.projections().new_metric_replay();
+                let status = replay_cold_query(
+                    state,
+                    &cold_query_scope(request),
+                    SignalKind::Metric,
+                    &archived,
+                );
                 let page = match status {
                     ArchiveQueryStatus::Ready(_) => archived.query(&query),
                     ArchiveQueryStatus::NotRequired | ArchiveQueryStatus::Unavailable(_) => {
-                        state.projections.query_metrics(&query)
+                        state.projections().query_metrics(&query)
                     }
                 }
                 .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?;
                 (page, status)
             } else {
                 (
-                    state.projections.query_metrics(&query).map_err(|error| {
+                    state.projections().query_metrics(&query).map_err(|error| {
                         ApiError::bad_request("invalid_query", error.to_string())
                     })?,
                     ArchiveQueryStatus::NotRequired,
@@ -175,7 +188,9 @@ pub(in crate::query) fn execute_query_v1(
                     .map(|filter| {
                         serde_json::to_value(&item)
                             .map_err(anyhow::Error::from)
-                            .and_then(|document| evaluate_filter(filter, &document))
+                            .and_then(|document| {
+                                evaluate_filter(filter, &document).map_err(anyhow::Error::from)
+                            })
                     })
                     .transpose()
                     .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?
@@ -224,11 +239,11 @@ pub(in crate::query) fn execute_query_v1(
             filter,
         } => {
             state
-                .projections
+                .projections()
                 .catch_up(projection::PROJECTION_TRACE_STORE)
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             let watermark = state
-                .projections
+                .projections()
                 .current_cursor(projection::PROJECTION_TRACE_STORE)
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             let mut query = projection::TraceQuery::for_project(&request.project);
@@ -265,20 +280,25 @@ pub(in crate::query) fn execute_query_v1(
                 .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?;
             query.after_trace_id = decode_query_cursor("traces", request.cursor.as_deref())?;
             query.limit = projection::MAX_TRACE_QUERY_LIMIT;
-            let (page, archive_status) = if cold_query_requested(request) {
-                let archived = projection::TraceProjection::new();
-                let status = replay_cold_query(state, request, SignalKind::Span, &archived);
+            let (page, archive_status) = if cold_query_requested_at(request, Utc::now()) {
+                let archived = state.projections().new_trace_replay();
+                let status = replay_cold_query(
+                    state,
+                    &cold_query_scope(request),
+                    SignalKind::Span,
+                    &archived,
+                );
                 let page = match status {
                     ArchiveQueryStatus::Ready(_) => archived.query(&query),
                     ArchiveQueryStatus::NotRequired | ArchiveQueryStatus::Unavailable(_) => {
-                        state.projections.query_traces(&query)
+                        state.projections().query_traces(&query)
                     }
                 }
                 .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?;
                 (page, status)
             } else {
                 (
-                    state.projections.query_traces(&query).map_err(|error| {
+                    state.projections().query_traces(&query).map_err(|error| {
                         ApiError::bad_request("invalid_query", error.to_string())
                     })?,
                     ArchiveQueryStatus::NotRequired,
@@ -293,7 +313,9 @@ pub(in crate::query) fn execute_query_v1(
                     .map(|filter| {
                         serde_json::to_value(&trace)
                             .map_err(anyhow::Error::from)
-                            .and_then(|document| evaluate_filter(filter, &document))
+                            .and_then(|document| {
+                                evaluate_filter(filter, &document).map_err(anyhow::Error::from)
+                            })
                     })
                     .transpose()
                     .map_err(|error| ApiError::bad_request("invalid_query", error.to_string()))?
@@ -328,5 +350,14 @@ pub(in crate::query) fn execute_query_v1(
                 archive_status,
             ))
         }
+    }
+}
+
+fn cold_query_scope(request: &QueryRequestV1) -> ColdQueryScope<'_> {
+    ColdQueryScope {
+        project: &request.project,
+        environment: request.environment.as_deref(),
+        start: request.time_range.start.as_deref(),
+        end: request.time_range.end.as_deref(),
     }
 }

@@ -1,26 +1,26 @@
 //! Whether the committed archive has events or dedupe receipts past retention.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
-use crate::archive::domain::archive_manifest::ArchiveManifest;
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
-use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
 
 pub(super) fn committed_has_expired_dedupe_receipt(
+    services: &ArchiveServices,
     manifest: &ArchiveManifest,
     cutoff_unix_nano: i64,
 ) -> Result<bool> {
     if manifest.dedupe_receipt_count == 0 {
         return Ok(false);
     }
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     let Some(entry) = catalog
         .reader_after(&manifest.catalog_root, "receipt/")?
         .next()
@@ -39,8 +39,12 @@ pub(super) fn committed_has_expired_dedupe_receipt(
 }
 
 #[doc(hidden)]
-pub fn retention_due_at(root: &Path, now: DateTime<Utc>) -> Result<bool> {
-    let Some(manifest) = fetch_verified_committed_root(root)? else {
+pub(crate) fn retention_due_at(
+    services: &ArchiveServices,
+    root: &Path,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    let Some(manifest) = services.fetch_verified_committed_root(root)? else {
         return Ok(false);
     };
     if manifest.retention_scan.is_some() {
@@ -57,9 +61,9 @@ pub fn retention_due_at(root: &Path, now: DateTime<Utc>) -> Result<bool> {
     }
     let receipt_cutoff_nanos = (now
         - chrono::Duration::seconds(
-            crate::journal::domain::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
+            crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
         ))
     .timestamp_nanos_opt()
     .context("dedupe receipt cleanup cutoff is outside the nanosecond range")?;
-    committed_has_expired_dedupe_receipt(&manifest, receipt_cutoff_nanos)
+    committed_has_expired_dedupe_receipt(services, &manifest, receipt_cutoff_nanos)
 }

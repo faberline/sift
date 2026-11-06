@@ -1,10 +1,29 @@
 //! Why ingest refused a request: its status, code, message and retry hint.
 
-use axum::http::StatusCode;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdmissionStatus {
+    BadRequest,
+    PayloadTooLarge,
+    UnsupportedMediaType,
+    TooManyRequests,
+    ServiceUnavailable,
+}
+
+impl AdmissionStatus {
+    pub fn code(self) -> u16 {
+        match self {
+            Self::BadRequest => 400,
+            Self::PayloadTooLarge => 413,
+            Self::UnsupportedMediaType => 415,
+            Self::TooManyRequests => 429,
+            Self::ServiceUnavailable => 503,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct AdmissionError {
-    pub status: StatusCode,
+    pub status: AdmissionStatus,
     pub code: &'static str,
     pub message: String,
     pub retryable: bool,
@@ -13,7 +32,7 @@ pub struct AdmissionError {
 
 impl AdmissionError {
     pub(in crate::ingest) fn new(
-        status: StatusCode,
+        status: AdmissionStatus,
         code: &'static str,
         message: impl Into<String>,
         retryable: bool,
@@ -29,12 +48,12 @@ impl AdmissionError {
     }
 
     pub fn invalid(code: &'static str, message: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_REQUEST, code, message, false, None)
+        Self::new(AdmissionStatus::BadRequest, code, message, false, None)
     }
 
     pub fn local_storage_backpressure(message: impl Into<String>) -> Self {
         Self::new(
-            StatusCode::SERVICE_UNAVAILABLE,
+            AdmissionStatus::ServiceUnavailable,
             "local_storage_backpressure",
             message,
             true,

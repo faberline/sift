@@ -1,22 +1,18 @@
 //! Replaying committed archive events for a project, environment and time
 //! range.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::archive::application::archive_receipts::ArchiveReplay;
 use crate::archive::application::committed_event_reader::CommittedEventReader;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::parse_optional_archive_time;
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
-use crate::archive::infrastructure::archive_integrity::verify_archive_segment;
-use crate::archive::infrastructure::archive_segment_cache::cached_segment_bytes;
-use crate::archive::infrastructure::parquet_event_codec::decode_parquet;
-use crate::archive::infrastructure::verified_manifest_fetcher::fetch_verified_committed_root;
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
+use crate::shared_kernel::archive_receipts::ArchiveReplay;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
@@ -25,7 +21,8 @@ use crate::SignalKind;
 /// Parquet objects are hash-checked before use. A good local cache is reused,
 /// but Sift still verifies the remote commit manifest on each cold query. This
 /// makes a GCS outage visible instead of returning a silent empty result.
-pub fn replay_committed_events<F>(
+pub(crate) fn replay_committed_events<F>(
+    services: &ArchiveServices,
     root: &Path,
     signal: SignalKind,
     project: &str,
@@ -37,7 +34,7 @@ pub fn replay_committed_events<F>(
 where
     F: FnMut(StoredEvent) -> Result<()>,
 {
-    let Some(manifest) = fetch_verified_committed_root(root)? else {
+    let Some(manifest) = services.fetch_verified_committed_root(root)? else {
         return Ok(None);
     };
     let start = parse_optional_archive_time("start", start)?;
@@ -48,7 +45,7 @@ where
 
     let mut scanned = 0_u64;
     let mut replayed = 0_u64;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     for entry in catalog.reader(&manifest.catalog_root)? {
         let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry?)? else {
             continue;
@@ -56,9 +53,9 @@ where
         if segment.signal != signal {
             continue;
         }
-        let bytes = cached_segment_bytes(root, &segment)?;
-        let events = decode_parquet(&bytes)?;
-        verify_archive_segment(&segment, &events)?;
+        let bytes = services.cached_segment_bytes(root, &segment)?;
+        let events = services.decode_parquet(&bytes)?;
+        services.verify_archive_segment(&segment, &events)?;
         for stored in events {
             scanned = scanned.saturating_add(1);
             let event = &stored.event;
@@ -91,6 +88,7 @@ where
 /// three signal streams by raw cursor and never treats an unavailable archive
 /// as an empty source.
 pub(crate) fn read_committed_events_after(
+    services: &ArchiveServices,
     root: &Path,
     after: u64,
     limit: usize,
@@ -98,7 +96,7 @@ pub(crate) fn read_committed_events_after(
     if limit == 0 {
         return Ok(Some(Vec::new()));
     }
-    let Some(mut reader) = CommittedEventReader::open(root, after)? else {
+    let Some(mut reader) = CommittedEventReader::open_with_services(services, root, after)? else {
         return Ok(None);
     };
     reader.read_next(limit).map(Some)

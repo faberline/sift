@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use raft_runtime::RaftStateMachine;
 use sift::{
-    durability::{
+    journal::{
         decode_raft_batch_for_diagnostics, encode_default_raft_batch_for_diagnostics,
         encode_raft_batch_for_diagnostics,
     },
@@ -25,7 +25,7 @@ fn log(id: impl Into<String>) -> EventEnvelope {
 fn follower_apply_outcomes_age_out_of_a_small_fixed_window() {
     let data = tempfile::tempdir().unwrap();
     let journal = Arc::new(DurableJournal::open(data.path()).unwrap());
-    let state_machine = sift::durability::SiftStateMachine::new(journal);
+    let state_machine = sift::journal::SiftStateMachine::new(journal);
     for index in 1..=100_u64 {
         let command = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",

@@ -6,7 +6,6 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::journal::domain::event_digest::{shard_for, xor_digest_in_place};
-use crate::journal::domain::idempotency_window::{generation_for, oldest_generation};
 use crate::journal::infrastructure::storage::dedupe_generation_store::{
     append_entries, generation_path, pending_entry_count, persist_meta, remove_generation_dir,
     seal_generation,
@@ -14,6 +13,7 @@ use crate::journal::infrastructure::storage::dedupe_generation_store::{
 use crate::journal::infrastructure::storage::dedupe_index::{
     DedupeIndex, DedupeRecord, BACKGROUND_FLUSH_ENTRIES,
 };
+use crate::shared_kernel::idempotency_window::{generation_for, oldest_generation};
 
 impl DedupeIndex {
     pub(crate) fn maintain_at(&self, now: DateTime<Utc>, force: bool) -> Result<usize> {

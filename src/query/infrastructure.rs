@@ -5,3 +5,5 @@
 pub(crate) mod file_query_job_store;
 pub(crate) mod sift_api_client;
 pub(crate) mod store_query_client;
+
+pub(crate) mod api_port_adapter;

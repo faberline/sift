@@ -8,7 +8,7 @@ pub(crate) mod infrastructure;
 pub(crate) mod interfaces;
 
 pub use application::projection_runtime::{
-    Projection, ProjectionRuntime, PROJECTION_BATCH_SIZE, PROJECTION_RETRY_AFTER_SECONDS,
+    ProjectionRuntime, PROJECTION_BATCH_SIZE, PROJECTION_RETRY_AFTER_SECONDS,
     PROJECTION_SNAPSHOT_INTERVAL_EVENTS,
 };
 pub use domain::log::{
@@ -30,6 +30,8 @@ pub use infrastructure::logging_projection::LoggingProjection;
 pub use infrastructure::metric_projection::MetricProjection;
 pub use infrastructure::trace_projection::TraceProjection;
 pub use service_projection::{
-    ProjectionCheckpoint, ProjectionDescriptor, ProjectionLag, ProjectionStateEnvelope,
-    RebuildComparison, PROJECTION_STATE_FORMAT_VERSION,
+    ProjectionCheckpoint, ProjectionStateEnvelope, PROJECTION_STATE_FORMAT_VERSION,
 };
+
+pub use domain::projection::Projection;
+pub use domain::runtime_metadata::{ProjectionDescriptor, ProjectionLag, RebuildComparison};

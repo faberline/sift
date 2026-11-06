@@ -7,7 +7,7 @@ use std::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use service_k8s::{ManagedService, ReadyFacts};
-use sift::operator::{AuthMode, Sift};
+use sift::operations::{AuthMode, Sift};
 
 fn sift_output(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_sift"))
@@ -415,7 +415,7 @@ async fn reconcile_fails_closed_when_the_kubernetes_api_has_no_ready_endpoint() 
 
 #[test]
 fn operator_yaml_is_parseable_and_contains_gke_control_plane_dependencies() {
-    let crd = parse_yaml_documents(&sift::deploy::crd_yaml());
+    let crd = parse_yaml_documents(&sift::operations::crd_yaml());
     let crd = object(&crd, "CustomResourceDefinition", "sifts.sift.axiom.dev");
     let spec_schema = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
         ["spec"]["properties"];
@@ -431,7 +431,7 @@ fn operator_yaml_is_parseable_and_contains_gke_control_plane_dependencies() {
         "string"
     );
 
-    let yaml = sift::deploy::operator_yaml_with_image(
+    let yaml = sift::operations::operator_yaml_with_image(
         "observability-system",
         "asia-east1-docker.pkg.dev/example/axiom/sift:gke-test",
     )
@@ -520,8 +520,10 @@ fn operator_yaml_is_parseable_and_contains_gke_control_plane_dependencies() {
                 .as_array()
                 .is_some_and(|resources| resources.contains(&json!("endpoints")))
     }));
-    assert!(sift::deploy::operator_yaml_with_image("INVALID", "example.invalid/sift:1").is_err());
-    assert!(sift::deploy::operator_yaml_with_image("sift-system", "{invalid-yaml}").is_err());
+    assert!(
+        sift::operations::operator_yaml_with_image("INVALID", "example.invalid/sift:1").is_err()
+    );
+    assert!(sift::operations::operator_yaml_with_image("sift-system", "{invalid-yaml}").is_err());
 }
 
 #[test]
@@ -824,7 +826,7 @@ fn unsupported_membership_is_refused_in_status_without_weakening_the_rendered_qu
 
 #[test]
 fn mvp_crd_and_operator_render_archive_restore_limits_and_role_storage() {
-    let crd = parse_yaml_documents(&sift::deploy::crd_yaml());
+    let crd = parse_yaml_documents(&sift::operations::crd_yaml());
     let crd = object(&crd, "CustomResourceDefinition", "sifts.sift.axiom.dev");
     let spec_schema = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
         ["spec"]["properties"];

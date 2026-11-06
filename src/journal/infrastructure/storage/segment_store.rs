@@ -9,11 +9,11 @@ use std::sync::Mutex;
 
 use anyhow::{bail, Context, Result};
 
-use crate::journal::domain::segment_manifest::{AppendLocation, SegmentManifest};
-use crate::journal::domain::shard_route::{bucket_for, Route};
 use crate::journal::infrastructure::storage::segment_files::{
     event_time_unix_nano, files_with_extension, read_events, route_from_path, verify_segment,
 };
+use crate::shared_kernel::segment_manifest::{AppendLocation, SegmentManifest};
+use crate::shared_kernel::shard_route::{bucket_for, Route};
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(super) const FRAMED_LOG_HEADER_BYTES: u64 = 16;

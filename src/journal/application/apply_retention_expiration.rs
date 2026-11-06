@@ -7,13 +7,12 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::journal::application::dedupe_window::rebuild_dedupe_index;
+use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
 use crate::journal::domain::recent_cursor::recent_cursor_map;
-use crate::journal::infrastructure::canonical_recovery_reader::CanonicalRecoveryReader;
-use crate::journal::infrastructure::durable_journal::DurableJournal;
 use crate::shared_kernel::event_content_digest::xor_digest;
 
-impl DurableJournal {
+impl JournalRuntime {
     pub(crate) fn evict_resident_before(&self, cutoff: DateTime<Utc>) -> Result<usize> {
         let mut state = self.state.write().expect("journal state lock poisoned");
         let before = state.recent_events.len();
@@ -40,13 +39,12 @@ impl DurableJournal {
         retained_prefix_digest: [u8; 32],
         repair_dedupe: bool,
     ) -> Result<()> {
-        let retention_status =
-            crate::archive::application::archive_status_queries::committed_status(self.data_dir())?
-                .context("expiration requires a committed archive")?;
+        let retention_status = self
+            .archive_read
+            .committed_status(self.data_dir())?
+            .context("expiration requires a committed archive")?;
         let retention_generation = retention_status.retention_generation;
-        let archived = crate::archive::application::archive_status_queries::committed_watermarks(
-            self.data_dir(),
-        )?;
+        let archived = self.archive_read.committed_watermarks(self.data_dir())?;
         let mut state = self.state.write().expect("journal state lock poisoned");
         if !repair_dedupe && state.total_events < archived_prefix_events {
             bail!("journal contains fewer events than its prior archive prefix");
@@ -84,9 +82,9 @@ impl DurableJournal {
         state.total_events = retained_events;
         let suffix_digest = if repair_dedupe {
             let mut digest = [0_u8; 32];
-            let mut recovery = CanonicalRecoveryReader::open(
-                &self.storage,
-                &self.wal,
+            let mut recovery = self.resources.reader(
+                self.storage.as_ref(),
+                self.wal.as_ref(),
                 archived,
                 archived.max_cursor(),
                 true,
@@ -107,16 +105,20 @@ impl DurableJournal {
         state.event_content_digest = xor_digest(retained_prefix_digest, suffix_digest);
         state.retention_generation = retention_generation;
         let last_cursor = state.last_cursor;
-        crate::storage::JournalHead::new(last_cursor, retained_events)
-            .with_projection_generation(state.projection_generation)
-            .with_retention_generation(retention_generation)
-            .persist(self.data_dir())?;
+        self.resources.persist_head(
+            self.data_dir(),
+            &crate::journal::domain::journal_head::JournalHead::new(last_cursor, retained_events)
+                .with_projection_generation(state.projection_generation)
+                .with_retention_generation(retention_generation),
+        )?;
         if repair_dedupe {
             rebuild_dedupe_index(
                 self.data_dir(),
-                &self.storage,
-                &self.wal,
-                &self.dedupe,
+                self.resources.as_ref(),
+                self.archive_read.as_ref(),
+                self.storage.as_ref(),
+                self.wal.as_ref(),
+                self.dedupe.as_ref(),
                 archived,
                 last_cursor,
             )?;

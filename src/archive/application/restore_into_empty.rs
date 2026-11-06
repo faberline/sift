@@ -1,59 +1,58 @@
 //! Restoring an archive into an empty data directory, page by page.
 
+use crate::archive::application::archive_services::ArchiveServices;
+
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
-use crate::archive::application::archive_receipts::ArchiveReceipt;
+use crate::archive::application::manifest_validation::validate_archive_manifest;
+use crate::archive::application::signal_service::SignalService as ArchiveSignalStream;
 use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_event_time::event_time_unix_nano;
-use crate::archive::domain::archive_manifest::ArchiveManifest;
-use crate::archive::domain::archive_manifest_validator::validate_archive_manifest;
 use crate::archive::domain::blob_hash_set::BlobHashSet;
+use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::archive::domain::event_set_digest::{include_event_content, include_event_id};
-use crate::archive::infrastructure::archive_catalog::{
-    catalog_for_uri, decode_archive_catalog_entry,
-};
-use crate::archive::infrastructure::archive_commit_state::adopt_verified_archive_receipt;
-use crate::archive::infrastructure::archive_integrity::sha256;
-use crate::archive::infrastructure::archive_signal_stream::ArchiveSignalStream;
-use crate::archive::infrastructure::dedupe_receipt_archive::fetch_dedupe_receipts;
-use crate::archive::infrastructure::restore_state::require_empty_restore_target;
-use crate::archive::infrastructure::spill_catalog::SpillCatalog;
-use crate::journal::infrastructure::storage::blob_store::BlobStore;
-use crate::journal::infrastructure::storage::shard_router::write_epoch_maps;
-use crate::node::domain::storage_role::StorageRole;
-use crate::node::infrastructure::data_layout::DataLayout;
+use crate::shared_kernel::archive_manifest::ArchiveManifest;
+use crate::shared_kernel::archive_receipts::ArchiveReceipt;
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
-pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Result<ArchiveManifest> {
-    require_empty_restore_target(target)?;
-    let manifest_bytes = service_backup::fetch_backup_object(manifest_uri)?;
-    let manifest_sha256 = sha256(&manifest_bytes);
+pub(super) fn restore_gcs_into_empty(
+    services: &ArchiveServices,
+    manifest_uri: &str,
+    target: &Path,
+) -> Result<ArchiveManifest> {
+    services.require_empty_restore_target(target)?;
+    let manifest_bytes = services.resources.fetch_object(manifest_uri)?;
+    let manifest_sha256 = sha256_hex(&manifest_bytes);
     let mut manifest: ArchiveManifest =
         serde_json::from_slice(&manifest_bytes).context("decode Sift archive manifest")?;
     validate_archive_manifest(&manifest)?;
 
-    let layout = DataLayout::open(target, StorageRole::All)?;
+    let layout = services.open_restore_layout(target)?;
     if layout.manifest().cluster_id == manifest.source_cluster_id {
         bail!("cold restore must create a new Sift cluster ID");
     }
     drop(layout);
-    write_epoch_maps(target, &manifest.epochs)?;
-    let journal = crate::journal::infrastructure::durable_journal::DurableJournal::open(target)?;
+    services
+        .restore_target
+        .write_epochs(target, &manifest.epochs)?;
+    let journal = services.restore_target.open_journal(target)?;
     let hot_cutoff_nanos = (Utc::now() - chrono::Duration::days(30))
         .timestamp_nanos_opt()
         .context("30-day hot restore cutoff is outside the nanosecond range")?;
-    let catalog = catalog_for_uri(&manifest.catalog_uri)?;
+    let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     let stream = |signal| -> Result<ArchiveSignalStream> {
         let prefix = format!("segment/{signal}/");
-        Ok(ArchiveSignalStream::new(
+        Ok(services.resources.signal_stream(
             target,
             catalog.reader_after(&manifest.catalog_root, &prefix)?,
             signal,
+            0,
         ))
     };
     let mut streams = [
@@ -63,8 +62,12 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
     ];
     let mut page = Vec::with_capacity(10_000);
     let spill_parent = target.join("tmp");
-    let mut hot_blob_hashes = SpillCatalog::new(&spill_parent, "restore-hot-blobs-")?;
-    let mut blob_reference_counts = SpillCatalog::new(&spill_parent, "restore-blob-counts-")?;
+    let mut hot_blob_hashes = services
+        .resources
+        .spill(&spill_parent, "restore-hot-blobs-")?;
+    let mut blob_reference_counts = services
+        .resources
+        .spill(&spill_parent, "restore-blob-counts-")?;
     let mut event_count = 0_u64;
     let mut last_cursor = 0_u64;
     let mut event_id_digest = [0_u8; 32];
@@ -140,7 +143,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
         bail!("Sift archive manifest count, digest, watermark, or Raft snapshot index mismatch");
     }
 
-    let blob_store = BlobStore::open(target, 65_536)?;
+    let blob_store = services.restore_target.open_blob_writer(target, 65_536)?;
     let mut restored_blobs = 0_u64;
     for entry in catalog.reader(&manifest.catalog_root)? {
         let ArchiveCatalogItem::Blob(blob) = decode_archive_catalog_entry(entry?)? else {
@@ -157,8 +160,8 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
                 blob.reference.hash
             );
         }
-        let bytes = service_backup::fetch_backup_object(&blob.object_uri)?;
-        let actual_hash = format!("sha256:{}", sha256(&bytes));
+        let bytes = services.resources.fetch_object(&blob.object_uri)?;
+        let actual_hash = format!("sha256:{}", sha256_hex(&bytes));
         if actual_hash != blob.reference.hash || bytes.len() as u64 != blob.reference.size {
             bail!(
                 "restored blob {} failed hash/size verification",
@@ -184,7 +187,7 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
         let ArchiveCatalogItem::Receipt(receipt) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
-        let rows = fetch_dedupe_receipts(&receipt)?;
+        let rows = services.fetch_dedupe_receipts(&receipt)?;
         journal.restore_archive_receipts(&rows, manifest.raft_snapshot_index)?;
         restored_receipt_segments = restored_receipt_segments.saturating_add(1);
     }
@@ -198,9 +201,9 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
         manifest_sha256,
         manifest: manifest.clone(),
     };
-    adopt_verified_archive_receipt(target, &receipt)?;
+    services.adopt_verified_archive_receipt(target, &receipt)?;
     drop(journal);
-    let mut layout = DataLayout::open(target, StorageRole::All)?;
+    let mut layout = services.open_restore_layout(target)?;
     layout.mark_restored_from(manifest_uri)?;
     manifest.segments.clear();
     manifest.blobs.clear();
@@ -208,12 +211,16 @@ pub(super) fn restore_gcs_into_empty(manifest_uri: &str, target: &Path) -> Resul
     Ok(manifest)
 }
 
-fn restore_archive_page(
-    journal: &crate::journal::infrastructure::durable_journal::DurableJournal,
+fn restore_archive_page<H>(
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
     events: Vec<StoredEvent>,
     hot_cutoff_nanos: i64,
-    hot_blob_hashes: &mut impl BlobHashSet,
-) -> Result<()> {
+    hot_blob_hashes: &mut H,
+) -> Result<()>
+where
+    H: BlobHashSet,
+    anyhow::Error: From<H::Error>,
+{
     let mut hot = Vec::with_capacity(events.len());
     let mut cold = Vec::new();
     for event in events {

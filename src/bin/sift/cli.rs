@@ -32,7 +32,7 @@ pub(super) enum Command {
     /// Run the unified h2c/HTTP1 operational-event service.
     Serve(ServeArgs),
     /// Collect axiom.service.log.v1 JSONL from a file, stdin, or Kubernetes CRI logs.
-    Collect(CollectArgs),
+    Collect(Box<CollectArgs>),
     /// Run one versioned logs, metrics, or traces query through the Sift API.
     Query(QueryArgs),
     /// Serve the read-only Sift MCP tools.

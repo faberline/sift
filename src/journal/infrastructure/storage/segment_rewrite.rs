@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::journal::domain::segment_manifest::{AppendLocation, SegmentManifest, SegmentState};
-use crate::journal::domain::shard_route::{bucket_for, Route};
 use crate::journal::infrastructure::storage::segment_files::{
     event_time_unix_nano, read_events, sha256_file, verify_segment,
 };
 use crate::journal::infrastructure::storage::segment_store::SegmentStore;
+use crate::shared_kernel::segment_manifest::{AppendLocation, SegmentManifest, SegmentState};
+use crate::shared_kernel::shard_route::{bucket_for, Route};
 use crate::shared_kernel::stored_event::StoredEvent;
 
 impl SegmentStore {

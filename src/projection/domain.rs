@@ -9,3 +9,9 @@ pub(crate) mod metric_aggregation;
 pub(crate) mod metric_memory_size;
 pub(crate) mod metric_series;
 pub(crate) mod trace;
+
+pub(crate) mod log_record_normalizer;
+pub(crate) mod projection;
+pub(crate) mod replay_port;
+pub(crate) mod runtime_metadata;
+pub(crate) mod runtime_port;

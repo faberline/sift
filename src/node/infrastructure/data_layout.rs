@@ -4,11 +4,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use storage_durable::{DataRoot, DataRootPolicy};
 
 use crate::node::domain::storage_role::StorageRole;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 pub const DEFAULT_DATA_DIR: &str = "/var/lib/sift";
 
@@ -39,16 +38,7 @@ const DIRECTORIES: &[&str] = &[
     "tmp",
 ];
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LayoutManifest {
-    pub format_version: u32,
-    pub cluster_id: String,
-    pub node_id: String,
-    pub role: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub restored_from: Option<String>,
-}
+pub use crate::shared_kernel::layout_manifest::LayoutManifest;
 
 #[derive(Clone, Copy)]
 struct SiftDataRootPolicy {
@@ -79,7 +69,7 @@ impl DataRootPolicy for SiftDataRootPolicy {
             .context("system clock is before Unix epoch")?
             .as_nanos();
         let seed = format!("{}:{}:{}", canonical.display(), std::process::id(), now);
-        let digest = hex::encode(Sha256::digest(seed.as_bytes()));
+        let digest = sha256_hex(seed.as_bytes());
         Ok(LayoutManifest {
             format_version: FORMAT_VERSION,
             cluster_id: format!("cluster-{}", &digest[..16]),

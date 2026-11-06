@@ -4,6 +4,7 @@
 
 pub(crate) mod archive_checkpoint;
 pub(crate) mod archive_checkpoint_install;
+pub(crate) mod checkpoint_framing;
 pub(crate) mod command_codec;
 pub(crate) mod command_committer;
 pub(crate) mod control_state_store;
@@ -17,3 +18,10 @@ pub(crate) mod sift_state_machine_checkpoints;
 pub(crate) mod snapshot_format;
 pub(crate) mod snapshot_restore;
 pub(crate) mod snapshot_writer;
+
+#[cfg(test)]
+mod checkpoint_compatibility_tests;
+
+pub(crate) mod checkpoint_port_adapter;
+
+pub(crate) mod raft_checkpoint_adapter;

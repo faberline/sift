@@ -9,7 +9,7 @@ use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair,
 };
-use sift::{durability::SiftStateMachine, DurableJournal, EventEnvelope, EventQuery, SignalKind};
+use sift::{journal::SiftStateMachine, DurableJournal, EventEnvelope, EventQuery, SignalKind};
 use tempfile::TempDir;
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 

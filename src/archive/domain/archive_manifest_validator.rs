@@ -3,14 +3,59 @@
 
 use std::collections::BTreeSet;
 
-use anyhow::{bail, Context, Result};
+use thiserror::Error;
 
-use crate::archive::domain::archive_manifest::{
+use crate::archive::domain::manifest_validation_policy::{
+    ManifestValidationPolicy, UriValidationError,
+};
+use crate::shared_kernel::archive_manifest::{
     ArchiveDedupeReceipt, ArchiveManifest, ARCHIVE_FORMAT_VERSION,
 };
 use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
 
-pub(in crate::archive) fn validate_dedupe_receipt(receipt: &ArchiveDedupeReceipt) -> Result<()> {
+#[derive(Debug, Error)]
+pub(crate) enum ArchiveManifestError {
+    #[error("archive dedupe receipt has invalid metadata")]
+    InvalidDedupeReceipt,
+    #[error("Sift archive manifest has invalid identity or digest fields")]
+    InvalidIdentity,
+    #[error(transparent)]
+    Encode(#[from] serde_json::Error),
+    #[error("Sift archive root manifest exceeds 64 KiB")]
+    RootTooLarge,
+    #[error("Sift archive manifest has invalid coverage or retained watermarks")]
+    InvalidWatermarks,
+    #[error("Sift archive retention delta has invalid source metadata")]
+    InvalidRetentionDelta,
+    #[error("Sift archive retention scan has an invalid catalog cursor")]
+    InvalidRetentionCursor,
+    #[error("Sift archive retention scan lacks its generation delta")]
+    MissingGenerationDelta,
+    #[error("Sift archive manifest has an invalid segment object")]
+    InvalidSegment,
+    #[error("Sift archive manifest event count exhausted u64")]
+    EventCountOverflow,
+    #[error("Sift archive manifest segment totals do not match retained event metadata")]
+    SegmentTotals,
+    #[error("Sift archive manifest has an invalid blob object")]
+    InvalidBlob,
+    #[error("Sift archive manifest blob count does not match its catalog root")]
+    BlobCount,
+    #[error("Sift archive manifest has an invalid or unsorted GC object URI")]
+    InvalidGcObjectUri,
+    #[error("Sift archive manifest GC count does not match its catalog root")]
+    GcCount,
+    #[error("validate archive manifest GC object URI {uri}")]
+    GcObjectUri {
+        uri: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+}
+
+pub(in crate::archive) fn validate_dedupe_receipt(
+    receipt: &ArchiveDedupeReceipt,
+) -> Result<(), ArchiveManifestError> {
     if !receipt.object_uri.starts_with("gs://")
         || receipt.bytes == 0
         || receipt.sha256.len() != 64
@@ -20,12 +65,18 @@ pub(in crate::archive) fn validate_dedupe_receipt(receipt: &ArchiveDedupeReceipt
         || receipt.first_cursor > receipt.last_cursor
         || receipt.min_acknowledged_at_unix_nano > receipt.max_acknowledged_at_unix_nano
     {
-        bail!("archive dedupe receipt has invalid metadata");
+        return Err(ArchiveManifestError::InvalidDedupeReceipt);
     }
     Ok(())
 }
 
-pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()> {
+pub(crate) fn validate_archive_manifest<P: ManifestValidationPolicy + ?Sized>(
+    manifest: &ArchiveManifest,
+    policy: &P,
+) -> Result<(), ArchiveManifestError>
+where
+    P::Error: Into<UriValidationError>,
+{
     if manifest.format_version != ARCHIVE_FORMAT_VERSION
         || manifest.source_cluster_id.trim().is_empty()
         || manifest.source_node_id.trim().is_empty()
@@ -48,8 +99,7 @@ pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()
                 .saturating_add(manifest.blob_count)
                 .saturating_add(manifest.dedupe_receipt_count)
         || (manifest.segment_count == 0) != manifest.oldest_event_time_unix_nano.is_none()
-        || manifest.catalog_root.page_bytes_limit as usize
-            != storage_segment::DEFAULT_CATALOG_PAGE_BYTES
+        || manifest.catalog_root.page_bytes_limit as usize != policy.catalog_page_bytes()
         || manifest.gc_plan_uri.is_some() != manifest.gc_plan_root.is_some()
         || manifest
             .gc_plan_uri
@@ -61,10 +111,10 @@ pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()
             .as_ref()
             .is_some_and(|root| root.entry_count != manifest.gc_object_count)
     {
-        bail!("Sift archive manifest has invalid identity or digest fields");
+        return Err(ArchiveManifestError::InvalidIdentity);
     }
     if serde_json::to_vec(manifest)?.len() >= 64 * 1024 {
-        bail!("Sift archive root manifest exceeds 64 KiB");
+        return Err(ArchiveManifestError::RootTooLarge);
     }
     if manifest.watermarks.max_cursor() > manifest.raft_snapshot_index
         || manifest.event_count > manifest.raft_snapshot_index
@@ -72,7 +122,7 @@ pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()
         || manifest.retained_watermarks.metrics > manifest.watermarks.metrics
         || manifest.retained_watermarks.traces > manifest.watermarks.traces
     {
-        bail!("Sift archive manifest has invalid coverage or retained watermarks");
+        return Err(ArchiveManifestError::InvalidWatermarks);
     }
     if let Some(delta) = &manifest.retention_delta {
         if !delta.source_manifest_uri.starts_with("gs://")
@@ -89,21 +139,21 @@ pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()
             || manifest.retention_generation != delta.source_generation.saturating_add(1)
             || manifest.event_count > delta.source_event_count
         {
-            bail!("Sift archive retention delta has invalid source metadata");
+            return Err(ArchiveManifestError::InvalidRetentionDelta);
         }
     }
     if let Some(scan) = &manifest.retention_scan {
         if scan.after_catalog_key.as_str() <= "segment/"
             || !scan.after_catalog_key.starts_with("segment/")
         {
-            bail!("Sift archive retention scan has an invalid catalog cursor");
+            return Err(ArchiveManifestError::InvalidRetentionCursor);
         }
         if manifest
             .retention_delta
             .as_ref()
             .is_none_or(|delta| delta.cutoff_unix_nano != scan.cutoff_unix_nano)
         {
-            bail!("Sift archive retention scan lacks its generation delta");
+            return Err(ArchiveManifestError::MissingGenerationDelta);
         }
     }
     let mut event_count = 0_u64;
@@ -134,11 +184,11 @@ pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()
                 != segment.max_acknowledged_at_unix_nano
             || !segment_ids.insert(segment.source.segment_id.clone())
         {
-            bail!("Sift archive manifest has an invalid segment object");
+            return Err(ArchiveManifestError::InvalidSegment);
         }
         event_count = event_count
             .checked_add(segment.source.event_count)
-            .context("Sift archive manifest event count exhausted u64")?;
+            .ok_or(ArchiveManifestError::EventCountOverflow)?;
         retained_watermarks.include(segment.signal, segment.source.last_cursor);
     }
     if !manifest.segments.is_empty() || manifest.segment_count == 0 {
@@ -160,7 +210,7 @@ pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()
             || !oldest_matches
             || manifest.segments.len() as u64 != manifest.segment_count
         {
-            bail!("Sift archive manifest segment totals do not match retained event metadata");
+            return Err(ArchiveManifestError::SegmentTotals);
         }
     }
     let mut blob_hashes = BTreeSet::new();
@@ -169,27 +219,31 @@ pub(crate) fn validate_archive_manifest(manifest: &ArchiveManifest) -> Result<()
             || blob.reference.size == 0
             || !blob_hashes.insert(blob.reference.hash.clone())
         {
-            bail!("Sift archive manifest has an invalid blob object");
+            return Err(ArchiveManifestError::InvalidBlob);
         }
     }
     if (!manifest.blobs.is_empty() || manifest.blob_count == 0)
         && manifest.blobs.len() as u64 != manifest.blob_count
     {
-        bail!("Sift archive manifest blob count does not match its catalog root");
+        return Err(ArchiveManifestError::BlobCount);
     }
     let mut prior_gc_uri: Option<&str> = None;
     for uri in &manifest.gc_object_uris {
         if !uri.starts_with("gs://") || prior_gc_uri.is_some_and(|prior| prior >= uri.as_str()) {
-            bail!("Sift archive manifest has an invalid or unsorted GC object URI");
+            return Err(ArchiveManifestError::InvalidGcObjectUri);
         }
-        service_backup::GcsSink::from_exact_uri(uri)
-            .with_context(|| format!("validate archive manifest GC object URI {uri}"))?;
+        policy
+            .validate_gc_uri(uri)
+            .map_err(|source| ArchiveManifestError::GcObjectUri {
+                uri: uri.clone(),
+                source: source.into(),
+            })?;
         prior_gc_uri = Some(uri);
     }
     if (!manifest.gc_object_uris.is_empty() || manifest.gc_object_count == 0)
         && manifest.gc_object_uris.len() as u64 != manifest.gc_object_count
     {
-        bail!("Sift archive manifest GC count does not match its catalog root");
+        return Err(ArchiveManifestError::GcCount);
     }
     Ok(())
 }

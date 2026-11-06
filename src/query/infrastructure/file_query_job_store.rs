@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use sha2::{Digest, Sha256};
 
 use crate::query::domain::query_job::{validate_id, QueryJobStatusV1, QueryJobV1};
-use crate::query::interfaces::http::query_request_v1::QueryRequestV1;
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::query_request::QueryRequestV1;
+use crate::shared_kernel::query_response::QueryResponseV1;
+use crate::shared_kernel::sha256_hex::sha256_hex;
 
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
@@ -52,13 +52,13 @@ impl QueryJobStore {
     pub fn create(&self, request: QueryRequestV1) -> Result<QueryJobV1> {
         let created_at = now();
         let nonce = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
-        let query_id = hex::encode(Sha256::digest(format!(
+        let query_id = sha256_hex(format!(
             "{}:{}:{}:{}",
             std::process::id(),
             created_at,
             nonce,
             request.project
-        )))[..32]
+        ))[..32]
             .to_string();
         let job = QueryJobV1 {
             query_id,
@@ -140,20 +140,22 @@ impl QueryJobStore {
     }
 }
 
-impl service_executor::JobState<QueryResponseV1> for QueryJobStore {
+impl crate::query::domain::job_store_port::QueryJobStorePort for QueryJobStore {
     type Error = anyhow::Error;
-    type Id = String;
-
-    fn mark_running(&self, id: &Self::Id) -> Result<()> {
-        QueryJobStore::mark_running(self, id)
+    fn create(&self, request: QueryRequestV1) -> Result<QueryJobV1> {
+        QueryJobStore::create(self, request)
     }
-
-    fn succeed(&self, id: &Self::Id, output: QueryResponseV1) -> Result<()> {
-        QueryJobStore::succeed(self, id, output)
+    fn get(&self, query_id: &str) -> Result<Option<QueryJobV1>> {
+        QueryJobStore::get(self, query_id)
     }
-
-    fn fail(&self, id: &Self::Id, message: String) -> Result<()> {
-        QueryJobStore::fail(self, id, message)
+    fn mark_running(&self, query_id: &str) -> Result<()> {
+        QueryJobStore::mark_running(self, query_id)
+    }
+    fn succeed(&self, query_id: &str, result: QueryResponseV1) -> Result<()> {
+        QueryJobStore::succeed(self, query_id, result)
+    }
+    fn fail(&self, query_id: &str, message: String) -> Result<()> {
+        QueryJobStore::fail(self, query_id, message)
     }
 }
 

@@ -1,4 +1,4 @@
-use sift::storage::StorageConfig;
+use sift::journal::StorageConfig;
 
 #[test]
 fn each_signal_starts_with_one_shard_and_large_immutable_segments() {

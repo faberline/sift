@@ -3,5 +3,7 @@
 //! the query role.
 
 pub(crate) mod image_reference;
+pub(crate) mod instance_names;
+pub(crate) mod instance_renderer;
 pub(crate) mod namespace_name;
 pub(crate) mod route_class;

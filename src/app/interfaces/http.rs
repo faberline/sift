@@ -4,3 +4,4 @@
 pub(crate) mod api_error;
 pub(crate) mod openapi;
 pub(crate) mod router;
+mod schemas;

@@ -1,11 +1,11 @@
 //! Whether a query read the archive, and the stats and warnings that follow.
 
-use crate::query::interfaces::http::query_response_v1::QueryResponseV1;
+use crate::shared_kernel::query_response::QueryResponseV1;
 
 #[derive(Debug)]
 pub(crate) enum ArchiveQueryStatus {
     NotRequired,
-    Ready(crate::archive::application::archive_receipts::ArchiveReplay),
+    Ready(crate::shared_kernel::archive_receipts::ArchiveReplay),
     Unavailable(String),
 }
 

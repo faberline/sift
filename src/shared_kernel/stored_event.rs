@@ -2,11 +2,10 @@
 //! accepted it, and the event itself.
 
 use serde::{Deserialize, Deserializer, Serialize};
-use utoipa::ToSchema;
 
 use crate::shared_kernel::event::{IncomingEvent, OperationalEventV2 as EventEnvelope};
 
-#[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StoredEvent {
     pub cursor: u64,
     /// Sift acceptance time. Exact event-id idempotency starts from this time.

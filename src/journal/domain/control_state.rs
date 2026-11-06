@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::journal::domain::retention_fence::RetentionFenceV1;
+use crate::shared_kernel::retention_fence::RetentionFenceV1;
 
 pub(in crate::journal) const CONTROL_STATE_FORMAT_VERSION: u16 = 1;
 

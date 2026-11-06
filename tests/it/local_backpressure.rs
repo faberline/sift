@@ -18,7 +18,7 @@ fn production_defaults_admit_the_mvp_target_with_headroom() {
 
 #[test]
 fn disk_levels_are_warning_at_70_backpressure_at_80_and_critical_at_90_percent() {
-    use sift::storage::{CapacityLevel, LocalCapacity};
+    use sift::node::{CapacityLevel, LocalCapacity};
 
     for (bytes, expected) in [
         (69, CapacityLevel::Normal),

@@ -4,11 +4,11 @@
 use serde_json::{json, Value};
 use service_k8s::render::{self, RenderCtx};
 
-use crate::operations::infrastructure::k8s::constants::{AGENT_COMPONENT, HTTP_PORT};
+use crate::operations::domain::instance_names::{AGENT_COMPONENT, HTTP_PORT};
 use crate::operations::infrastructure::k8s::role_workloads::{
     role_extra_labels, role_name, role_selector_labels,
 };
-use crate::operations::interfaces::crd::sift_spec::{AuthMode, SiftSpec};
+use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
 pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> render::DaemonSetPlan {
     let name = role_name(cx, AGENT_COMPONENT);

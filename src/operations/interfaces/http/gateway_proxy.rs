@@ -1,45 +1,11 @@
 //! The gateway: Sift's route policy for the shared reverse-proxy runtime, which
 //! picks the store or query upstream for each request.
 
-use std::time::Duration;
-
 use anyhow::{bail, Context, Result};
-use axum::http::{Method, Uri};
 use axum::Router;
 use url::Url;
 
-use crate::operations::domain::route_class::is_query_path;
-
-const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(60);
-
-#[derive(Clone)]
-struct SiftRolePolicy {
-    store: Url,
-    query: Option<Url>,
-    max_body_bytes: usize,
-}
-
-impl service_http::ReverseProxyPolicy for SiftRolePolicy {
-    fn select_upstream(
-        &self,
-        _method: &Method,
-        uri: &Uri,
-    ) -> Result<Url, service_http::ReverseProxySelectionError> {
-        Ok(if self.query.is_some() && is_query_path(uri.path()) {
-            self.query.as_ref().expect("query endpoint checked").clone()
-        } else {
-            self.store.clone()
-        })
-    }
-
-    fn max_body_bytes(&self) -> usize {
-        self.max_body_bytes
-    }
-
-    fn upstream_timeout(&self) -> Duration {
-        UPSTREAM_TIMEOUT
-    }
-}
+use crate::operations::application::gateway_policy::SiftRolePolicy;
 
 pub fn gateway_router(
     store_endpoint: &str,
@@ -62,11 +28,7 @@ fn router(
     let query = query_endpoint
         .map(|value| endpoint(value, "query"))
         .transpose()?;
-    service_http::reverse_proxy_router(SiftRolePolicy {
-        store,
-        query,
-        max_body_bytes,
-    })
+    service_http::reverse_proxy_router(SiftRolePolicy::new(store, query, max_body_bytes))
 }
 
 fn endpoint(value: &str, role: &str) -> Result<Url> {

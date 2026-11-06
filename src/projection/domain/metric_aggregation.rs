@@ -3,14 +3,15 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::Result;
-
 use crate::projection::domain::metric::{
-    MetricAggregation, MetricHistogramV1, MetricPointV1, MetricRollupV1, ROLLUP_WINDOWS_SECONDS,
+    MetricAggregation, MetricError, MetricHistogramV1, MetricPointV1, MetricRollupV1,
+    ROLLUP_WINDOWS_SECONDS,
 };
 use crate::MetricTemporality;
 
-pub(in crate::projection) fn make_rollups(points: &[MetricPointV1]) -> Result<Vec<MetricRollupV1>> {
+pub(in crate::projection) fn make_rollups(
+    points: &[MetricPointV1],
+) -> Result<Vec<MetricRollupV1>, MetricError> {
     let mut rollups = Vec::new();
     for window_seconds in ROLLUP_WINDOWS_SECONDS {
         let window_nanos = (window_seconds as i64) * 1_000_000_000;
@@ -107,13 +108,13 @@ pub(in crate::projection) fn aggregate(
 
 pub(in crate::projection) fn merge_histograms(
     points: &[MetricPointV1],
-) -> Result<Option<MetricHistogramV1>> {
+) -> Result<Option<MetricHistogramV1>, MetricError> {
     merge_histogram_refs(points.iter().filter_map(|point| point.histogram.as_ref()))
 }
 
 fn merge_histogram_refs<'a>(
     histograms: impl Iterator<Item = &'a MetricHistogramV1>,
-) -> Result<Option<MetricHistogramV1>> {
+) -> Result<Option<MetricHistogramV1>, MetricError> {
     let mut merged: Option<MetricHistogramV1> = None;
     for histogram in histograms {
         match &mut merged {

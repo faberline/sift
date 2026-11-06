@@ -1,7 +1,7 @@
 //! The resident memory a metric point, chunk or series is charged against the
 //! memtable limit, and the counters tests read of how often it is measured.
 
-use anyhow::{bail, Context, Result};
+use thiserror::Error;
 
 use crate::projection::domain::metric::{MetricChunkV1, MetricPointV1};
 use crate::projection::domain::metric_series::StoredMetricSeries;
@@ -17,32 +17,44 @@ thread_local! {
     };
 }
 
+#[derive(Debug, Error)]
+pub(in crate::projection) enum MetricMemoryError {
+    #[error("resident metric chunk has no trusted size metadata")]
+    UntrustedChunkSize,
+    #[error("metric resident byte accounting overflowed")]
+    ByteAccountingOverflow,
+    #[error("measure metric memtable point")]
+    MeasurePoint(#[source] serde_json::Error),
+}
+
 pub(in crate::projection) fn metric_series_memory_bytes(
     series: &StoredMetricSeries,
-) -> Result<usize> {
+) -> Result<usize, MetricMemoryError> {
     series.chunks.iter().try_fold(0_usize, |total, chunk| {
         if chunk.point_count == 0 || chunk.materialized_bytes == 0 {
-            bail!("resident metric chunk has no trusted size metadata");
+            return Err(MetricMemoryError::UntrustedChunkSize);
         }
         total
             .checked_add(chunk.materialized_bytes)
-            .context("metric resident byte accounting overflowed")
+            .ok_or(MetricMemoryError::ByteAccountingOverflow)
     })
 }
 
-pub(in crate::projection) fn metric_chunk_memory_bytes(chunk: &MetricChunkV1) -> Result<usize> {
+pub(in crate::projection) fn metric_chunk_memory_bytes(
+    chunk: &MetricChunkV1,
+) -> Result<usize, MetricMemoryError> {
     chunk.points.iter().try_fold(0_usize, |total, point| {
         Ok(total.saturating_add(metric_point_memory_bytes(point)?))
     })
 }
 
-pub(super) fn metric_point_memory_bytes(point: &MetricPointV1) -> Result<usize> {
+pub(super) fn metric_point_memory_bytes(point: &MetricPointV1) -> Result<usize, MetricMemoryError> {
     #[cfg(test)]
     METRIC_POINT_MEMORY_MEASUREMENTS.with(|measurements| {
         measurements.set(measurements.get().saturating_add(1));
     });
     let encoded_bytes = serde_json::to_vec(point)
-        .context("measure metric memtable point")?
+        .map_err(MetricMemoryError::MeasurePoint)?
         .len();
     let exemplar_bytes = point.exemplars.iter().fold(0_usize, |total, exemplar| {
         total

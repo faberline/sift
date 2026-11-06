@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt};
 
 use sift::{
-    storage::SignalWal, DurableJournal, EventEnvelope, EventQuery, MetricPoint, MetricTemporality,
+    journal::SignalWal, DurableJournal, EventEnvelope, EventQuery, MetricPoint, MetricTemporality,
     SignalKind, StoredEvent,
 };
 
