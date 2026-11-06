@@ -1,0 +1,178 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sift-smoke-probe
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sift-smoke-probe
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    resourceNames: [sift-smoke-0]
+    verbs: [get, delete]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    resourceNames: [data-sift-smoke-0]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sift-smoke-probe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sift-smoke-probe
+subjects:
+  - kind: ServiceAccount
+    name: sift-smoke-probe
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sift-smoke-probe
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sift-smoke-probe
+    spec:
+      serviceAccountName: sift-smoke-probe
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      nodeSelector:
+        faberline.dev/pool: sift-client
+      tolerations:
+        - key: faberline.dev/pool
+          operator: Equal
+          value: sift-client
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: fixture
+          image: docker.io/alpine/k8s:1.32.13@sha256:5efac3ed9955c8747296d520539cded681f4ef5dbb73fb591141df282b61cc35
+          command: [/bin/sh, /scripts/fixture.sh]
+          workingDir: /work
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: work
+              mountPath: /work
+        - name: collector
+          image: sift
+          args:
+            - collect
+            - --source
+            - /work/event.jsonl
+            - --source-id
+            - sift-gke-smoke-$(POD_UID)
+            - --endpoint
+            - http://sift-smoke:7380
+            - --project
+            - local
+            - --environment
+            - test
+            - --checkpoint
+            - /work/checkpoint.json
+            - --quarantine
+            - /work/rejected.jsonl
+            - --batch-size
+            - "1"
+            - --max-retries
+            - "2"
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      containers:
+        - name: verify
+          image: docker.io/alpine/k8s:1.32.13@sha256:5efac3ed9955c8747296d520539cded681f4ef5dbb73fb591141df282b61cc35
+          command: [/bin/sh, /scripts/verify.sh]
+          workingDir: /work
+          env:
+            - name: SIFT_URL
+              value: http://sift-smoke:7380
+            - name: HOME
+              value: /work
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: work
+              mountPath: /work
+            - name: probe-api
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: sift-smoke-scripts
+        - name: work
+          emptyDir:
+            sizeLimit: 4Mi
+        - name: probe-api
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
