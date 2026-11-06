@@ -105,8 +105,9 @@ def ports():
 def wait_ready(pid, port, path):
     until = time.monotonic() + 20
     while time.monotonic() < until:
-        require(os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None,
-                "service exited before readiness")
+        if hasattr(os, "waitid"):
+            require(os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None,
+                    "service exited before readiness")
         with closing(http.client.HTTPConnection(HOST, port, timeout=0.5)) as connection:
             try:
                 connection.request("GET", path)
