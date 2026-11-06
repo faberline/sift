@@ -41,7 +41,6 @@ pub struct InstrumentationScope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(default)]
-    #[schema(value_type = Object)]
     pub attributes: BTreeMap<String, AttributeValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_url: Option<String>,
