@@ -63,8 +63,8 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: fixture
-          image: docker.io/alpine/k8s:1.32.13@sha256:5efac3ed9955c8747296d520539cded681f4ef5dbb73fb591141df282b61cc35
-          command: [/bin/sh, /scripts/fixture.sh]
+          image: docker.io/library/python:3.13-alpine@sha256:d76f585fb0d5107dd47143da5e61554fd9cae656a30f3470f815cb8475769b6a
+          command: [python, -B, /scripts/smoke.py, fixture]
           workingDir: /work
           env:
             - name: POD_UID
@@ -127,14 +127,12 @@ spec:
               mountPath: /work
       containers:
         - name: verify
-          image: docker.io/alpine/k8s:1.32.13@sha256:5efac3ed9955c8747296d520539cded681f4ef5dbb73fb591141df282b61cc35
-          command: [/bin/sh, /scripts/verify.sh]
+          image: docker.io/library/python:3.13-alpine@sha256:d76f585fb0d5107dd47143da5e61554fd9cae656a30f3470f815cb8475769b6a
+          command: [python, -B, /scripts/smoke.py, verify]
           workingDir: /work
           env:
             - name: SIFT_URL
               value: http://sift-smoke:7380
-            - name: HOME
-              value: /work
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
