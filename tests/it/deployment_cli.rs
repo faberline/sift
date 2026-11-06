@@ -461,6 +461,11 @@ fn operator_yaml_is_parseable_and_contains_gke_control_plane_dependencies() {
             && rule["resources"] == json!(["projects"])
             && rule["verbs"] == json!(["get", "create", "update"])
     }));
+    assert!(rules.contains(&json!({
+        "apiGroups": [""],
+        "resources": ["pods"],
+        "verbs": ["get", "list"]
+    })));
     assert!(rules.iter().any(|rule| {
         rule["apiGroups"] == json!(["sift.axiom.dev"])
             && rule["resources"]
