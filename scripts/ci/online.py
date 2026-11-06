@@ -14,6 +14,7 @@ import urllib.request
 import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[2]
+CHECKER_ROOT = Path('src/aw/scripts')
 HEX40 = re.compile(r'[0-9a-f]{40}')
 SENSITIVE = re.compile(r'token|secret|password|authorization|bearer|cookie|credential|kubeconfig|private.key', re.I)
 
@@ -36,12 +37,12 @@ def load_lock(path):
     if not all(HEX40.fullmatch(v) for v in data['repositories'].values()):
         raise ValueError('dependencies must use complete commit SHAs')
     checker = data['checker']
-    if checker['repository'] != 'faberline/workspace' or not HEX40.fullmatch(checker['revision']):
+    if checker['repository'] != 'faberline/aw' or not HEX40.fullmatch(checker['revision']):
         raise ValueError('checker source must be pinned')
-    if len(checker['blobs']) != 16:
+    if len(checker['blobs']) != 15:
         raise ValueError('checker file inventory changed')
     for path, digest in checker['blobs'].items():
-        if not path.startswith('scripts/meta/') or '..' in Path(path).parts or not HEX40.fullmatch(digest):
+        if Path(path).parent != CHECKER_ROOT / 'rust_arch' or not HEX40.fullmatch(digest):
             raise ValueError('invalid checker path or blob')
     for version in (data['rust'], data['python'], data['uv'], data['docker']):
         if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
@@ -241,7 +242,9 @@ def run():
         results.append({'gate': 'all-required-ignored', 'status': 'BLOCKED', 'reason': 'pinned environment preparation failed'})
     gate('clippy', ['cargo', 'clippy', '--locked', '-p', 'sift', '--all-targets', '--', '-D', 'warnings'])
     arch_json = task / 'architecture.json'
-    arch_ok, _ = gate('canonical-architecture', [str(task / 'checker-env/bin/python'), str(task / 'checker/scripts/meta/rust_arch_contract.py'),
+    arch_entry = 'import sys; sys.path.insert(0, sys.argv.pop(1)); from rust_arch.cli import main; raise SystemExit(main())'
+    arch_ok, _ = gate('canonical-architecture', [str(task / 'checker-env/bin/python'), '-IB', '-c', arch_entry,
+        str(task / 'checker' / CHECKER_ROOT),
         'check', '--repo', str(ROOT), '--strict', '--base', identity['base_sha'], '--json', str(arch_json)], timeout=180)
     if arch_ok and not architecture_clean(arch_json):
         results[-1]['status'] = 'FAIL'

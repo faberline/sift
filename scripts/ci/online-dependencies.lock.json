@@ -1,7 +1,7 @@
 {
   "schema": "sift.online-dependencies/v1",
   "rust": "1.96.1",
-  "python": "3.11.11",
+  "python": "3.13.5",
   "uv": "0.12.1",
   "docker": "29.8.2",
   "repositories": {
@@ -13,25 +13,24 @@
     "defer": "f01a079cc0ae023d77d96ef3590aae0becf59d62"
   },
   "checker": {
-    "repository": "faberline/workspace",
-    "revision": "c4e6dac20272384890193e6e2f8c86c4b8b0fb2b",
+    "repository": "faberline/aw",
+    "revision": "b8a18c864f30bb638ed9fbf613dda762c61238fc",
     "blobs": {
-      "scripts/meta/rust_arch/__init__.py": "a297060bb95c7cea394406448cb92083c0056be9",
-      "scripts/meta/rust_arch/cargo.py": "ae2a106d660438313e0c365aa50e2d6a01d60974",
-      "scripts/meta/rust_arch/cli.py": "61fb57c71d464f6b39bb677ee5c770e8a13ec413",
-      "scripts/meta/rust_arch/config.py": "fe2a97a53ebf5e42ae6b2cd4349090610c737dd3",
-      "scripts/meta/rust_arch/files.py": "3d45e828743b2241d9782db9650668066f788e12",
-      "scripts/meta/rust_arch/model.py": "c17596f946bea19859b8f3afa098bb6337f97358",
-      "scripts/meta/rust_arch/modtree.py": "987a5fa81cf4adf40c5c7f1bc9ab3d08f3e079a3",
-      "scripts/meta/rust_arch/policy.toml": "d6dee6072e72f0da67ac8df63605ce03e89cedd6",
-      "scripts/meta/rust_arch/ratchet.py": "81a860e7d05ba41816b38d24ecc903f29c359d9f",
-      "scripts/meta/rust_arch/report.py": "75aca8679a1633376c4a9f48e4aac919eed79330",
-      "scripts/meta/rust_arch/rules_ddd.py": "f4c991afb6b97b2a25c5826d6216c6d59cf9b2b6",
-      "scripts/meta/rust_arch/rules_deps.py": "c37d89bde4356ea3fc6c39af90dabb9f30845669",
-      "scripts/meta/rust_arch/rules_layout.py": "4d14372e51b0dfe6d376c651d4614dd876c52e00",
-      "scripts/meta/rust_arch/rules_size.py": "e57ad732fd57a57db433d498a3ec9ef1fef5c238",
-      "scripts/meta/rust_arch/rustsrc.py": "abf51a8513ae10908e3f5dd1f567ff8b4a204a32",
-      "scripts/meta/rust_arch_contract.py": "91f847973a1ca1a94d21813ddf8680407a7e6ecf"
+      "src/aw/scripts/rust_arch/__init__.py": "a297060bb95c7cea394406448cb92083c0056be9",
+      "src/aw/scripts/rust_arch/cargo.py": "ae2a106d660438313e0c365aa50e2d6a01d60974",
+      "src/aw/scripts/rust_arch/cli.py": "9e079483b4736da1946eae7f03442d663762e00a",
+      "src/aw/scripts/rust_arch/config.py": "fe2a97a53ebf5e42ae6b2cd4349090610c737dd3",
+      "src/aw/scripts/rust_arch/files.py": "3d45e828743b2241d9782db9650668066f788e12",
+      "src/aw/scripts/rust_arch/model.py": "c17596f946bea19859b8f3afa098bb6337f97358",
+      "src/aw/scripts/rust_arch/modtree.py": "77b2aad236f560670b23659e4ab600d4a79ad40b",
+      "src/aw/scripts/rust_arch/policy.toml": "19277dfef4e6c90b4c489a1edcf82e7dc304a2eb",
+      "src/aw/scripts/rust_arch/ratchet.py": "81a860e7d05ba41816b38d24ecc903f29c359d9f",
+      "src/aw/scripts/rust_arch/report.py": "75aca8679a1633376c4a9f48e4aac919eed79330",
+      "src/aw/scripts/rust_arch/rules_ddd.py": "c7c45cc4892f07fca20a30da16db875cf16b0906",
+      "src/aw/scripts/rust_arch/rules_deps.py": "c37d89bde4356ea3fc6c39af90dabb9f30845669",
+      "src/aw/scripts/rust_arch/rules_layout.py": "a2f528c9273810a4645d02b7152dae476306bc0f",
+      "src/aw/scripts/rust_arch/rules_size.py": "e57ad732fd57a57db433d498a3ec9ef1fef5c238",
+      "src/aw/scripts/rust_arch/rustsrc.py": "0e1e701758ddb31418642eadcb9762918e78e0fc"
     }
   },
   "ignored_cases": {
@@ -46,7 +45,7 @@
     "artifact_total_bytes": 524288,
     "retention_days": 3
   },
-  "checker_requirements_sha256": "acaa356aef1cc032d23933059016b867b7ce66ca5c5b30b77cae25829a012082",
+  "checker_requirements_sha256": "8de78e2fce0abce79c38b5ba700e218e2dafa2a35b66660cb3586b4e268cd60a",
   "required_gates": [
     "prepare",
     "ci-unit-controls",

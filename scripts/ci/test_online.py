@@ -33,8 +33,8 @@ class RunnerControls(unittest.TestCase):
 
     def test_checker_path_escape_is_rejected(self):
         data = json.loads((ROOT / 'scripts/ci/online-dependencies.lock.json').read_text())
-        key, value = data['checker']['blobs'].popitem()
-        data['checker']['blobs']['scripts/meta/../../bad.py'] = value
+        _, value = data['checker']['blobs'].popitem()
+        data['checker']['blobs']['src/aw/scripts/rust_arch/../bad.py'] = value
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'lock.json'
             path.write_text(json.dumps(data))

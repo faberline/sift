@@ -56,7 +56,7 @@ async fn six_hundred_thousand_events_archive_and_restore_with_bounded_resident_s
                 .unwrap();
             state.journal().storage().seal_ready().unwrap();
             assert!(state.journal().resident_event_count() <= 100_000);
-            if last % 100_000 == 0 {
+            if last.is_multiple_of(100_000) {
                 eprintln!("large archive lifecycle accepted {last} events");
             }
         }

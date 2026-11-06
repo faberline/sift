@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use sift::archive::ArchiveManifest;
 use sift::projection::{LoggingProjection, MetricProjection, Projection, TraceProjection};
-use sift::query::{QueryJobV1, QueryRequestV1, QueryResponseV1};
+use sift::query::{QueryExpressionV1, QueryJobV1, QueryRequestV1, QueryResponseV1};
 use sift::{
     AttributeValue, EventEnvelope, MetricPoint, MetricTemporality, SignalKind, StoredEvent,
 };
@@ -141,6 +141,18 @@ fn query_job_bytes_read_and_reencode_without_change() {
     let bytes = golden("query-job.json", &serde_json::to_vec(&job).unwrap());
     let old: QueryJobV1 = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(serde_json::to_vec(&old).unwrap(), bytes);
+}
+
+#[test]
+fn range_filter_keeps_its_existing_json_shape() {
+    let filter: QueryExpressionV1 = serde_json::from_slice(
+        br#"{"op":"range","field":"severity_number","gte":9,"lt":17,"lte":null}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&filter).unwrap(),
+        br#"{"op":"range","field":"severity_number","gte":9,"lt":17}"#,
+    );
 }
 
 #[test]

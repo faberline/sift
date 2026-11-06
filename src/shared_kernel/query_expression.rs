@@ -28,13 +28,13 @@ pub enum QueryExpressionV1 {
     Range {
         field: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        gt: Option<serde_json::Value>,
+        gt: Option<Box<serde_json::Value>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        gte: Option<serde_json::Value>,
+        gte: Option<Box<serde_json::Value>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        lt: Option<serde_json::Value>,
+        lt: Option<Box<serde_json::Value>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        lte: Option<serde_json::Value>,
+        lte: Option<Box<serde_json::Value>>,
     },
     Text {
         field: String,

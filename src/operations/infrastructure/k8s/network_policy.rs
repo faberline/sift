@@ -41,7 +41,7 @@ fn kubernetes_api_egress(cidrs: &[String], ports: &[u16]) -> render::NetworkRule
     render::NetworkRulePlan::new(
         cidrs
             .iter()
-            .map(|cidr| render::NetworkPeerPlan::ip_block(cidr))
+            .map(render::NetworkPeerPlan::ip_block)
             .collect(),
         ports
             .iter()

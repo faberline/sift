@@ -163,7 +163,7 @@ fn proto_exemplars(values: &[wire::Exemplar]) -> Vec<MetricExemplar> {
         .iter()
         .filter_map(|value| {
             Some(MetricExemplar {
-                value: value.value.clone().and_then(|value| match value {
+                value: value.value.and_then(|value| match value {
                     wire::exemplar::Value::AsDouble(value) if value.is_finite() => Some(value),
                     wire::exemplar::Value::AsInt(value) => Some(value as f64),
                     _ => None,

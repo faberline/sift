@@ -21,9 +21,8 @@ use crate::journal::infrastructure::raft::control_state_store::{
 use crate::journal::infrastructure::raft::local_checkpoint::LocalCheckpointV1;
 use crate::journal::infrastructure::raft::resident_checkpoint::ResidentCheckpointV1;
 use crate::shared_kernel::append_result::AppendResult;
+use crate::shared_kernel::checkpoint_data::CapturedPrefix;
 use crate::shared_kernel::retention_fence::RetentionFenceV1;
-use crate::shared_kernel::segment_manifest::SegmentManifest;
-use crate::SignalKind;
 
 #[cfg(any(not(unix), unix))]
 use crate::journal::infrastructure::raft::control_state_store::set_directory_mode;
@@ -177,7 +176,7 @@ impl SiftStateMachine {
     /// Upload can continue after this method returns while newer Raft entries
     /// append to the journal.
     #[doc(hidden)]
-    pub fn capture_archive_prefix(&self) -> Result<(u64, u64, Vec<(SignalKind, SegmentManifest)>)> {
+    pub fn capture_archive_prefix(&self) -> Result<CapturedPrefix> {
         let _gate = self
             .commit_gate
             .lock()
