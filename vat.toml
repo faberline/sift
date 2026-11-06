@@ -28,4 +28,14 @@ id = "ec-stability"
 requires = ["sift"]
 cmd = ["sh", "-c", "export CARGO_TARGET_DIR=\"$VAT_WORKSPACE_BASE/target\" && exec cargo test -p sift --test it -- stability_e2e:: --nocapture"]
 timeout_s = 600
+
+# Set SIFT_VAT_BIN_DIR to the absolute directory containing the five pinned
+# executables from scripts/ci/online-dependencies.lock.json.
+# The PATH above is machine-specific. Set CARGO and, if needed, RUSTC to the
+# absolute executable paths for the pinned toolchain on your machine.
+# Run with vat run --keep never vat-producers to remove the outer VAT as well.
+[[runners]]
+id = "vat-producers"
+cmd = ["sh", "-ec", "test -n \"$SIFT_VAT_BIN_DIR\"; export CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-$VAT_WORKSPACE_BASE/target}\"; exec \"${CARGO:-cargo}\" test --locked -p sift --test it -- vat_service_observability_e2e::vat_managed_service_stdout_reaches_real_sift_query --exact --ignored --nocapture"]
+timeout_s = 1200
 # HANDWRITE-END
