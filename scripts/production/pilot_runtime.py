@@ -26,13 +26,16 @@ class Receiver:
         key, csr, leaf = self.root / 'key.pem', self.root / 'server.csr', self.root / 'server.pem'
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
             '-subj', '/CN=Sift pilot root', '-addext', 'basicConstraints=critical,CA:TRUE',
+            '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-addext', 'subjectKeyIdentifier=hash',
             '-keyout', str(ca_key), '-out', str(cert)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         subprocess.run(['openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes',
             '-subj', '/CN=localhost', '-keyout', str(key), '-out', str(csr)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         extensions = self.root / 'extensions.ini'
-        private(extensions, b'subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n')
+        private(extensions, b'subjectAltName=DNS:localhost,IP:127.0.0.1\n'
+            b'basicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\n'
+            b'keyUsage=digitalSignature,keyEncipherment\nauthorityKeyIdentifier=keyid:always,issuer\n')
         subprocess.run(['openssl', 'x509', '-req', '-in', str(csr), '-CA', str(cert), '-CAkey', str(ca_key),
             '-CAcreateserial', '-out', str(leaf), '-days', '1', '-extfile', str(extensions)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)

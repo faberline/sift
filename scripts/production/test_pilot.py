@@ -1,5 +1,9 @@
 """Offline controls for a bounded trial and its durable input records."""
-import json, tempfile, unittest
+import http.client
+import json
+import ssl
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 from load_client import Api
@@ -11,6 +15,22 @@ from run_pilot import input_block, limits
 
 
 class Pilot(unittest.TestCase):
+    def test_receiver_certificate_passes_strict_https_validation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            receiver = Receiver(Path(temp) / 'receiver', port=0)
+            context = ssl.create_default_context(cafile=str(receiver.cert))
+            context.verify_flags |= ssl.VERIFY_X509_STRICT
+            connection = http.client.HTTPSConnection(
+                'localhost', receiver.server.server_port, timeout=3, context=context)
+            try:
+                connection.request('GET', '/readyz')
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b'')
+            finally:
+                connection.close()
+                receiver.close()
+
     def test_trial_cannot_use_a_rated_load_rate_or_an_unbounded_duration(self):
         for seconds, rate in ((0, 100), (1801, 100), (True, 100), (1800, 10_000), (1800, True), (1800, 99)):
             with self.subTest(seconds=seconds, rate=rate):
