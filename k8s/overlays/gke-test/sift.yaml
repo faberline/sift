@@ -63,14 +63,15 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-data-root
-          image: docker.io/alpine/k8s:1.32.13@sha256:5efac3ed9955c8747296d520539cded681f4ef5dbb73fb591141df282b61cc35
+          image: docker.io/library/python:3.13-alpine@sha256:d76f585fb0d5107dd47143da5e61554fd9cae656a30f3470f815cb8475769b6a
           command:
             - /bin/sh
             - -ec
             - |
-              chown 65532:65532 /var/lib/sift
-              chmod 0700 /var/lib/sift
-              test "$(stat -c '%u:%g:%a' /var/lib/sift)" = '65532:65532:700'
+              mkdir -p /var/lib/sift/data
+              chown 65532:65532 /var/lib/sift/data
+              chmod 0700 /var/lib/sift/data
+              test "$(stat -c '%u:%g:%a' /var/lib/sift/data)" = '65532:65532:700'
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
@@ -90,7 +91,7 @@ spec:
       containers:
         - name: sift
           image: sift
-          args: [serve, --role, all, --data-dir, /var/lib/sift]
+          args: [serve, --role, all, --data-dir, /var/lib/sift/data]
           env:
             - name: SIFT_AUTH
               value: "off"

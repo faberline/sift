@@ -6,5 +6,4 @@ resources:
 configMapGenerator:
   - name: sift-smoke-scripts
     files:
-      - fixture.sh
-      - verify.sh
+      - smoke.py
