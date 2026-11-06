@@ -89,6 +89,7 @@ print(f"Required ignored tests: {sum(expected.values())}")
   python3 -B scripts/release/production_receipt.py
   python3 -B scripts/production/test_prepare.py
   python3 -B scripts/production/test_runtime.py
+  python3 -B scripts/production/test_external_availability.py
   python3 -B scripts/production/test_exports.py
   SIFT_PRODUCTION_TEST_BIN="${CARGO_TARGET_DIR:-$repo_root/target}/debug/sift" \
     python3 -B scripts/production/test_load.py
@@ -115,7 +116,7 @@ report={'schema':'sift.local-candidate-check/v1','result':'passed','production_a
     'source_commit':revision,'completed_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
     'checks':{name:'passed' for name in ['format','locked_build','pinned_core_build_stamp','full_rust_suite',
         'required_environment_tests','capability_evidence','clippy','strict_architecture','release_contract',
-        'production_receipt_controls','production_preparation_controls','production_runtime_controls',
+        'production_receipt_controls','production_preparation_controls','production_runtime_controls','external_availability_controls',
         'production_comparison_controls','production_load_driver','production_pilot_controls','official_prometheus_oracle',
         'remote_write_compliance','docker_named_volume']}}
 path=Path(output)

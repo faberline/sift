@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read the exact GKE deployment before load tests. This does not deploy."""
 import argparse, hashlib, json, subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 import prepare
 
@@ -83,6 +84,7 @@ def main():
     nodes=command(kube+['get','nodes','-o','json'])
     pods=command(kube+['get','pods','--namespace',namespace,'-o','json'])
     report=inspect(binding,resource,preflight,cluster,nodes,pods)
+    report['observed_at']=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
     require(not args.output.exists(), 'output must be new')
     with args.output.open('x') as out:out.write(json.dumps(report,indent=2)+'\n')
     args.output.chmod(0o600)

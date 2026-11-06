@@ -185,7 +185,7 @@ cannot supply this evidence.
 
 After deployment, read the live nodes and Pods with the runtime check.
 It checks the permanent cluster ID, image digests, voter placement, readiness,
-and Secret mounts. It reads metadata. It does not deploy or certify load.
+and Secret mounts. It records the observation time for the external probe. It does not deploy or certify load.
 
 ```sh
 python3 -B scripts/production/verify_runtime.py \
@@ -193,6 +193,21 @@ python3 -B scripts/production/verify_runtime.py \
   --prepared-dir /private/tmp/sift-production/prepared \
   --kubeconfig /private/tmp/sift-production/kubeconfig \
   --output /private/tmp/sift-production/runtime-check.json
+```
+
+Read the existing public HTTPS `/readyz` check in the same GCP project.
+Set the UTC window after the runtime observation. Wait at least 35 seconds
+after its end so Monitoring can publish the points. Verify that the chosen
+hostname routes to this candidate for the full window.
+
+```sh
+python3 -B scripts/production/capture_external_availability.py \
+  --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
+  --prepared-dir /private/tmp/sift-production/prepared \
+  --runtime-check /private/tmp/sift-production/runtime-check.json \
+  --endpoint "$SIFT_PROBE_ENDPOINT" --check-id "$SIFT_UPTIME_CHECK_ID" \
+  --start "$SIFT_PROBE_START_UTC" --end "$SIFT_PROBE_END_UTC" \
+  --output /private/tmp/sift-production/evidence/external_availability.json
 ```
 
 Expose log collector metrics with `sift collect --metrics-port 9318`.
