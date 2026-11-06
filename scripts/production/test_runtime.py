@@ -27,6 +27,13 @@ class Runtime(unittest.TestCase):
         return verify_runtime.inspect(self.binding,self.resource,self.preflight,self.cluster,self.nodes,self.pods)
     def test_ready_snapshot_does_not_claim_production(self):
         self.assertIs(self.inspect()['production_accepted'],False)
+    def test_nested_fqdn_network_policy_is_required(self):
+        self.cluster['enableFqdnNetworkPolicy']=True
+        for fqdn_fields in ({'enableFqdnNetworkPolicy':False}, {}):
+            with self.subTest(fqdn_fields=fqdn_fields):
+                self.cluster['networkConfig']={'datapathProvider':'ADVANCED_DATAPATH',**fqdn_fields}
+                with self.assertRaisesRegex(ValueError,'network policy requirements differ'):
+                    self.inspect()
     def test_changed_permanent_cluster_id_is_refused(self):
         self.cluster['id']='new-cluster-with-the-same-name'
         with self.assertRaises(ValueError):self.inspect()

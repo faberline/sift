@@ -21,8 +21,9 @@ def inspect(binding, resource, preflight, cluster, nodes, pods):
         and '/projects/'+identity['project']+'/' in cluster['selfLink'], 'live cluster differs')
     require(cluster['status']=='RUNNING' and cluster.get('autopilot',{}).get('enabled',False) is False,
         'Standard GKE must be running')
-    require(cluster.get('networkConfig',{}).get('datapathProvider')=='ADVANCED_DATAPATH'
-        and cluster.get('enableFqdnNetworkPolicy') is True, 'network policy requirements differ')
+    network=cluster.get('networkConfig',{})
+    require(network.get('datapathProvider')=='ADVANCED_DATAPATH'
+        and network.get('enableFqdnNetworkPolicy') is True, 'network policy requirements differ')
     require(cluster.get('workloadIdentityConfig',{}).get('workloadPool')==identity['project']+'.svc.id.goog',
         'live Workload Identity differs')
     identity_hash=hashlib.sha256(json.dumps(identity,sort_keys=True,separators=(',',':')).encode()).hexdigest()

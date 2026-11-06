@@ -16,7 +16,7 @@ class Preparation(unittest.TestCase):
             'measured_store_bytes_per_item':1000,'store_pvc_gib':50000,'control_pvc_gib':5}
         self.cluster={'name':'acceptance','location':'asia-east1-a','status':'RUNNING','id':'permanent-cluster-id',
             'selfLink':'https://container.googleapis.com/v1/projects/project-one/zones/asia-east1-a/clusters/acceptance',
-            'networkConfig':{'datapathProvider':'ADVANCED_DATAPATH'},'enableFqdnNetworkPolicy':True,
+            'networkConfig':{'datapathProvider':'ADVANCED_DATAPATH','enableFqdnNetworkPolicy':True},
             'workloadIdentityConfig':{'workloadPool':'project-one.svc.id.goog'}}
         self.samples=[{'resource':{'type':'k8s_container','labels':{'project_id':'project-one',
             'namespace_name':'app','container_name':'checkout','cluster_name':'acceptance',
@@ -71,11 +71,18 @@ class Preparation(unittest.TestCase):
                 with self.assertRaises(ValueError):self.run_prepare()
             self.config=original
     def test_wrong_cluster_and_autopilot_are_refused(self):
-        for key,value in [('name','other'),('autopilot',{'enabled':True}),('enableFqdnNetworkPolicy',False)]:
+        for key,value in [('name','other'),('autopilot',{'enabled':True})]:
             original=copy.deepcopy(self.cluster)
             with self.subTest(key=key):
                 self.cluster[key]=value
                 with self.assertRaises(ValueError):self.run_prepare()
             self.cluster=original
+    def test_nested_fqdn_network_policy_is_required(self):
+        self.cluster['enableFqdnNetworkPolicy']=True
+        for fqdn_fields in ({'enableFqdnNetworkPolicy':False}, {}):
+            with self.subTest(fqdn_fields=fqdn_fields):
+                self.cluster['networkConfig']={'datapathProvider':'ADVANCED_DATAPATH',**fqdn_fields}
+                with self.assertRaisesRegex(ValueError,'FQDN network policy must be enabled'):
+                    self.run_prepare()
 
 if __name__=='__main__': unittest.main()

@@ -38,8 +38,9 @@ def prepare(candidate_raw, candidate, config, cluster, entries):
     require(cluster.get('name')==config['cluster'] and cluster.get('location')==config['location'], 'cluster differs')
     require('/projects/'+config['project']+'/' in cluster.get('selfLink',''), 'cluster project differs')
     require(cluster.get('status')=='RUNNING' and cluster.get('autopilot',{}).get('enabled',False) is False, 'Standard GKE must be running')
-    require(cluster.get('networkConfig',{}).get('datapathProvider')=='ADVANCED_DATAPATH', 'GKE Dataplane V2 is required')
-    require(cluster.get('enableFqdnNetworkPolicy') is True, 'FQDN network policy must be enabled')
+    network=cluster.get('networkConfig',{})
+    require(network.get('datapathProvider')=='ADVANCED_DATAPATH', 'GKE Dataplane V2 is required')
+    require(network.get('enableFqdnNetworkPolicy') is True, 'FQDN network policy must be enabled')
     require(cluster.get('workloadIdentityConfig',{}).get('workloadPool')==config['project']+'.svc.id.goog', 'Workload Identity is required')
     require(re.fullmatch(r'gs://[a-z0-9][a-z0-9._-]+/[^?#\s]+',config['archive_uri']) is not None,'GCS prefix is required')
     hosts=config['webhook_hosts']
