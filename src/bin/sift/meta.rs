@@ -7,23 +7,32 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
 
+use crate::terminal_output::print_json_terminal;
+
 #[derive(Args)]
 pub(super) struct SpecArgs {
     /// Generate a typed API client rather than print the OpenAPI document.
     #[command(subcommand)]
-    pub(super) command: Option<SpecCommand>,
-    #[arg(long, default_value = "openapi-json", value_parser = ["openapi-json"])]
-    pub(super) format: String,
+    command: Option<SpecCommand>,
+    #[arg(long, default_value = "openapi-json", value_enum)]
+    format: SpecFormat,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum SpecFormat {
+    OpenapiJson,
+    OpenapiYaml,
+    JsonSchema,
 }
 
 #[derive(Subcommand)]
-pub(super) enum SpecCommand {
+enum SpecCommand {
     /// Generate a typed client from Sift's own OpenAPI document.
     Gen(GenArgs),
 }
 
 #[derive(Args)]
-pub(super) struct GenArgs {
+struct GenArgs {
     /// Target language for the generated client.
     #[arg(long, value_enum)]
     lang: GenLang,
@@ -136,7 +145,26 @@ pub(super) const LLM_TOPICS: &[cli_std::llm::Topic] = &[
     },
 ];
 
-pub(super) fn spec_gen(args: GenArgs) -> Result<()> {
+pub(super) fn spec(args: SpecArgs) -> Result<()> {
+    if let Some(SpecCommand::Gen(args)) = args.command {
+        return spec_gen(args);
+    }
+
+    let document = sift::openapi();
+    match args.format {
+        SpecFormat::OpenapiJson => print_json_terminal(serde_json::json!({"openapi": document})),
+        SpecFormat::OpenapiYaml => {
+            print!("{}", serde_yaml::to_string(&document)?);
+            println!("# next: done");
+            Ok(())
+        }
+        SpecFormat::JsonSchema => {
+            print_json_terminal(serde_json::json!({"components": document.components}))
+        }
+    }
+}
+
+fn spec_gen(args: GenArgs) -> Result<()> {
     use openapi_codegen::{generate, GenOptions, HttpClient, Lang};
 
     let lang = match args.lang {

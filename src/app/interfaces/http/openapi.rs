@@ -61,8 +61,10 @@ struct SiftApi;
 
 pub fn openapi() -> utoipa::openapi::OpenApi {
     use utoipa::openapi::{
-        path::{OperationBuilder, PathItem, PathItemType},
+        path::{OperationBuilder, ParameterBuilder, ParameterIn, PathItem, PathItemType},
         response::ResponseBuilder,
+        schema::{ObjectBuilder, SchemaType},
+        Required,
     };
 
     let mut document = SiftApi::openapi();
@@ -106,14 +108,49 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
             "post" => PathItemType::Post,
             _ => unreachable!("phase-one OpenAPI method is fixed"),
         };
-        let operation = OperationBuilder::new()
+        let mut operation = OperationBuilder::new()
             .summary(Some(summary))
-            .response("200", ResponseBuilder::new().description("Success").build())
-            .build();
+            .response("200", ResponseBuilder::new().description("Success").build());
+        for name in path
+            .split('/')
+            .filter_map(|part| part.strip_prefix('{')?.strip_suffix('}'))
+        {
+            operation = operation.parameter(
+                ParameterBuilder::new()
+                    .name(name)
+                    .parameter_in(ParameterIn::Path)
+                    .required(Required::True)
+                    .schema(Some(ObjectBuilder::new().schema_type(SchemaType::String))),
+            );
+        }
+        if matches!(
+            path,
+            "/api/v1/traces/{trace_id}" | "/api/v1/queries/{query_id}"
+        ) {
+            operation = operation.parameter(
+                ParameterBuilder::new()
+                    .name("project")
+                    .parameter_in(ParameterIn::Query)
+                    .required(Required::True)
+                    .schema(Some(ObjectBuilder::new().schema_type(SchemaType::String))),
+            );
+        }
+        if path == "/api/v1/traces/{trace_id}" {
+            operation = operation.parameter(
+                ParameterBuilder::new()
+                    .name("min_cursor")
+                    .parameter_in(ParameterIn::Query)
+                    .schema(Some(
+                        ObjectBuilder::new()
+                            .schema_type(SchemaType::Integer)
+                            .minimum(Some(0.0)),
+                    )),
+            );
+        }
         document
             .paths
             .paths
-            .insert(path.to_string(), PathItem::new(method, operation));
+            .insert(path.to_string(), PathItem::new(method, operation.build()));
     }
     super::production_schema::extend(&mut document);
     document
