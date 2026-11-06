@@ -79,15 +79,20 @@ root_digest=$(jq -r '.image.root_digest' "$manifest")
 image="${RELEASE_IMAGE_OWNER}/${app}@${root_digest}"
 
 # --- receipt binds this exact candidate ------------------------------------
-jq -e --arg schema "$(release_app_receipt_schema "$app")" --arg version "$version" --arg commit "$commit" --arg run "$run_id" --arg attempt "$attempt" --arg root "$root_digest" --arg manifest_sha "$(sha256_file "$manifest")" '
-  .schema == $schema and .complete == true and
-  .candidate.version == $version and .candidate.commit == $commit and
-  .candidate.run_id == $run and .candidate.run_attempt == $attempt and
-  .candidate.root_digest == $root and .candidate.manifest_sha256 == $manifest_sha
-' "$receipt" >/dev/null || release_refuse "receipt does not bind candidate $tag $commit run $run_id attempt $attempt root $root_digest"
-if release_app_uses_shared_scripts "$app"; then
-  jq -e --arg image "$image" '.result == "passed" and .gke.image == $image and .gke.image_provenance == "prebuilt"' "$receipt" >/dev/null \
-    || release_refuse "receipt is not a passed run of the candidate image $image"
+if [[ "$app" == sift && "$version" != 0.1.* ]]; then
+  python3 -B "$SCRIPT_DIR/verify-production-receipt.py" --receipt "$receipt" --candidate-manifest "$manifest" \
+    || release_refuse "production acceptance receipt is incomplete"
+else
+  jq -e --arg schema "$(release_app_receipt_schema "$app")" --arg version "$version" --arg commit "$commit" --arg run "$run_id" --arg attempt "$attempt" --arg root "$root_digest" --arg manifest_sha "$(sha256_file "$manifest")" '
+    .schema == $schema and .complete == true and
+    .candidate.version == $version and .candidate.commit == $commit and
+    .candidate.run_id == $run and .candidate.run_attempt == $attempt and
+    .candidate.root_digest == $root and .candidate.manifest_sha256 == $manifest_sha
+  ' "$receipt" >/dev/null || release_refuse "receipt does not bind candidate $tag $commit run $run_id attempt $attempt root $root_digest"
+  if release_app_uses_shared_scripts "$app"; then
+    jq -e --arg image "$image" '.result == "passed" and .gke.image == $image and .gke.image_provenance == "prebuilt"' "$receipt" >/dev/null \
+      || release_refuse "receipt is not a passed run of the candidate image $image"
+  fi
 fi
 
 # --- tag protection, then the one tag ---------------------------------------
