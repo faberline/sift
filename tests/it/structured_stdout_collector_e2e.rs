@@ -77,7 +77,7 @@ fn reserve_port() -> u16 {
 async fn wait_ready(process: &mut SiftProcess, client: &reqwest::Client, base: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        if let Ok(response) = client.get(format!("{base}/healthz")).send().await {
+        if let Ok(response) = client.get(format!("{base}/readyz")).send().await {
             if response.status().is_success() {
                 return;
             }
@@ -219,6 +219,7 @@ async fn wait_for_records(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_file_collector_ingests_queries_and_resumes() {
     let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("sift-data");
     let source = temp.path().join("lumen.stdout.jsonl");
     let checkpoint = temp.path().join("collector.checkpoint.json");
     let quarantine = temp.path().join("collector.rejected.jsonl");
@@ -248,7 +249,7 @@ async fn real_file_collector_ingests_queries_and_resumes() {
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    let mut process = SiftProcess::spawn(port, &temp.path().join("sift-data"));
+    let mut process = SiftProcess::spawn(port, &data_dir);
     wait_ready(&mut process, &client, &base).await;
 
     let first = run_collector(&source, &checkpoint, &quarantine, &base);
@@ -293,5 +294,11 @@ async fn real_file_collector_ingests_queries_and_resumes() {
 
     let all = wait_for_records(&client, &base, None, 2).await;
     assert_eq!(all["records"].as_array().unwrap().len(), 2);
+
+    drop(process);
+    let mut restarted = SiftProcess::spawn(port, &data_dir);
+    wait_ready(&mut restarted, &client, &base).await;
+    let recovered = wait_for_records(&client, &base, None, 2).await;
+    assert_eq!(recovered["records"], all["records"]);
 }
 // HANDWRITE-END
