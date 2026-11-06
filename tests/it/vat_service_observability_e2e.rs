@@ -262,7 +262,8 @@ async fn vat_runner_collects_every_service() {
     let stalled_url = format!("http://{}", stalled.local_addr().unwrap());
     for producer in &producers {
         let checkpoint = checkpoint_path(producer);
-        let before = std::fs::read(&checkpoint).expect("baseline checkpoint");
+        let before = read_checkpoint(&checkpoint);
+        let source_len = std::fs::metadata(&producer.stdout).unwrap().len();
         let failed = run_collector(producer, &checkpoint, &stalled_url, "1");
         let stderr = String::from_utf8_lossy(&failed.stderr);
         assert!(
@@ -276,7 +277,11 @@ async fn vat_runner_collects_every_service() {
             "{} did not hit stalled receiver",
             producer.name
         );
-        assert_eq!(std::fs::read(&checkpoint).unwrap(), before);
+        assert_eq!(
+            std::fs::metadata(&producer.stdout).unwrap().len(),
+            source_len
+        );
+        assert_outage_checkpoint(before, read_checkpoint(&checkpoint), source_len);
     }
     drop(stalled);
     for request in &backlog {
@@ -324,7 +329,7 @@ async fn vat_runner_collects_every_service() {
             "producers": SERVICES.len(),
             "successful_requests": proof.iter().filter(|event| event["status"] == 200).count(),
             "rejected_requests": proof.iter().filter(|event| event["status"].as_u64().unwrap() >= 400).count(),
-            "unchanged_checkpoints_after_outage": SERVICES.len(),
+            "unchanged_resume_checkpoints_after_outage": SERVICES.len(),
             "replayed_sources": SERVICES.len(),
             "records": proof,
         }),
@@ -458,6 +463,32 @@ async fn wait_for_access_log(producer: &Producer, trace: &str, status: u16) -> S
 
 fn checkpoint_path(producer: &Producer) -> PathBuf {
     PathBuf::from(format!("{}.collector.checkpoint.json", producer.name))
+}
+
+fn read_checkpoint(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).expect("read collector checkpoint"))
+        .expect("decode collector checkpoint")
+}
+
+fn assert_outage_checkpoint(before: Value, mut after: Value, source_len: u64) {
+    let files = before["files"]
+        .as_object()
+        .expect("checkpoint file identities");
+    assert_eq!(files.len(), 1, "one file identity per producer");
+    let (identity, file) = files.iter().next().unwrap();
+    let prior_len = file["observed_len"]
+        .as_u64()
+        .expect("prior observed length");
+    assert!(source_len > prior_len, "backlog must grow the source file");
+    assert_eq!(after["files"][identity]["observed_len"], json!(source_len));
+
+    // Discovery records the observed end before sending. No failed send may
+    // change the acknowledged cursor, counters, anchor, or any other field.
+    after["files"][identity]["observed_len"] = json!(prior_len);
+    assert_eq!(
+        after, before,
+        "failed delivery changed acknowledged progress"
+    );
 }
 
 fn run_collector(producer: &Producer, checkpoint: &Path, endpoint: &str, timeout: &str) -> Output {
