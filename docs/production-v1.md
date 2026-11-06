@@ -176,6 +176,12 @@ The command writes `instance.json` and `preflight.json`. It does not deploy.
 Before deployment, verify three ready nodes with separate placement for each
 voter group. Configure GCS access, peer TLS, the Webhook Secret, and the GCP
 external probe. Use the candidate digest in every Sift workload.
+The `external_availability` gate records Cloud Monitoring
+`monitoring.googleapis.com/uptime_check/check_passed` observations for the
+candidate endpoint during the test window. Include the SHA-256 hashes of the
+check resource name and the endpoint URL. The gate requires a successful
+observation and zero failures in that window. An in-cluster readiness check
+cannot supply this evidence.
 
 After deployment, read the live nodes and Pods with the runtime check.
 It checks the permanent cluster ID, image digests, voter placement, readiness,

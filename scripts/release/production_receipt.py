@@ -4,13 +4,15 @@ import hashlib,json,re,math
 from pathlib import Path
 
 GATES=('functional','promql_oracle','control_failover','load_30m','load_24h',
-    'node_failure','pvc_restore','gcs_outage','all_disk_restore','source_fidelity','capacity','delivery')
+    'node_failure','pvc_restore','gcs_outage','all_disk_restore','source_fidelity','capacity','delivery','external_availability')
 
 SOURCE_SIGNALS=('logs','metrics','traces','alerts')
 
 COMMON={'result','source_commit','image','cluster_identity_sha256','evidence_sha256'}
 FIELDS={
  'functional':{},
+ 'external_availability':{'metric_type':str,'uptime_check_sha256':str,'endpoint_sha256':str,
+    'successful_checks':int,'failed_checks':int},
  'promql_oracle':{'prometheus_version':str,'expressions_compared':int},
  'control_failover':{'control_state_differences':int,'leader_changes':int},
  'node_failure':{'lost_acknowledged_events':int},
@@ -89,12 +91,16 @@ def validate(proof,candidate,image):
     require(all(type(count) is int and count>0 for count in g['compared_records'].values()),'each signal needs compared records')
     require(g['gcp_rollback_configured'] is (g['reference_origin']=='gcp'),'migration rollback or fresh-install reference')
     g=proof['gates']['capacity']
-    require(g.get('measured_samples',0)>0 and g.get('sample_mean_bytes',0)>0,'real sample measurement')
+    require(g['measured_samples']>=100 and g['sample_mean_bytes']>0,'at least 100 real samples are required')
     require(g.get('cost_cap_usd',0)>0 and 0<=g.get('actual_cost_usd',-1)<=g['cost_cap_usd'],'cost cap')
     require(g.get('capacity_exceeded') is False and g.get('pvc_sized_from_samples') is True,'capacity or PVC sizing')
     g=proof['gates']['delivery']
     require(0<g.get('webhook_p95_seconds',999)<=60 and g.get('retry_notification_ids_unchanged') is True,'notification latency or identity')
     require(g.get('unknown_recovery_notifications')==0 and g.get('mute_verified') is True and g.get('hold_verified') is True,'notification state semantics')
+    g=proof['gates']['external_availability']
+    require(g['metric_type']=='monitoring.googleapis.com/uptime_check/check_passed','Cloud Monitoring uptime metric')
+    require(digest(g['uptime_check_sha256']) and digest(g['endpoint_sha256']),'uptime check and endpoint bindings')
+    require(g['successful_checks']>0 and g['failed_checks']==0,'successful external uptime observations')
     g=proof['gates']['promql_oracle']
     require(g.get('prometheus_version')=='3.5.0' and g.get('expressions_compared',0)>=22,'pinned Prometheus oracle')
     require(proof.get('cleanup',{}).get('status')=='clean','acceptance cleanup')
@@ -153,6 +159,9 @@ def self_test():
     p['gates']['capacity'].update({'measured_samples':100,'sample_mean_bytes':1000,'cost_cap_usd':100,'actual_cost_usd':90,'capacity_exceeded':False,'pvc_sized_from_samples':True})
     p['gates']['delivery'].update({'webhook_p95_seconds':30,'retry_notification_ids_unchanged':True,'unknown_recovery_notifications':0,'mute_verified':True,'hold_verified':True})
     p['gates']['promql_oracle'].update({'prometheus_version':'3.5.0','expressions_compared':22})
+    p['gates']['external_availability'].update({
+        'metric_type':'monitoring.googleapis.com/uptime_check/check_passed','uptime_check_sha256':'e'*64,
+        'endpoint_sha256':'f'*64,'successful_checks':3,'failed_checks':0})
     validate(p,c,image)
     migration=copy.deepcopy(p)
     migration['gates']['source_fidelity'].update({'reference_origin':'gcp','gcp_rollback_configured':True})
@@ -168,6 +177,10 @@ def self_test():
         except ValueError:negative+=1
         else:raise AssertionError(name+' image accepted')
     for name,field,value in [('load_24h','acknowledged_events',863999999),('gcs_outage','acknowledged_after_rpo_limit',1),
+        ('capacity','measured_samples',99),('external_availability','successful_checks',0),
+        ('external_availability','failed_checks',1),('external_availability','endpoint_sha256','invalid'),
+        ('external_availability','uptime_check_sha256','invalid'),
+        ('external_availability','metric_type','local-readiness'),
         ('all_disk_restore','lost_recent_seconds',901),('delivery','unknown_recovery_notifications',1),
         ('source_fidelity','duration_seconds',1799),('source_fidelity','reference_origin','unknown'),
         ('source_fidelity','complete',False),('source_fidelity','differences',1),
