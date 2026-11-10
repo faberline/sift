@@ -180,6 +180,99 @@ async fn upgrade_check_reads_the_sift_release_list_without_installing() {
     );
 }
 
+#[tokio::test]
+async fn query_reads_a_stored_log_from_a_live_local_sift() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(sift::ServiceState::open(temp.path()).unwrap());
+    let app = sift::router(state.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let ingest = client
+        .post(format!("{endpoint}/v1/logs"))
+        .header("content-type", "application/json")
+        .header("x-sift-project", "cli-query")
+        .json(&cli_query_logs_payload())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ingest.status(), reqwest::StatusCode::OK);
+
+    let stored_request = temp.path().join("request.json");
+    std::fs::write(&stored_request, query_request("cli-query").to_string()).unwrap();
+    let stored_request = stored_request.to_str().unwrap();
+
+    let mut value = serde_json::Value::Null;
+    let mut found = false;
+    for _ in 0..20 {
+        let stdout = sift_stdout(isolated_sift().args([
+            "query",
+            stored_request,
+            "--endpoint",
+            endpoint.as_str(),
+        ]))
+        .await;
+        value = serde_json::from_str(&stdout).expect("sift query prints JSON");
+        if value.to_string().contains("cli-query-proof") {
+            found = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(found, "stored record was not returned: {value}");
+    assert_eq!(value["next"], "done");
+
+    let other_request = temp.path().join("other-request.json");
+    std::fs::write(&other_request, query_request("other-project").to_string()).unwrap();
+    let other_request = other_request.to_str().unwrap();
+    let other = sift_stdout(isolated_sift().args([
+        "query",
+        other_request,
+        "--endpoint",
+        endpoint.as_str(),
+    ]))
+    .await;
+    let other: serde_json::Value = serde_json::from_str(&other).expect("sift query prints JSON");
+    assert_eq!(other["next"], "done");
+    assert!(
+        !other.to_string().contains("cli-query-proof"),
+        "another project must not see the record: {other}"
+    );
+
+    server.abort();
+}
+
+fn query_request(project: &str) -> serde_json::Value {
+    json!({
+        "version": 1,
+        "project": project,
+        "signal": {"kind": "logs"},
+        "limit": 10,
+        "mode": "sync"
+    })
+}
+
+fn cli_query_logs_payload() -> serde_json::Value {
+    let now = chrono::Utc::now().timestamp_nanos_opt().unwrap() as u64;
+    json!({
+        "resourceLogs": [{
+            "resource": {"attributes": [
+                {"key": "service.name", "value": {"stringValue": "cli-query"}}
+            ]},
+            "scopeLogs": [{"logRecords": [{
+                "timeUnixNano": now.to_string(),
+                "severityText": "INFO",
+                "body": {"stringValue": "cli-query-proof"},
+                "attributes": [
+                    {"key": "sift.event_id", "value": {"stringValue": "cli-query-1"}}
+                ]
+            }]}]
+        }]
+    })
+}
+
 fn isolated_sift() -> tokio::process::Command {
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_sift"));
     // An empty PATH also prevents the shared CLI from invoking the user's gh.
