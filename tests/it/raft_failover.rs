@@ -1,6 +1,12 @@
 //! Three durable Sift voters retain acknowledged data across repeated leader loss.
 
-use std::{collections::HashMap, future::pending, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    future::pending,
+    net::SocketAddr,
+    sync::{Arc, Weak},
+    time::Duration,
+};
 
 use raft_runtime::{
     FsyncPolicy, HostConfig, Membership, PeerTransport, RaftHost, RaftStateMachine, RaftStore,
@@ -84,6 +90,7 @@ struct Node {
 struct RunningNode {
     host: RaftHost,
     journal: Arc<DurableJournal>,
+    state_machine: Weak<SiftStateMachine>,
     listener: JoinHandle<anyhow::Result<()>>,
     shutdown: oneshot::Sender<()>,
 }
@@ -94,6 +101,7 @@ impl Node {
         let data = self.data.path();
         let journal = Arc::new(DurableJournal::open(data).unwrap());
         let state_machine = Arc::new(SiftStateMachine::open(data, journal.clone()).unwrap());
+        let state_machine_released = Arc::downgrade(&state_machine);
         let transport = PeerTransport::from_config(&self.material.config).unwrap();
         let peers = urls
             .iter()
@@ -126,6 +134,7 @@ impl Node {
         self.running = Some(RunningNode {
             host,
             journal,
+            state_machine: state_machine_released,
             listener,
             shutdown,
         });
@@ -139,6 +148,7 @@ impl Node {
         let RunningNode {
             host,
             journal,
+            state_machine,
             listener,
             shutdown,
         } = self.running.take().expect("running voter to stop");
@@ -158,6 +168,15 @@ impl Node {
         })
         .await
         .expect("stopped voter released its journal");
+        // Dropping RaftHost only aborts its tick and pump tasks; they release the
+        // state machine (and the data root it holds) when the runtime cancels them.
+        tokio::time::timeout(WAIT, async {
+            while state_machine.strong_count() != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stopped voter released its state machine");
     }
 }
 
