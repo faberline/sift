@@ -4,6 +4,11 @@
 
 pub(crate) mod filter_evaluator;
 pub(crate) mod filter_expression;
+pub(crate) mod metric_binary;
+pub(crate) mod metric_evaluator;
+pub(crate) mod metric_expression;
+pub(crate) mod metric_quantile;
+pub(crate) mod metric_rate;
 pub(crate) mod promql;
 pub(crate) mod promql_evaluator;
 pub(crate) mod query_job;

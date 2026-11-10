@@ -89,7 +89,9 @@ fn validate_archive_upload_intent(intent: &ArchiveUploadIntent) -> Result<()> {
         || !intent.manifest_uri.starts_with(&intent.destination_uri)
         || intent.archive_prefix.is_empty()
         || intent.generated_at.is_empty()
-        || intent.captured_cursor == 0
+        // The first joint recovery record protects an empty journal before
+        // write admission opens. A suffix must still have a nonzero cursor.
+        || (intent.captured_cursor == 0 && intent.source_manifest_uri.is_some())
         || intent.source_cluster_id.is_empty()
         || intent.source_manifest_uri.is_some() != intent.source_manifest_sha256.is_some()
         || intent.source_manifest_sha256.as_ref().is_some_and(|hash| {

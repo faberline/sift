@@ -4,6 +4,7 @@ use crate::shared_kernel::port_future::PortFuture;
 use crate::shared_kernel::query_phase_one::{CorrelationRequestV1, LogTailRequestV1};
 use crate::shared_kernel::query_request::QueryRequestV1;
 use crate::shared_kernel::query_response::QueryResponseV1;
+use crate::shared_kernel::query_v2::{QueryRequestV2, QueryResponseV2};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -15,6 +16,16 @@ pub(crate) trait SiftApiPort: Send + Sync {
         &'a self,
         request: &'a QueryRequestV1,
     ) -> PortFuture<'a, QueryResponseV1, Self::Error>;
+    fn query_v2<'a>(
+        &'a self,
+        request: &'a QueryRequestV2,
+    ) -> PortFuture<'a, QueryResponseV2, Self::Error>;
+    fn control_records<'a>(
+        &'a self,
+        project: &'a str,
+        collection: &'a str,
+        after: Option<&'a str>,
+    ) -> PortFuture<'a, Value, Self::Error>;
     fn query_value<'a>(&'a self, request: &'a QueryRequestV1)
         -> PortFuture<'a, Value, Self::Error>;
     fn tail_logs<'a>(&'a self, request: &'a LogTailRequestV1)

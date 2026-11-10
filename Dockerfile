@@ -3,6 +3,7 @@ FROM rust:1.96-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8
 ARG TARGETPLATFORM
 WORKDIR /workspace
 COPY --chown=65532:65532 . .
+ARG SIFT_SOURCE_REVISION
 RUN --mount=type=cache,id=sift-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=sift-cargo-git,target=/usr/local/cargo/git \
     --mount=type=cache,id=sift-cargo-target-${TARGETPLATFORM},target=/workspace/target \

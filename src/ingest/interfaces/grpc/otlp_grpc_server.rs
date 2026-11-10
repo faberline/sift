@@ -113,14 +113,11 @@ impl transport_otlp::OtlpConsumer for SiftGrpcConsumer {
             .map_err(|error| transport_otlp::TransportError::Consumer {
                 message: format!("{}; retry after 5 seconds", error.message),
             })?;
-        let accepted_count = accepted.len();
-        if let Err(error) = self.state.append_events(accepted).await {
-            rejected += accepted_count;
-            push_message(
-                &mut messages,
-                format!("durable batch append failed: {error}"),
-            );
-        }
+        self.state.append_events(accepted).await.map_err(|error| {
+            transport_otlp::TransportError::Consumer {
+                message: format!("durable batch append failed: {error}; retain and retry"),
+            }
+        })?;
         Ok(transport_otlp::PartialSuccess::new(
             rejected,
             messages.join("; "),

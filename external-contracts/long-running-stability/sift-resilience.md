@@ -5,7 +5,7 @@ summary: Stability contract for bounded ingest, drain readiness, and durable Sif
 fill_sections: [e2e-test, tool-contract]
 ---
 
-# EC: Sift Long-Running Resilience
+# EC: Sift Bounded Ingest and Restart
 
 ## External Contract
 <!-- type: e2e-test lang: yaml -->

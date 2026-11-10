@@ -37,7 +37,7 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
     ];
     let mut agent_volumes = vec![
         json!({"name":"pod-logs","hostPath":{"path":"/var/log/pods","type":"Directory"}}),
-        json!({"name":"data","hostPath":{"path":"/var/lib/sift","type":"DirectoryOrCreate"}}),
+        json!({"name":"data","hostPath":{"path":format!("/var/lib/sift/agents/{}/{}",cx.ns,cx.name),"type":"DirectoryOrCreate"}}),
     ];
     if matches!(spec.auth, AuthMode::Kubernetes) {
         agent_mounts.push(json!({
@@ -81,6 +81,8 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
             "collect".into(),
             "--cri-root".into(),
             "/var/log/pods".into(),
+            "--namespace".into(),
+            cx.ns.into(),
             "--data-dir".into(),
             "/var/lib/sift".into(),
             "--checkpoint".into(),
@@ -125,12 +127,20 @@ pub(super) fn agent_project_role_plan(cx: &RenderCtx<'_>) -> render::RolePlan {
     render::RolePlan {
         name,
         component: "auth".into(),
-        rules: vec![render::RbacRulePlan {
-            api_groups: vec!["sift.axiom.dev".into()],
-            resources: vec!["projects".into()],
-            resource_names: vec![cx.name.into()],
-            verbs: vec!["get".into(), "create".into(), "update".into()],
-        }],
+        rules: vec![
+            render::RbacRulePlan {
+                api_groups: vec!["sift.axiom.dev".into()],
+                resources: vec!["projects".into()],
+                resource_names: vec![cx.name.into()],
+                verbs: vec!["get".into(), "create".into()],
+            },
+            render::RbacRulePlan {
+                api_groups: vec!["".into()],
+                resources: vec!["pods".into()],
+                resource_names: vec![],
+                verbs: vec!["get".into(), "list".into()],
+            },
+        ],
     }
 }
 
@@ -162,15 +172,9 @@ pub(super) fn agent_project_role_binding_plan(cx: &RenderCtx<'_>) -> render::Rol
         name: name.clone(),
         component: "auth".into(),
         role_name: name,
-        subjects: vec![
-            render::ServiceAccountSubjectPlan {
-                name: cx.name.into(),
-                namespace: cx.ns.into(),
-            },
-            render::ServiceAccountSubjectPlan {
-                name: format!("{}-backup", cx.name),
-                namespace: cx.ns.into(),
-            },
-        ],
+        subjects: vec![render::ServiceAccountSubjectPlan {
+            name: cx.name.into(),
+            namespace: cx.ns.into(),
+        }],
     }
 }

@@ -2,8 +2,8 @@
 
 use crate::operations::interfaces::crd::sift_spec::{AuthMode, Sift};
 use crate::shared_kernel::instance_spec::{
-    InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap, InstanceIngest,
-    InstancePlacement, InstanceSettings, InstanceSpec, InstanceStorage,
+    InstanceAlerting, InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap,
+    InstanceIngest, InstancePlacement, InstanceSettings, InstanceSpec, InstanceStorage,
 };
 use kube::ResourceExt;
 
@@ -46,6 +46,10 @@ impl From<&Sift> for InstanceSpec {
                     AuthMode::Kubernetes => InstanceAuth::Kubernetes,
                 },
                 tokens_secret: spec.tokens_secret.clone(),
+                alerting: InstanceAlerting {
+                    webhook_secret: spec.alerting.webhook_secret.clone(),
+                    allowed_hosts: spec.alerting.allowed_hosts.clone(),
+                },
                 backup: spec.backup.as_ref().map(|v| InstanceBackup {
                     schedule: v.schedule.clone(),
                     destination: v.destination.clone(),

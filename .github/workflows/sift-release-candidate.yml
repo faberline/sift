@@ -191,12 +191,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The suite's vat e2e cases spawn the sibling debug binaries they name
-          # (`require_binary` in tests/vat_*_observability_e2e.rs); build them
-          # first so `cargo test -p sift` runs unfiltered, exactly as declared.
-          cargo build --locked -p vat -p lumen -p tape -p relay -p defer -p sift --bins
-          cargo test --locked -p sift
-          uv run --python 3.13 --no-project scripts/release/verify-release-contract.py --app sift
+          ./test.sh --candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sift-source-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/sift-candidate-check.json
+          if-no-files-found: error
+          overwrite: false
 
   ghcr-image-and-attest:
     name: build candidate image and attest

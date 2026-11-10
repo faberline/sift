@@ -27,6 +27,8 @@ pub(in crate::projection) struct StoredMetricSeries {
     pub(in crate::projection) resource: BTreeMap<String, String>,
     pub(in crate::projection) attributes: BTreeMap<String, AttributeValue>,
     pub(in crate::projection) overflow: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::projection) dropped_through_time: Option<i64>,
     #[serde(default)]
     pub(in crate::projection) sealed_chunks: Vec<SealedMetricChunk>,
     pub(in crate::projection) chunks: Vec<ResidentMetricChunk>,
@@ -221,6 +223,11 @@ pub(in crate::projection) fn pop_oldest_metric_point(
         return Ok(None);
     };
     let point = chunk.points.remove(0);
+    series.dropped_through_time = Some(
+        series
+            .dropped_through_time
+            .map_or(point.time_unix_nano, |t| t.max(point.time_unix_nano)),
+    );
     let resident_bytes = metric_point_memory_bytes(&point)?;
     series.point_count = series.point_count.saturating_sub(1);
     chunk.point_count = chunk

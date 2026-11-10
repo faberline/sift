@@ -82,14 +82,15 @@ fn stored(cursor: u64, signal: SignalKind) -> StoredEvent {
 #[test]
 fn trace_projection_bounds_spans_and_dedupe_metadata_together() {
     let projection = TraceProjection::with_max_spans(10).unwrap();
+    assert_eq!(projection.descriptor().retention, "latest-10-spans");
     for cursor in 1..=100 {
         projection
             .apply_idempotent(&stored(cursor, SignalKind::Span))
             .unwrap();
     }
 
-    let snapshot: serde_json::Value =
-        serde_json::from_slice(&projection.snapshot().unwrap()).unwrap();
+    let bytes = projection.snapshot().unwrap();
+    let snapshot: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let span_count = snapshot["traces"]
         .as_object()
         .unwrap()
@@ -106,6 +107,21 @@ fn trace_projection_bounds_spans_and_dedupe_metadata_together() {
         .unwrap()
         .is_none());
     assert!(projection
+        .get_trace("project-a", "trace-100")
+        .unwrap()
+        .is_some());
+
+    let restored = TraceProjection::with_max_spans(5).unwrap();
+    restored.restore(&bytes).unwrap();
+    assert!(restored
+        .get_trace("project-a", "trace-95")
+        .unwrap()
+        .is_none());
+    assert!(restored
+        .get_trace("project-a", "trace-96")
+        .unwrap()
+        .is_some());
+    assert!(restored
         .get_trace("project-a", "trace-100")
         .unwrap()
         .is_some());

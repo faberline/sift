@@ -30,11 +30,8 @@ impl InstanceService {
         instance: &InstanceSpec,
         client: kube::Client,
     ) -> anyhow::Result<service_k8s::service::ReconcilePlan> {
-        let (api_cidrs, api_ports) = if matches!(instance.settings.auth, AuthMode::Kubernetes) {
-            self.renderer.discover_api_endpoint(client).await?
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        // The metrics agent lists Kubernetes Pods in every auth mode.
+        let (api_cidrs, api_ports) = self.renderer.discover_api_endpoint(client).await?;
         Ok(service_k8s::service::ReconcilePlan {
             children: self.renderer.render(instance, &api_cidrs, &api_ports),
             context: Value::Null,

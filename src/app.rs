@@ -6,6 +6,7 @@
 
 mod access_wiring;
 pub(crate) mod archive_wiring;
+pub(crate) mod collector_metrics;
 pub(crate) mod collector_wiring;
 pub(crate) mod grpc_authorization;
 mod instance_wiring;
@@ -22,7 +23,19 @@ mod projection_wiring;
 
 mod query_error_wiring;
 
+#[cfg(test)]
+mod collector_delivery_tests;
+mod control_jobs;
+mod control_observations;
+pub(crate) mod control_wiring;
+#[cfg(test)]
+mod metric_transport_tests;
+#[cfg(test)]
+mod otlp_delivery_tests;
+#[cfg(test)]
+mod production_tests;
 pub(crate) mod query_wiring;
+pub(crate) mod recovery_wiring;
 
 pub(crate) mod checkpoint_wiring;
 
@@ -31,6 +44,12 @@ mod peer_server_wiring;
 /// Shared service instances. Only assembly can access the concrete backends.
 #[derive(Clone)]
 pub struct ServiceState {
+    query_failures: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    storage_role: crate::node::domain::storage_role::StorageRole,
+    recovery_guard: std::sync::Arc<crate::operations::domain::recovery_guard::RecoveryGuard>,
+    archive_serial: std::sync::Arc<tokio::sync::Mutex<()>>,
+    control_serial: std::sync::Arc<tokio::sync::Mutex<()>>,
+    control: Option<std::sync::Arc<crate::control::application::service::ControlService>>,
     journal: std::sync::Arc<crate::journal::application::journal_service::DurableJournal>,
     draining: std::sync::Arc<std::sync::atomic::AtomicBool>,
     raft: Option<std::sync::Arc<raft_runtime::RaftHost>>,

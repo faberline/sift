@@ -34,8 +34,7 @@ impl TickFlags {
 }
 
 /// Run one lifecycle tick. The worker calls it only while this node leads.
-pub(in crate::archive) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
-    let services = ctx.services.as_ref();
+pub(crate) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
     let remote_archive = ctx.destination.is_some();
     let replicated = ctx.raft.is_some();
     let retention_capable = if remote_archive && replicated {
@@ -59,7 +58,7 @@ pub(in crate::archive) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
         true
     };
     let retention_fence = prepare_retention_fence(
-        services,
+        &ctx.services,
         &ctx.journal,
         &ctx.state_machine,
         ctx.raft.as_ref(),

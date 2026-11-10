@@ -89,6 +89,7 @@ impl JournalRuntime {
                     .signal
                     .is_none_or(|signal| entry.event.signal == signal)
             })
+            .take(limit)
         {
             if let Some(existing) = by_cursor.insert(event.cursor, event.clone()) {
                 if existing.event.event_id != event.event.event_id {

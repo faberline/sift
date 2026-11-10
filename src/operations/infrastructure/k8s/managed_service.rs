@@ -50,13 +50,55 @@ fn render_children(
         STORE_COMPONENT,
     ));
     plan.add_service_account(render::ServiceAccountPlan::new(
+        format!("{name}-control"),
+        CONTROL_COMPONENT,
+    ));
+    plan.add_service_account(render::ServiceAccountPlan::new(
         format!("{name}-backup"),
         BACKUP_COMPONENT,
     ));
 
+    plan.add_role(agent_project_role_plan(&cx));
+    plan.add_role_binding(agent_project_role_binding_plan(&cx));
     if matches!(instance.settings.auth, AuthMode::Kubernetes) {
-        plan.add_role(agent_project_role_plan(&cx));
-        plan.add_role_binding(agent_project_role_binding_plan(&cx));
+        plan.add_role(render::RolePlan {
+            name: format!("{name}-backup-project"),
+            component: "auth".into(),
+            rules: vec![render::RbacRulePlan {
+                api_groups: vec!["sift.axiom.dev".into()],
+                resources: vec!["projects".into()],
+                resource_names: vec![],
+                verbs: vec!["update".into()],
+            }],
+        });
+        plan.add_role_binding(render::RoleBindingPlan {
+            name: format!("{name}-backup-project"),
+            component: "auth".into(),
+            role_name: format!("{name}-backup-project"),
+            subjects: vec![render::ServiceAccountSubjectPlan::new(
+                &namespace,
+                format!("{name}-backup"),
+            )],
+        });
+        plan.add_role(render::RolePlan {
+            name: format!("{name}-control-project"),
+            component: "auth".into(),
+            rules: vec![render::RbacRulePlan {
+                api_groups: vec!["sift.axiom.dev".into()],
+                resources: vec!["projects".into()],
+                resource_names: vec![name.clone()],
+                verbs: vec!["get".into(), "update".into()],
+            }],
+        });
+        plan.add_role_binding(render::RoleBindingPlan {
+            name: format!("{name}-control-project"),
+            component: "auth".into(),
+            role_name: format!("{name}-control-project"),
+            subjects: vec![render::ServiceAccountSubjectPlan::new(
+                &namespace,
+                format!("{name}-control"),
+            )],
+        });
         let mut binding = render::ClusterRoleBindingPlan::new(
             auth_delegator_binding_name(&cx),
             AUTH_DELEGATION_COMPONENT,
@@ -66,6 +108,10 @@ fn render_children(
         .with_service_account(render::ServiceAccountSubjectPlan::new(
             &namespace,
             format!("{name}-store"),
+        ))
+        .with_service_account(render::ServiceAccountSubjectPlan::new(
+            &namespace,
+            format!("{name}-control"),
         ))
         .with_label("sift.axiom.dev/owner-namespace", &namespace);
         if let Some(uid) = instance.uid.as_deref() {
@@ -101,8 +147,11 @@ fn render_children(
     if let Some(backup) = &instance.settings.backup {
         plan.add_cron_job(backup_cron_job_plan(&cx, &instance.settings, backup));
     }
-    plan.render()
-        .expect("Sift typed Kubernetes workload plan must be valid")
+    let mut children = plan
+        .render()
+        .expect("Sift typed Kubernetes workload plan must be valid");
+    super::metrics_agent::append_metrics_agent(&mut children, &cx, &instance.settings);
+    children
 }
 
 pub(crate) struct KubernetesRenderer;

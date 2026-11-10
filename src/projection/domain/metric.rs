@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::projection::domain::metric_aggregation::{merge_counts, optional_max, optional_min};
 
-pub const METRIC_SCHEMA_VERSION: u32 = 7;
+pub const METRIC_SCHEMA_VERSION: u32 = 8;
 pub const METRIC_CHUNK_POINTS: usize = 256;
 pub const DEFAULT_METRIC_MEMTABLE_BYTES: usize = 256 * 1024 * 1024;
 pub const DEFAULT_METRIC_CARDINALITY_LIMIT: usize = 10_000;
@@ -40,6 +40,8 @@ pub(in crate::projection) enum MetricError {
     ExponentialBucketSum,
     #[error("histogram schemas are not merge compatible")]
     IncompatibleSchemas,
+    #[error("histogram count or bucket count overflowed")]
+    HistogramOverflow,
     #[error("project must not be empty")]
     EmptyProject,
     #[error("limit must be between 1 and {max}", max = MAX_METRIC_QUERY_LIMIT)]
@@ -65,6 +67,8 @@ pub(in crate::projection) enum MetricError {
 impl MetricHistogramV1 {
     pub(in crate::projection) fn validate(&self) -> Result<(), MetricError> {
         if !self.sum.is_finite()
+            || !self.zero_threshold.is_finite()
+            || self.zero_threshold < 0.0
             || self.min.is_some_and(|value| !value.is_finite())
             || self.max.is_some_and(|value| !value.is_finite())
             || self.explicit_bounds.iter().any(|value| !value.is_finite())
@@ -92,7 +96,12 @@ impl MetricHistogramV1 {
                 {
                     return Err(MetricError::ExplicitBoundsOrder);
                 }
-                if self.bucket_counts.iter().sum::<u64>() != self.count {
+                if self
+                    .bucket_counts
+                    .iter()
+                    .try_fold(0u64, |a, b| a.checked_add(*b))
+                    != Some(self.count)
+                {
                     return Err(MetricError::ExplicitBucketSum);
                 }
             }
@@ -103,10 +112,12 @@ impl MetricHistogramV1 {
                 {
                     return Err(MetricError::ExponentialShape);
                 }
-                let total = self.zero_count
-                    + self.positive_bucket_counts.iter().sum::<u64>()
-                    + self.negative_bucket_counts.iter().sum::<u64>();
-                if total != self.count {
+                let total = self
+                    .positive_bucket_counts
+                    .iter()
+                    .chain(&self.negative_bucket_counts)
+                    .try_fold(self.zero_count, |a, b| a.checked_add(*b));
+                if total != Some(self.count) {
                     return Err(MetricError::ExponentialBucketSum);
                 }
             }
@@ -120,6 +131,7 @@ impl MetricHistogramV1 {
         if self.kind != other.kind
             || self.explicit_bounds != other.explicit_bounds
             || self.scale != other.scale
+            || self.zero_threshold != other.zero_threshold
             || self.positive_offset != other.positive_offset
             || self.negative_offset != other.negative_offset
             || self.bucket_counts.len() != other.bucket_counts.len()
@@ -128,20 +140,30 @@ impl MetricHistogramV1 {
         {
             return Err(MetricError::IncompatibleSchemas);
         }
-        self.count = self.count.saturating_add(other.count);
-        self.sum += other.sum;
-        self.zero_count = self.zero_count.saturating_add(other.zero_count);
-        merge_counts(&mut self.bucket_counts, &other.bucket_counts);
+        let mut next = self.clone();
+        next.count = next
+            .count
+            .checked_add(other.count)
+            .ok_or(MetricError::HistogramOverflow)?;
+        next.sum += other.sum;
+        next.sum_present &= other.sum_present;
+        next.zero_count = next
+            .zero_count
+            .checked_add(other.zero_count)
+            .ok_or(MetricError::HistogramOverflow)?;
+        merge_counts(&mut next.bucket_counts, &other.bucket_counts)?;
         merge_counts(
-            &mut self.positive_bucket_counts,
+            &mut next.positive_bucket_counts,
             &other.positive_bucket_counts,
-        );
+        )?;
         merge_counts(
-            &mut self.negative_bucket_counts,
+            &mut next.negative_bucket_counts,
             &other.negative_bucket_counts,
-        );
-        self.min = optional_min(self.min, other.min);
-        self.max = optional_max(self.max, other.max);
+        )?;
+        next.min = optional_min(next.min, other.min);
+        next.max = optional_max(next.max, other.max);
+        next.validate()?;
+        *self = next;
         Ok(())
     }
 }
@@ -216,3 +238,36 @@ pub use crate::shared_kernel::projection_metric::{
     MetricQuery, MetricRollupV1, MetricSeriesResultV1, MAX_METRIC_QUERY_LIMIT,
     PROJECTION_METRIC_STORE,
 };
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn histogram_overflow_leaves_the_original_buckets_unchanged() {
+        let mut left = MetricHistogramV1 {
+            kind: HistogramKind::Explicit,
+            count: u64::MAX,
+            sum: 0.0,
+            sum_present: false,
+            zero_threshold: 0.0,
+            explicit_bounds: vec![],
+            bucket_counts: vec![u64::MAX],
+            scale: None,
+            zero_count: 0,
+            positive_offset: 0,
+            positive_bucket_counts: vec![],
+            negative_offset: 0,
+            negative_bucket_counts: vec![],
+            min: None,
+            max: None,
+        };
+        let original = left.clone();
+        let mut right = left.clone();
+        right.count = 1;
+        right.bucket_counts = vec![1];
+        assert!(matches!(
+            left.merge(&right),
+            Err(MetricError::HistogramOverflow)
+        ));
+        assert_eq!(left, original);
+    }
+}

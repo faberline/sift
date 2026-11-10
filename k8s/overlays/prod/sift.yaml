@@ -1,4 +1,4 @@
-# HANDWRITE-BEGIN gap="sift-kustomize-prod-instance" tracker="1606" reason="Keep production templates on the supported 1x1 topology until Sift owns safe membership changes."
+# HANDWRITE-BEGIN gap="sift-kustomize-prod-instance" tracker="1606" reason="Use the fixed three-store and three-control production topology. Size storage from application samples before deployment."
 apiVersion: sift.axiom.dev/v1alpha1
 kind: Sift
 metadata:

@@ -5,11 +5,11 @@ use base64::Engine as _;
 
 use crate::app::interfaces::http::api_error::ApiError;
 
-pub(in crate::query) fn encode_query_cursor(signal: &str, value: &str) -> String {
+pub(crate) fn encode_query_cursor(signal: &str, value: &str) -> String {
     format!("{signal}:{}", URL_SAFE_NO_PAD.encode(value.as_bytes()))
 }
 
-pub(in crate::query) fn decode_query_cursor(
+pub(crate) fn decode_query_cursor(
     signal: &str,
     cursor: Option<&str>,
 ) -> Result<Option<String>, ApiError> {

@@ -45,13 +45,36 @@ where
 
     let mut scanned = 0_u64;
     let mut replayed = 0_u64;
+    let (mut source_rows, mut source_bytes, mut entries) = (0u64, 0u64, 0usize);
     let catalog = services.resources.catalog_for_uri(&manifest.catalog_uri)?;
     for entry in catalog.reader(&manifest.catalog_root)? {
+        entries += 1;
+        if entries > 100_000 {
+            bail!("query_limit: archive catalog scan exceeds 100000 entries");
+        }
         let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry?)? else {
             continue;
         };
         if segment.signal != signal {
             continue;
+        }
+        let min = segment.source.min_event_time_unix_nano;
+        let max = segment.source.max_event_time_unix_nano;
+        if min != 0
+            && max >= min
+            && (start.is_some_and(|t| t.timestamp_nanos_opt().is_some_and(|t| max < t))
+                || end.is_some_and(|t| t.timestamp_nanos_opt().is_some_and(|t| min >= t)))
+        {
+            continue;
+        }
+        source_rows = source_rows
+            .checked_add(segment.source.event_count)
+            .context("archive row overflow")?;
+        source_bytes = source_bytes
+            .checked_add(segment.parquet_bytes)
+            .context("archive byte overflow")?;
+        if source_rows > 250_000 || source_bytes > 64 * 1024 * 1024 {
+            bail!("query_limit: archive scan exceeds 250000 rows or 64 MiB; narrow the window");
         }
         let bytes = services.cached_segment_bytes(root, &segment)?;
         let events = services.decode_parquet(&bytes)?;

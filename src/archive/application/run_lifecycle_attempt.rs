@@ -61,14 +61,14 @@ pub(in crate::archive) fn run_lifecycle_attempt(
     let (applied_index, raw_cursor, segments) = state_machine.capture_archive_prefix()?;
     match destination {
         Some(destination) => {
-            let committed_cursor =
-                crate::archive::application::archive_status_queries::committed_status(
-                    services,
-                    journal.storage().root(),
-                )?
-                .map(|status| status.snapshot_index)
-                .unwrap_or_default();
-            let mut commit = if retention_fence.is_none() && raw_cursor > committed_cursor {
+            let previous = crate::archive::application::archive_status_queries::committed_status(
+                services,
+                journal.storage().root(),
+            )?;
+            let committed_cursor = previous.as_ref().map_or(0, |status| status.snapshot_index);
+            let mut commit = if retention_fence.is_none()
+                && (previous.is_none() || raw_cursor > committed_cursor)
+            {
                 let receipt = crate::archive::application::archive_journal_to_gcs::archive_journal_gcs_captured(services,
                     journal,
                     destination,

@@ -46,7 +46,13 @@ where
         sink,
         &mut quarantine,
         service_collector::RuntimeConfig {
-            batch_size: config.batch_size,
+            // One-shot runs must commit a source rejection before reading past it.
+            // Continuous runs can poll after that commit with the chosen batch limit.
+            batch_size: if config.follow {
+                config.batch_size
+            } else {
+                config.batch_size.min(1)
+            },
             max_record_bytes: config.max_line_bytes,
             retry: service_collector::RetryPolicy::new(
                 config.max_retries,

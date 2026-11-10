@@ -264,3 +264,29 @@ domain = "src/operations/domain"
 application = "src/operations/application"
 infrastructure = "src/operations/infrastructure"
 interfaces = "src/operations/interfaces"
+
+[[contexts]]
+name = "control"
+depends_on = ["access", "query"]
+[contexts.layers]
+domain = "src/control/domain"
+application = "src/control/application"
+infrastructure = "src/control/infrastructure"
+interfaces = "src/control/interfaces"
+
+[[contexts]]
+name = "error_reporting"
+depends_on = ["control", "access"]
+[contexts.layers]
+domain = "src/error_reporting/domain"
+application = "src/error_reporting/application"
+interfaces = "src/error_reporting/interfaces"
+
+[[contexts]]
+name = "alerting"
+depends_on = ["control", "error_reporting", "query", "access"]
+[contexts.layers]
+domain = "src/alerting/domain"
+application = "src/alerting/application"
+infrastructure = "src/alerting/infrastructure"
+interfaces = "src/alerting/interfaces"

@@ -57,6 +57,15 @@ impl ServiceState {
                 journal.clone(),
             )?,
         );
+        let control_machine = if role == StorageRole::Control
+            || (role == StorageRole::All && !raft_runtime::replica_mode())
+        {
+            Some(Arc::new(
+                crate::control::infrastructure::state_machine::ControlStateMachine::open(data_dir)?,
+            ))
+        } else {
+            None
+        };
         let (raft, peer_transport, peer_port) = if raft_runtime::replica_mode() {
             let peer_port = std::env::var("SIFT_PEER_PORT")
                 .unwrap_or_else(|_| "7381".to_string())
@@ -64,21 +73,34 @@ impl ServiceState {
                 .context("SIFT_PEER_PORT must be a valid TCP port")?;
             let headless =
                 std::env::var("SIFT_RAFT_HEADLESS").unwrap_or_else(|_| "sift-peer".to_string());
-            let runtime = raft_runtime::ReplicaHostBuilder::new(
+            let builder = raft_runtime::ReplicaHostBuilder::new(
                 "sift",
                 headless,
                 peer_port,
                 "SIFT_PEERS",
                 "https",
                 SiftMembershipPolicy,
-            )?
-            .build_secure(
-                data_dir,
-                state_machine.clone(),
-                "SIFT_PEER",
-                raft_runtime::FsyncPolicy::Always,
-                raft_runtime::HostConfig::default(),
-            )
+            )?;
+            let runtime = if let Some(machine) = control_machine
+                .as_ref()
+                .filter(|_| role == StorageRole::Control)
+            {
+                builder.build_secure(
+                    data_dir,
+                    machine.clone(),
+                    "SIFT_PEER",
+                    raft_runtime::FsyncPolicy::Always,
+                    raft_runtime::HostConfig::default(),
+                )
+            } else {
+                builder.build_secure(
+                    data_dir,
+                    state_machine.clone(),
+                    "SIFT_PEER",
+                    raft_runtime::FsyncPolicy::Always,
+                    raft_runtime::HostConfig::default(),
+                )
+            }
             .context("replicated Sift requires peer mTLS")?;
             (
                 Some(runtime.host),
@@ -130,7 +152,28 @@ impl ServiceState {
             ),
         );
         let archive_services = Arc::new(super::archive_wiring::archive_services());
+        let recovery_guard = Arc::new(
+            crate::operations::domain::recovery_guard::RecoveryGuard::new(
+                std::env::var("SIFT_RECOVERY_DESTINATION").is_ok(),
+            ),
+        );
         Ok(Self {
+            query_failures: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            storage_role: role,
+            recovery_guard: recovery_guard.clone(),
+            archive_serial: Arc::new(tokio::sync::Mutex::new(())),
+            control_serial: Arc::new(tokio::sync::Mutex::new(())),
+            control: control_machine.map(|machine| {
+                super::control_wiring::service(
+                    machine,
+                    if role == StorageRole::Control {
+                        raft.clone()
+                    } else {
+                        None
+                    },
+                    recovery_guard,
+                )
+            }),
             projections,
             journal,
             draining: draining.clone(),
@@ -162,6 +205,10 @@ impl ServiceState {
 
     pub fn projections(&self) -> &ProjectionRuntime {
         &self.projections
+    }
+    pub(crate) fn record_query_failure(&self) {
+        self.query_failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub(crate) fn journal_service(&self) -> Arc<DurableJournal> {
@@ -196,14 +243,32 @@ impl ServiceState {
         &self,
         events: Vec<crate::shared_kernel::event::EventEnvelope>,
     ) -> Result<Vec<crate::shared_kernel::append_result::AppendResult>> {
-        self.ingest_service().append_batch(events).await
+        self.ensure_local_capacity(0)
+            .map_err(|error| anyhow::anyhow!("{}: {}", error.code, error.message))?;
+        self.recovery_guard
+            .check(chrono::Utc::now().timestamp())
+            .map_err(anyhow::Error::msg)?;
+        let results = self.ingest_service().append_batch(events).await?;
+        self.recovery_guard
+            .check(chrono::Utc::now().timestamp())
+            .map_err(anyhow::Error::msg)?;
+        Ok(results)
     }
 
     pub async fn append_events(
         &self,
         events: Vec<crate::shared_kernel::event::EventEnvelope>,
     ) -> Result<Vec<crate::shared_kernel::append_result::AppendResult>> {
-        self.ingest_service().append_events(events).await
+        self.ensure_local_capacity(0)
+            .map_err(|error| anyhow::anyhow!("{}: {}", error.code, error.message))?;
+        self.recovery_guard
+            .check(chrono::Utc::now().timestamp())
+            .map_err(anyhow::Error::msg)?;
+        let results = self.ingest_service().append_events(events).await?;
+        self.recovery_guard
+            .check(chrono::Utc::now().timestamp())
+            .map_err(anyhow::Error::msg)?;
+        Ok(results)
     }
 
     pub fn start_drain(&self) {
@@ -222,6 +287,19 @@ impl ServiceState {
         &self,
         incoming_bytes: usize,
     ) -> Result<(), crate::ingest::domain::admission_error::AdmissionError> {
+        if self.storage_role == StorageRole::Control {
+            return Err(
+                crate::ingest::domain::admission_error::AdmissionError::invalid(
+                    "role_mismatch",
+                    "control nodes accept control commands only",
+                ),
+            );
+        }
+        self.recovery_guard
+            .check(chrono::Utc::now().timestamp())
+            .map_err(
+            crate::ingest::domain::admission_error::AdmissionError::remote_protection_backpressure,
+        )?;
         self.ingest_service().ensure_local_capacity(incoming_bytes)
     }
 }

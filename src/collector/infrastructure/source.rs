@@ -2,8 +2,7 @@
 //! framing, and the bindings of the collector's records to service_collector's
 //! traits.
 
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, Read};
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -46,7 +45,7 @@ pub(crate) type DynCollectorSource = dyn service_collector::CollectorSource<
 
 pub(crate) fn open_source(config: &CollectorConfig) -> Result<Box<DynCollectorSource>> {
     match &config.source {
-        SourceSpec::File(path) => Ok(Box::new(LinearSource::file(
+        SourceSpec::File(path) => Ok(Box::new(super::file_source::FileSource::open(
             path.clone(),
             config.source_id.clone(),
             config.checkpoint_path.clone(),
@@ -63,10 +62,6 @@ pub(crate) fn open_source(config: &CollectorConfig) -> Result<Box<DynCollectorSo
 }
 
 enum LinearReader {
-    File {
-        path: PathBuf,
-        reader: BufReader<File>,
-    },
     Stdin,
 }
 
@@ -81,40 +76,6 @@ struct LinearSource {
 }
 
 impl LinearSource {
-    fn file(path: PathBuf, source_id: String, checkpoint_path: PathBuf) -> Result<Self> {
-        let checkpoint = CollectorCheckpoint::load(&checkpoint_path, &source_id)?;
-        let metadata = std::fs::metadata(&path)
-            .with_context(|| format!("inspect collector source {}", path.display()))?;
-        if !metadata.is_file() {
-            bail!("collector file source must be a regular file");
-        }
-        if metadata.len() < checkpoint.offset {
-            bail!(
-                "collector source was truncated or rotated: size {} is below checkpoint {}; use a new source_id or --cri-root for rotation-aware collection",
-                metadata.len(),
-                checkpoint.offset
-            );
-        }
-        let mut file = File::open(&path)
-            .with_context(|| format!("open collector source {}", path.display()))?;
-        file.seek(SeekFrom::Start(checkpoint.offset))
-            .with_context(|| format!("seek collector source {}", path.display()))?;
-        let read_offset = checkpoint.offset;
-        let read_line = checkpoint.line;
-        Ok(Self {
-            source_id,
-            checkpoint_path,
-            start_offset: read_offset,
-            checkpoint,
-            reader: LinearReader::File {
-                path,
-                reader: BufReader::new(file),
-            },
-            read_offset,
-            read_line,
-        })
-    }
-
     fn stdin(source_id: String, checkpoint_path: PathBuf) -> Result<Self> {
         let checkpoint = CollectorCheckpoint::load(&checkpoint_path, &source_id)?;
         let stdin = std::io::stdin();
@@ -134,7 +95,6 @@ impl LinearSource {
 
     fn read(&mut self, max_bytes: usize) -> Result<BoundedLine> {
         match &mut self.reader {
-            LinearReader::File { reader, .. } => read_bounded_line(reader, max_bytes),
             LinearReader::Stdin => read_bounded_line(&mut std::io::stdin().lock(), max_bytes),
         }
     }
@@ -221,17 +181,6 @@ impl service_collector::CollectorSource for LinearSource {
     }
 
     fn refresh(&mut self) -> Result<()> {
-        if let LinearReader::File { path, .. } = &self.reader {
-            let len = std::fs::metadata(path)
-                .with_context(|| format!("inspect collector source {}", path.display()))?
-                .len();
-            if len < self.read_offset {
-                bail!(
-                    "collector source was truncated or rotated: size {len} is below read offset {}; use --cri-root for rotation-aware collection",
-                    self.read_offset
-                );
-            }
-        }
         Ok(())
     }
 
@@ -248,6 +197,7 @@ impl service_collector::CollectorSource for LinearSource {
 pub(crate) struct BoundedLine {
     pub(crate) bytes_read: u64,
     pub(crate) preview: Vec<u8>,
+    pub(crate) tail: Vec<u8>,
     pub(crate) oversized: bool,
 }
 
@@ -257,6 +207,7 @@ pub(crate) fn read_bounded_line(
 ) -> Result<BoundedLine> {
     let mut bytes_read = 0_u64;
     let mut preview = Vec::with_capacity(max_bytes.min(8192));
+    let mut tail = Vec::with_capacity(256);
     let mut terminated = false;
 
     while !terminated {
@@ -271,6 +222,7 @@ pub(crate) fn read_bounded_line(
             .unwrap_or(available.len());
         let remaining = max_bytes.saturating_add(1).saturating_sub(preview.len());
         preview.extend_from_slice(&available[..consumed.min(remaining)]);
+        super::file_anchor::keep_tail(&mut tail, &available[..consumed]);
         bytes_read = bytes_read
             .checked_add(consumed as u64)
             .context("collector line byte count overflow")?;
@@ -282,6 +234,7 @@ pub(crate) fn read_bounded_line(
         bytes_read,
         oversized: bytes_read > max_bytes as u64,
         preview,
+        tail,
     })
 }
 

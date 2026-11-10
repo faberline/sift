@@ -8,6 +8,7 @@ use service_http::ProjectionMetadata;
 
 use crate::ingest::domain::admission_error::AdmissionError;
 
+#[derive(Debug)]
 pub(crate) struct ApiError {
     status: StatusCode,
     error: &'static str,
@@ -18,6 +19,16 @@ pub(crate) struct ApiError {
 }
 
 impl ApiError {
+    pub(crate) fn conflict(error: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            error,
+            message: message.into(),
+            retryable: false,
+            retry_after_secs: None,
+            projection_lag: None,
+        }
+    }
     pub(crate) fn bad_request(error: &'static str, message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,

@@ -75,6 +75,9 @@ pub struct LogPage {
     pub next_cursor: u64,
     pub projection_cursor: u64,
     pub has_more: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[schema(required = false)]
+    pub incomplete: bool,
 }
 
 schema_adapter!(crate::projection::domain::log::LogRecordV1, LogRecordV1);

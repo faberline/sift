@@ -63,6 +63,7 @@ fn replay_local_events_after_archive<Q, P>(
     mut after: u64,
     projection: &crate::projection::application::replay_service::ReplayService<Q, P>,
 ) -> Result<()> {
+    let (mut scanned, mut bytes) = (0usize, 0usize);
     loop {
         let events = state.journal().query(EventQuery {
             signal: Some(signal),
@@ -74,6 +75,13 @@ fn replay_local_events_after_archive<Q, P>(
         };
         after = last.cursor;
         for event in events {
+            scanned += 1;
+            bytes = bytes
+                .checked_add(serde_json::to_vec(&event)?.len())
+                .context("cold query byte overflow")?;
+            if scanned > 250_000 || bytes > 64 * 1024 * 1024 {
+                anyhow::bail!("query_limit: local archive join exceeds 250000 rows or 64 MiB");
+            }
             if event.event.project != scope.project
                 || scope
                     .environment

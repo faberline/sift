@@ -49,31 +49,54 @@ if [[ "${1:-}" == "--candidate" ]]; then
   }
   export SIFT_SOURCE_REVISION="$candidate_revision"
   bash tests/candidate_root.sh
-  # These are real-service oracles used by the two VAT stdout journeys.
-  # They belong to independent repositories, not this Cargo workspace.
-  missing_binary=0
-  for binary in vat lumen tape relay defer; do
-    if ! binary_path="$(command -v "$binary")" || [[ ! -f "$binary_path" || ! -x "$binary_path" ]]; then
-      echo "candidate requires $binary from its faberline repository on PATH" >&2
-      missing_binary=1
-      continue
-    fi
-    python3 - "$binary" "$binary_path" <<'PY'
-import hashlib, pathlib, sys
-path = pathlib.Path(sys.argv[2]).resolve(strict=True)
-digest = hashlib.sha256()
-with path.open('rb') as stream:
-    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-        digest.update(chunk)
-print(f'candidate oracle {sys.argv[1]}: {path} sha256={digest.hexdigest()}')
-PY
-  done
-  [[ "$missing_binary" == 0 ]] || exit 1
+  if git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
+    [[ "$(git -C "$repo_root" rev-parse HEAD)" == "$candidate_revision" ]] || { echo 'candidate source does not match HEAD' >&2; exit 1; }
+    [[ -z "$(git -C "$repo_root" status --porcelain)" ]] || { echo 'candidate mode requires committed source bytes' >&2; exit 1; }
+  fi
+  candidate_report="${CARGO_TARGET_DIR:-$repo_root/target}/sift-candidate-check.json"
+  rm -f -- "$candidate_report"
+  cargo fmt --all -- --check
   cargo build --locked -p sift --bins
+  source scripts/prepare-test-environment.sh
+  prepare_sift_test_environment
+  for binary in vat lumen tape relay defer; do
+    binary_path="$(command -v "$binary")"
+    [[ -f "$binary_path" && -x "$binary_path" ]] || {
+      echo "candidate requires $binary from its pinned source" >&2
+      exit 1
+    }
+    printf 'candidate oracle %s: ' "$binary"
+    shasum -a 256 "$binary_path"
+  done
   bash scripts/faberline-core-test.sh build-stamp
   cargo test --locked -p sift "$@"
-  cargo test --locked -p sift --test it -- vat_lumen_observability_e2e:: --ignored
-  cargo test --locked -p sift --test it -- vat_service_observability_e2e:: --ignored
+  cargo test --locked -p sift --test it -- --ignored --list | python3 -B -c '
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts/ci"))
+from online import ignored_inventory, load_lock
+expected = load_lock(root / "scripts/ci/online-dependencies.lock.json")["ignored_cases"]
+if not ignored_inventory(sys.stdin.buffer.read(), expected):
+    raise SystemExit("Required ignored-test inventory differs")
+print(f"Required ignored tests: {sum(expected.values())}")
+' "$repo_root"
+  cargo test --locked -p sift --test it -- --ignored --test-threads=1
+  python3 -B scripts/verify-capability-evidence.py \
+    > "${CARGO_TARGET_DIR:-$repo_root/target}/sift-capability-evidence.json"
+  cargo clippy --locked -p sift --all-targets -- -D warnings
+  bash scripts/check-architecture.sh
+  python3 -B scripts/release/verify-release-contract.py --self-test
+  python3 -B scripts/release/production_receipt.py
+  python3 -B scripts/production/test_prepare.py
+  python3 -B scripts/production/test_runtime.py
+  python3 -B scripts/production/test_external_availability.py
+  python3 -B scripts/production/test_exports.py
+  SIFT_PRODUCTION_TEST_BIN="${CARGO_TARGET_DIR:-$repo_root/target}/debug/sift" \
+    python3 -B scripts/production/test_load.py
+  python3 -B scripts/production/test_pilot.py
+  python3 -B scripts/release/make-gke-release-receipt.py --self-test
+  source scripts/prepare-prometheus-oracle.sh
+  verify_official_promql_oracle
   candidate_bin="${CARGO_TARGET_DIR:-$repo_root/target}/debug/sift"
   [[ -x "$candidate_bin" ]] || {
     echo "candidate Sift binary was not produced at $candidate_bin" >&2
@@ -82,6 +105,30 @@ PY
   SIFT_EXPECTED_SOURCE_REVISION="$candidate_revision" \
     bash tests/prometheus_compliance.sh
   bash tests/docker_named_volume.sh
+  python3 -B - "$candidate_revision" "$repo_root" "$candidate_report" <<'PY'
+import datetime,json,os,subprocess,sys,tempfile
+from pathlib import Path
+revision,root,output=sys.argv[1:]
+def git(*args):return subprocess.check_output(['git','-C',root,*args],text=True).strip()
+if git('rev-parse','HEAD')!=revision or git('status','--porcelain'):
+    raise SystemExit('source changed while the candidate gate was running')
+report={'schema':'sift.local-candidate-check/v1','result':'passed','production_accepted':False,
+    'source_commit':revision,'completed_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    'checks':{name:'passed' for name in ['format','locked_build','pinned_core_build_stamp','full_rust_suite',
+        'required_environment_tests','capability_evidence','clippy','strict_architecture','release_contract',
+        'production_receipt_controls','production_preparation_controls','production_runtime_controls','external_availability_controls',
+        'production_comparison_controls','production_load_driver','production_pilot_controls','official_prometheus_oracle',
+        'remote_write_compliance','docker_named_volume']}}
+path=Path(output)
+fd,temporary=tempfile.mkstemp(prefix='.sift-candidate-check-',dir=path.parent)
+try:
+    with os.fdopen(fd,'w') as out:
+        json.dump(report,out,indent=2);out.write('\n');out.flush();os.fsync(out.fileno())
+    os.replace(temporary,path)
+finally:
+    if os.path.exists(temporary):os.unlink(temporary)
+print('PASS: exact source candidate checks; GKE production acceptance remains pending')
+PY
   exit 0
 fi
 

@@ -70,17 +70,34 @@ struct TailLogsToolArgs {
     request: Value,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[schemars(crate = "schemars1")]
+struct ControlToolArgs {
+    project: String,
+    after: Option<String>,
+}
+
 #[tool_router]
 impl SiftMcpServer {
     #[tool(
         name = "sift_query",
-        description = "Query Sift logs, metrics, or traces with QueryRequestV1",
+        description = "Query Sift logs, metrics, or traces with a V1 or V2 request",
         annotations(read_only_hint = true)
     )]
     async fn sift_query(
         &self,
         Parameters(args): Parameters<QueryToolArgs>,
     ) -> std::result::Result<Json<Value>, ErrorData> {
+        if args.request.get("version").and_then(Value::as_u64) == Some(2) {
+            let request = parse_tool_request(args.request, "QueryRequestV2")?;
+            return self
+                .api
+                .query_v2(&request)
+                .await
+                .and_then(|response| serde_json::to_value(response).map_err(Into::into))
+                .map(Json)
+                .map_err(tool_api_error);
+        }
         let request: QueryRequestV1 = parse_tool_request(args.request, "QueryRequestV1")?;
         request
             .validate()
@@ -177,6 +194,65 @@ impl SiftMcpServer {
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         self.api
             .tail_logs(&request)
+            .await
+            .map(Json)
+            .map_err(tool_api_error)
+    }
+
+    #[tool(
+        name = "sift_list_alert_rules",
+        description = "Read alert rules in one project",
+        annotations(read_only_hint = true)
+    )]
+    async fn sift_list_alert_rules(
+        &self,
+        Parameters(args): Parameters<ControlToolArgs>,
+    ) -> Result<Json<Value>, ErrorData> {
+        self.read_control(args, "alert-rules").await
+    }
+    #[tool(
+        name = "sift_list_alerts",
+        description = "Read alert states in one project",
+        annotations(read_only_hint = true)
+    )]
+    async fn sift_list_alerts(
+        &self,
+        Parameters(args): Parameters<ControlToolArgs>,
+    ) -> Result<Json<Value>, ErrorData> {
+        self.read_control(args, "alerts").await
+    }
+    #[tool(
+        name = "sift_list_error_groups",
+        description = "Read error groups in one project",
+        annotations(read_only_hint = true)
+    )]
+    async fn sift_list_error_groups(
+        &self,
+        Parameters(args): Parameters<ControlToolArgs>,
+    ) -> Result<Json<Value>, ErrorData> {
+        self.read_control(args, "error-groups").await
+    }
+    #[tool(
+        name = "sift_list_saved_queries",
+        description = "Read saved queries in one project",
+        annotations(read_only_hint = true)
+    )]
+    async fn sift_list_saved_queries(
+        &self,
+        Parameters(args): Parameters<ControlToolArgs>,
+    ) -> Result<Json<Value>, ErrorData> {
+        self.read_control(args, "saved-queries").await
+    }
+}
+
+impl SiftMcpServer {
+    async fn read_control(
+        &self,
+        args: ControlToolArgs,
+        collection: &str,
+    ) -> Result<Json<Value>, ErrorData> {
+        self.api
+            .control_records(&args.project, collection, args.after.as_deref())
             .await
             .map(Json)
             .map_err(tool_api_error)
