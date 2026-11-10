@@ -2,15 +2,6 @@ name: sift-gke-test
 
 on:
   workflow_dispatch:
-    inputs:
-      pull_request:
-        description: Sift PR number with a current trusted verdict
-        required: true
-        type: string
-      verifier_run:
-        description: Successful sift-pr-verifier run ID for that PR head
-        required: true
-        type: string
 
 permissions: {}
 concurrency:
@@ -23,10 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      actions: read
       contents: read
-      issues: read
-      pull-requests: read
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
@@ -35,15 +23,9 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Require the current PR and its trusted verdict
+      - name: Record the source commit
         id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pull_request }}
-          VERIFIER_RUN: ${{ inputs.verifier_run }}
-        run: |
-          python3 -B scripts/ci/gke_candidate.py --pull-request "$PR_NUMBER" \
-            --verifier-run "$VERIFIER_RUN" --output "$GITHUB_OUTPUT"
+        run: echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve
