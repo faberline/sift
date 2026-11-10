@@ -2,7 +2,7 @@
 name = "sift"
 version = "0.2.0"
 edition = "2021"
-authors = ["Chris Cheng <chris.cheng.c4@gmail.com>"]
+authors = ["Faberline contributors"]
 license = "MIT"
 repository = "https://github.com/faberline/sift"
 description = "Sift — one SRE product for logs, metrics, and traces"

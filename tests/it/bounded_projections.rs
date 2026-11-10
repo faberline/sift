@@ -128,6 +128,15 @@ fn trace_projection_bounds_spans_and_dedupe_metadata_together() {
 }
 
 #[test]
+fn trace_projection_descriptor_reports_the_configured_span_bound() {
+    let projection = TraceProjection::with_max_spans(10).unwrap();
+    assert_eq!(projection.descriptor().retention, "latest-10-spans");
+
+    let projection = TraceProjection::new();
+    assert_eq!(projection.descriptor().retention, "latest-100000-spans");
+}
+
+#[test]
 fn metric_projection_bounds_retained_points_without_event_id_identity() {
     let projection = MetricProjection::with_limits(10, 10).unwrap();
     for cursor in 1..=100 {
