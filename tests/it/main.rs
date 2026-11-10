@@ -19,6 +19,7 @@ mod kind_mvp_contract;
 mod kubernetes_auth;
 mod live_backup;
 mod local_backpressure;
+mod local_runtime_journey;
 mod logging_store;
 mod mcp_library_boundary;
 mod mcp_surface;
