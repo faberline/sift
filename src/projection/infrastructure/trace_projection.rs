@@ -223,7 +223,7 @@ impl Projection for TraceProjection {
         ProjectionDescriptor {
             name: PROJECTION_TRACE_STORE.into(),
             schema_version: TRACE_SCHEMA_VERSION,
-            retention: "raw-journal-retention".into(),
+            retention: format!("latest-{0}-spans", self.max_spans),
         }
     }
 
