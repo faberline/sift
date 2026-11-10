@@ -14,7 +14,7 @@ fill_sections: [e2e-test, tool-contract]
 e2e_tests:
   - id: sift-long-running-stability-resilience
     capability_id: long-running-stability
-    claim_id: ingest-query-replay-soak
+    claim_id: baseline-ingest-and-restart-resilience
     contract_id: sift.resilience.v1
     category: stability
     command: "cargo test -p sift --test it -- stability_e2e:: --nocapture"
