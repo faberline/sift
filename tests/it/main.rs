@@ -38,6 +38,7 @@ mod phase_one_surface;
 mod production_workflow;
 mod projection_runtime;
 mod prometheus_api;
+mod prometheus_semantics;
 mod raft_batch;
 mod raft_dedupe_determinism;
 mod raft_failover;
