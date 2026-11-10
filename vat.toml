@@ -8,9 +8,6 @@ base = "."
 workdir = "."
 keep = "always"
 
-[env]
-PATH = "/Users/chrischeng/.rustup/toolchains/stable-aarch64-apple-darwin/bin:/Users/chrischeng/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin"
-
 [[services]]
 id = "sift"
 cmd = ["sh", "-c", "CARGO_TARGET_DIR=\"$VAT_WORKSPACE_BASE/target\" cargo build -p sift --bin sift && exec \"$VAT_WORKSPACE_BASE/target/debug/sift\" serve --host 127.0.0.1 --data-dir \"/tmp/sift-vat-data-$$\""]
