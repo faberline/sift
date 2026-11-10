@@ -33,6 +33,16 @@ pub(crate) async fn admin_integrity(
     Query(query): Query<IntegrityHttpQuery>,
 ) -> Result<Json<IntegrityReportV1>, ApiError> {
     authorize_global_admin(principal.as_ref().map(|principal| &principal.0))?;
+    tokio::task::spawn_blocking(move || integrity_report(&state, query))
+        .await
+        .map_err(|error| ApiError::internal(format!("integrity worker failed: {error}")))?
+        .map(Json)
+}
+
+fn integrity_report(
+    state: &ServiceState,
+    query: IntegrityHttpQuery,
+) -> Result<IntegrityReportV1, ApiError> {
     let project = query.project.trim();
     if project.is_empty() {
         return Err(ApiError::bad_request(
@@ -88,7 +98,7 @@ pub(crate) async fn admin_integrity(
         }
     }
 
-    Ok(Json(IntegrityReportV1 {
+    Ok(IntegrityReportV1 {
         version: 1,
         project: project.to_string(),
         cluster_id: layout.cluster_id,
@@ -124,5 +134,5 @@ pub(crate) async fn admin_integrity(
                     .is_some_and(|status| status.retention_scan_pending),
             },
         },
-    }))
+    })
 }

@@ -229,3 +229,81 @@ async fn query_rejects_unknown_versions_and_invalid_regex() {
     .await;
     assert_eq!(regex.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn v2_hot_history_survives_without_archive_and_cold_history_stays_retryable() {
+    use chrono::{Duration, SecondsFormat, Utc};
+    for (age, expected_status) in [
+        (Duration::minutes(20), StatusCode::OK),
+        (Duration::days(31), StatusCode::SERVICE_UNAVAILABLE),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let state = Arc::new(ServiceState::open(temp.path()).unwrap());
+        let end = Utc::now() - age;
+        for index in 0..3 {
+            let time = end - Duration::seconds(2 - index);
+            let mut point = metric();
+            point.event_id = format!("history-{index}");
+            point.occurred_at = time.to_rfc3339_opts(SecondsFormat::Nanos, true);
+            point.observed_at.clone_from(&point.occurred_at);
+            let metric = point.metric.as_mut().unwrap();
+            metric.name = "pilot_counter".into();
+            metric.temporality = MetricTemporality::Cumulative;
+            metric.value = 10.0 + index as f64;
+            state.journal().append(point).unwrap();
+        }
+        for project in ["project-a", "project-b"] {
+            let mut event = log(project, "historical error");
+            event.project = project.into();
+            event.occurred_at = end.to_rfc3339_opts(SecondsFormat::Nanos, true);
+            event.observed_at.clone_from(&event.occurred_at);
+            state.journal().append(event).unwrap();
+        }
+        let app = router(state);
+        let end_text = end.to_rfc3339_opts(SecondsFormat::Nanos, true);
+        for signal in [
+            serde_json::json!({"kind":"metrics", "expression":"sum(rate(pilot_counter[2s]))"}),
+            serde_json::json!({"kind":"logs_count"}),
+        ] {
+            let metrics = signal["kind"] == "metrics";
+            let range = if metrics {
+                serde_json::json!({"end":end_text})
+            } else {
+                serde_json::json!({
+                    "start":(end - Duration::seconds(1)).to_rfc3339_opts(SecondsFormat::Nanos,true),
+                    "end":(end + Duration::seconds(1)).to_rfc3339_opts(SecondsFormat::Nanos,true)})
+            };
+            let response = post_json(
+                &app,
+                "/api/v2/query",
+                serde_json::json!({
+                "version":2,"project":"project-a","environment":"prod", "time_range":range,
+                "signal":signal}),
+            )
+            .await;
+            assert_eq!(
+                response.status(),
+                expected_status,
+                "age={age}, metrics={metrics}"
+            );
+            let body = body_json(response).await;
+            if expected_status == StatusCode::SERVICE_UNAVAILABLE {
+                assert_eq!(body["error"], "retention_checkpoint_pending");
+                assert_eq!(body["retryable"], true);
+            } else if metrics {
+                assert_eq!(body["partial"], false);
+                assert_eq!(body["data"]["result"].as_array().unwrap().len(), 1);
+                let rate = body["data"]["result"][0]["value"][1]
+                    .as_str()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap();
+                assert!((rate - 1.0).abs() < 1e-10, "{body}");
+            } else {
+                assert_eq!(body["partial"], false);
+                assert_eq!(body["data"]["count"], 1);
+                assert_eq!(body["data"]["exact"], true);
+            }
+        }
+    }
+}

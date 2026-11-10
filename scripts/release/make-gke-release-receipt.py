@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
-"""Create a public, redacted GKE release receipt for one shared-script app.
+"""Create a public, redacted Sift GKE release receipt.
 
-The receipt binds one verified release candidate (its final manifest bytes,
-commit, run, and image digests) to one digest-pinned GKE acceptance run. Two
-evidence backends exist, selected per app by scripts/release/apps.sh:
+For 0.2.0 and later, --production-acceptance binds all production gates to
+the exact candidate manifest, source commit, and immutable image. Historical
+0.1 releases retain the legacy GCP evidence contract.
 
-  --backend gcp             acceptance/gcp evidence (run.json, images.json,
-                            acceptance.json, cleanup.json). Used by sift.
-  --backend gke-acceptance  one .github/workflows/gke-acceptance.yml run that
-                            was dispatched with the candidate image: the
-                            `gh run view --json ...` record plus the downloaded
-                            evidence bundle. Used by keep, relay, and defer.
-
-The evidence bundle carries a kubeconfig; this script never reads, hashes,
-or copies it. `--self-test` exercises both backends on synthetic evidence,
-including the negative controls, without any network access.
+This script never reads or copies a kubeconfig or credentials. Self-tests use
+synthetic evidence and never qualify a production release.
 """
 
 from __future__ import annotations
@@ -67,6 +59,7 @@ APPS: Dict[str, Dict[str, Any]] = {
     "relay": {"backend": "gke-acceptance", "targets": TWO_TARGETS, "functional": HARNESS_FIELDS},
     "defer": {"backend": "gke-acceptance", "targets": TWO_TARGETS, "functional": HARNESS_FIELDS},
 }
+APPS = {"sift": APPS["sift"]}
 
 
 def candidate_schema(app: str) -> str:
@@ -363,6 +356,7 @@ def make_receipt(
     cleanup: Optional[Path] = None,
     gh_run: Optional[Path] = None,
     evidence_dir: Optional[Path] = None,
+    production_acceptance: Optional[Path] = None,
 ) -> Dict[str, Any]:
     if app not in APPS:
         fail(f"unknown shared-script app: {app} (known: {' '.join(sorted(APPS))})")
@@ -371,47 +365,59 @@ def make_receipt(
     candidate_raw, candidate_manifest_json = load_json(candidate_manifest, "candidate manifest")
     candidate = validate_candidate(app, candidate_raw, candidate_manifest_json)
     image = f"{IMAGE_OWNER}/{app}@{candidate['root_digest']}"
-    if backend == "gcp":
-        if run is None or images is None or acceptance is None or cleanup is None:
-            fail("backend gcp needs --run, --images, --acceptance, and --cleanup")
-        run_raw, run_json = load_json(run, "GKE run evidence")
-        images_raw, images_json = load_json(images, "GKE image evidence")
-        acceptance_raw, acceptance_json = load_json(acceptance, "GKE functional evidence")
-        cleanup_raw, cleanup_json = load_json(cleanup, "GKE cleanup evidence")
-        run_id, functional, public_cleanup = validate_gcp(app, candidate, run_json, images_json, acceptance_json, cleanup_json)
-        gke = {
-            "backend": "gcp",
-            "run_id": run_id,
-            "image": image,
-            "image_provenance": "prebuilt",
-            "functional": functional,
-            "cleanup": public_cleanup,
-        }
-        evidence = {
-            "run_sha256": sha256(run_raw),
-            "images_sha256": sha256(images_raw),
-            "acceptance_sha256": sha256(acceptance_raw),
-            "cleanup_sha256": sha256(cleanup_raw),
-        }
-    elif backend == "gke-acceptance":
-        if gh_run is None or evidence_dir is None:
-            fail("backend gke-acceptance needs --gh-run and --evidence-dir")
-        gh_raw, gh_json = load_json(gh_run, "gh run record")
-        run_id, run_url, functional, public_cleanup, evidence = validate_gke_acceptance(app, candidate, gh_json, evidence_dir)
-        evidence["gh_run_sha256"] = sha256(gh_raw)
-        gke = {
-            "backend": "gke-acceptance",
-            "run_id": run_id,
-            "run_url": run_url,
-            "image": image,
-            "image_provenance": "prebuilt",
-            "functional": functional,
-            "cleanup": public_cleanup,
-        }
+    production = None
+    production_version = tuple(map(int,candidate['version'].split('.'))) >= (0,2,0)
+    if production_version:
+        from production_receipt import load_proof
+        try: production, proof_hash = load_proof(production_acceptance,candidate,image)
+        except (ValueError,KeyError,TypeError) as error: fail(str(error))
+        gke = {'backend':'gcp','run_id':'prod-'+candidate['commit'][:12]+'-'+proof_hash[:12],
+            'image':image,'image_provenance':'prebuilt',
+            'functional':{name:'passed' for name in production['gates']},
+            'cleanup':production['cleanup']}
+        evidence = {'production_acceptance_sha256':proof_hash}
     else:
-        fail(f"unknown backend: {backend}")
+        if backend == "gcp":
+            if run is None or images is None or acceptance is None or cleanup is None:
+                fail("backend gcp needs --run, --images, --acceptance, and --cleanup")
+            run_raw, run_json = load_json(run, "GKE run evidence")
+            images_raw, images_json = load_json(images, "GKE image evidence")
+            acceptance_raw, acceptance_json = load_json(acceptance, "GKE functional evidence")
+            cleanup_raw, cleanup_json = load_json(cleanup, "GKE cleanup evidence")
+            run_id, functional, public_cleanup = validate_gcp(app, candidate, run_json, images_json, acceptance_json, cleanup_json)
+            gke = {
+                "backend": "gcp",
+                "run_id": run_id,
+                "image": image,
+                "image_provenance": "prebuilt",
+                "functional": functional,
+                "cleanup": public_cleanup,
+            }
+            evidence = {
+                "run_sha256": sha256(run_raw),
+                "images_sha256": sha256(images_raw),
+                "acceptance_sha256": sha256(acceptance_raw),
+                "cleanup_sha256": sha256(cleanup_raw),
+            }
+        elif backend == "gke-acceptance":
+            if gh_run is None or evidence_dir is None:
+                fail("backend gke-acceptance needs --gh-run and --evidence-dir")
+            gh_raw, gh_json = load_json(gh_run, "gh run record")
+            run_id, run_url, functional, public_cleanup, evidence = validate_gke_acceptance(app, candidate, gh_json, evidence_dir)
+            evidence["gh_run_sha256"] = sha256(gh_raw)
+            gke = {
+                "backend": "gke-acceptance",
+                "run_id": run_id,
+                "run_url": run_url,
+                "image": image,
+                "image_provenance": "prebuilt",
+                "functional": functional,
+                "cleanup": public_cleanup,
+            }
+        else:
+            fail(f"unknown backend: {backend}")
     receipt = {
-        "schema": receipt_schema(app),
+        "schema": f"{app}.gke-release-receipt/v2" if production_version else receipt_schema(app),
         "complete": True,
         "result": "passed",
         "candidate": candidate,
@@ -425,6 +431,7 @@ def make_receipt(
             "command_output_retained": False,
         },
     }
+    if production is not None: receipt['production'] = production
     data = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
     if output.is_symlink():
         fail("output must not be a symlink")
@@ -604,106 +611,6 @@ def self_test() -> None:
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
 
-        # --- gke-acceptance backend (keep) ---------------------------------
-        app = "keep"
-        base = tmp / app
-        candidate = fixture_candidate(app, "0.4.13", commit)
-        image = f"{IMAGE_OWNER}/{app}@{candidate['image']['root_digest']}"
-        manifest_path = base / "final-candidate-manifest.json"
-        _write_json(manifest_path, candidate)
-        gh_run_path = base / "gh-run.json"
-        _write_json(gh_run_path, fixture_gke_acceptance(app, commit, image))
-        evidence = base / "evidence"
-        write_harness_evidence(app, evidence, image)
-        output = base / f"{app}-gke-receipt.json"
-
-        def run_keep(manifest=manifest_path, gh=gh_run_path, ev=evidence, out=output):
-            return make_receipt(app, "gke-acceptance", manifest, out, gh_run=gh, evidence_dir=ev)
-
-        receipt = run_keep()
-        positive += 1
-        assert receipt["gke"]["run_id"] == "gha-99001-1", receipt["gke"]
-        assert receipt["gke"]["backend"] == "gke-acceptance"
-        assert set(receipt["evidence"]) == {"gh_run_sha256", "manifests_sha256", "results_sha256", "verdict_sha256"}
-        kube_bytes = (evidence / "kubeconfig").read_bytes()
-        rendered = json.dumps(receipt)
-        assert sha256(kube_bytes) not in rendered
-        assert "apiVersion: v1" not in rendered and "kind: Config" not in rendered
-        assert not any("kubeconfig" in key for key in receipt["evidence"])
-        assert receipt["redaction"]["kubeconfig_retained"] is False
-        sidecar = output.with_name(output.name + ".sha256")
-        assert sidecar.read_text() == f"{sha256(output.read_bytes())}  {output.name}\n"
-        expect_refusal("wrong backend for keep", lambda: make_receipt(app, "gcp", manifest_path, output, run=gh_run_path, images=gh_run_path, acceptance=gh_run_path, cleanup=gh_run_path))
-        negative += 1
-        expect_refusal("wrong output name", lambda: make_receipt(app, "gke-acceptance", manifest_path, base / "receipt.json", gh_run=gh_run_path, evidence_dir=evidence))
-        negative += 1
-
-        def mutated_gh(label: str, mutate: Callable[[Dict[str, Any]], None]) -> None:
-            nonlocal negative
-            record = copy.deepcopy(json.loads(gh_run_path.read_text()))
-            mutate(record)
-            path = base / f"gh-{negative}.json"
-            _write_json(path, record)
-            expect_refusal(label, lambda: run_keep(gh=path))
-            negative += 1
-
-        def acceptance_job(record: Dict[str, Any]) -> Dict[str, Any]:
-            return next(job for job in record["jobs"] if job["name"] == ACCEPTANCE_JOB)
-
-        def find_step(record: Dict[str, Any], name: str) -> Dict[str, Any]:
-            return next(step for step in acceptance_job(record)["steps"] if step["name"] == name)
-
-        mutated_gh("run conclusion failure", lambda r: r.update(conclusion="failure"))
-        mutated_gh("run not completed", lambda r: r.update(status="in_progress"))
-        mutated_gh("headSha mismatch", lambda r: r.update(headSha="f" * 40))
-        mutated_gh("displayTitle without image", lambda r: r.update(displayTitle=f"gke-acceptance {app} @ {commit}"))
-        mutated_gh("displayTitle other app", lambda r: r.update(displayTitle=f"gke-acceptance relay @ {commit} image={image}"))
-        mutated_gh("other workflow", lambda r: r.update(workflowName="keep-test-image"))
-        mutated_gh("push event", lambda r: r.update(event="push"))
-        mutated_gh("foreign url", lambda r: r.update(url="https://github.com/someone/else/actions/runs/99001"))
-        mutated_gh("build job ran", lambda r: r["jobs"][0].update(conclusion="success"))
-        mutated_gh("park step failed", lambda r: find_step(r, PARK_STEP).update(conclusion="failure"))
-        mutated_gh("verify image step skipped", lambda r: find_step(r, VERIFY_IMAGE_STEP).update(conclusion="skipped"))
-        mutated_gh("harness step absent", lambda r: acceptance_job(r)["steps"].remove(find_step(r, HARNESS_STEP)))
-        mutated_gh("acceptance job failed", lambda r: acceptance_job(r).update(conclusion="failure"))
-        mutated_gh("two acceptance jobs", lambda r: r["jobs"].append(copy.deepcopy(acceptance_job(r))))
-
-        def mutated_evidence(label: str, mutate: Callable[[Path], None]) -> None:
-            nonlocal negative
-            path = base / f"evidence-{negative}"
-            shutil.copytree(evidence, path)
-            mutate(path)
-            expect_refusal(label, lambda: run_keep(ev=path))
-            negative += 1
-
-        def drop(path: Path) -> None:
-            path.rename(path.with_name(path.name + ".absent"))
-
-        mutated_evidence("verdict FAIL", lambda p: (p / app / "verdict.txt").write_text(f"[{app}] FAIL: readyz\n"))
-        mutated_evidence("results FAIL", lambda p: (p / "results.txt").write_text(f"{app} FAIL\n"))
-        mutated_evidence("results extra app", lambda p: (p / "results.txt").write_text(f"{app} PASS\nrelay PASS\n"))
-        mutated_evidence("manifests other image", lambda p: (p / app / "manifests.yaml").write_text(f"image: {IMAGE_OWNER}/{app}:latest\n"))
-        mutated_evidence("teardown missing", lambda p: drop(p / app / "teardown.log"))
-        mutated_evidence("verdict missing", lambda p: drop(p / app / "verdict.txt"))
-
-        def mutated_manifest(label: str, mutate: Callable[[Dict[str, Any]], None]) -> None:
-            nonlocal negative
-            record = copy.deepcopy(candidate)
-            mutate(record)
-            path = base / f"manifest-{negative}.json"
-            _write_json(path, record)
-            expect_refusal(label, lambda: run_keep(manifest=path))
-            negative += 1
-
-        mutated_manifest("candidate job failed", lambda c: c["jobs"].update({"verify-candidate": "failure"}))
-        mutated_manifest("candidate job missing", lambda c: c["jobs"].pop("keep-release-gates"))
-        mutated_manifest("root equals amd64", lambda c: c["image"].update(root_digest=c["image"]["amd64_digest"]))
-        mutated_manifest("foreign image repository", lambda c: c["image"].update(repository=f"{IMAGE_OWNER}/relay"))
-        mutated_manifest("tag mismatch", lambda c: c.update(tag="keep@0.4.14"))
-        mutated_manifest("built from a branch", lambda c: c.update(source_ref="refs/heads/feature"))
-        mutated_manifest("candidate tag not run scoped", lambda c: c.update(candidate_tag="release-candidate-1-1"))
-        mutated_manifest("extra target", lambda c: c["artifacts"].append(dict(c["artifacts"][0], target="aarch64-apple-darwin")))
-
         # --- gcp backend (sift) -------------------------------------------
         app = "sift"
         base = tmp / app
@@ -764,6 +671,7 @@ def self_test() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--production-acceptance",type=Path,help="0.2.0: complete same-candidate production gates")
     parser.add_argument("--app", choices=sorted(APPS))
     parser.add_argument("--backend", choices=("gcp", "gke-acceptance"))
     parser.add_argument("--candidate-manifest", type=Path)
@@ -792,6 +700,7 @@ def main() -> None:
         cleanup=args.cleanup,
         gh_run=args.gh_run,
         evidence_dir=args.evidence_dir,
+        production_acceptance=args.production_acceptance,
     )
     print(f"GKE receipt written: {args.output}")
 

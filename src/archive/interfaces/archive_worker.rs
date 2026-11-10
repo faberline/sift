@@ -28,6 +28,7 @@ impl ServiceState {
         interval: std::time::Duration,
     ) -> ArchiveWorker {
         let ctx = self.lifecycle_context(destination);
+        let archive_serial = self.archive_serial();
         let (shutdown, mut shutdown_rx) = tokio::sync::watch::channel(false);
         let task = tokio::spawn(async move {
             loop {
@@ -36,6 +37,7 @@ impl ServiceState {
                     None => true,
                 };
                 if leader {
+                    let _serial = archive_serial.lock().await;
                     run_lifecycle_tick(&ctx).await;
                 }
 

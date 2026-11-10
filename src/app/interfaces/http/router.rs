@@ -29,8 +29,48 @@ use crate::query::interfaces::mcp::mcp_transport::http_router;
 pub fn router(state: Arc<ServiceState>) -> Router {
     Router::new()
         .route("/api/v1/query", post(query_v1))
+        .route(
+            "/api/v2/query",
+            post(crate::query::interfaces::http::query_v2::query_v2),
+        )
+        .route("/api/v1/recovery/data", post(super::recovery::capture))
+        .route(
+            "/api/v1/saved-queries",
+            get(crate::control::interfaces::http::saved_queries),
+        )
+        .route(
+            "/api/v1/error-groups",
+            get(crate::error_reporting::interfaces::http::error_groups),
+        )
+        .route(
+            "/api/v1/error-groups/{id}",
+            axum::routing::put(crate::error_reporting::interfaces::http::set_status),
+        )
+        .route(
+            "/api/v1/alert-rules",
+            get(crate::alerting::interfaces::http::rules),
+        )
+        .route(
+            "/api/v1/alert-rules/{id}",
+            axum::routing::put(crate::alerting::interfaces::http::put_rule)
+                .delete(crate::alerting::interfaces::http::delete_rule),
+        )
+        .route(
+            "/api/v1/alerts",
+            get(crate::alerting::interfaces::http::alerts),
+        )
+        .route(
+            "/api/v1/alerts/{id}/mute",
+            axum::routing::put(crate::alerting::interfaces::http::mute),
+        )
+        .route(
+            "/api/v1/saved-queries/{id}",
+            axum::routing::put(crate::control::interfaces::http::put_saved_query)
+                .delete(crate::control::interfaces::http::delete_saved_query),
+        )
         .route("/api/v1/logs/tail", post(tail_logs_v1))
         .route("/api/v1/traces/{trace_id}", get(get_trace))
+        .route("/v1/traces/{id}", get(get_trace))
         .route("/api/v1/correlate", post(correlate_v1))
         .route("/api/v1/services", get(list_services_v1))
         .route("/api/v1/queries/{query_id}", get(get_query_job_v1))

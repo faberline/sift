@@ -15,10 +15,10 @@ RELEASE_COMPATIBILITY_LINE="- Compatibility: no HTTP, CLI, wire format, on-disk 
 release_refuse() { printf 'refused: %s\n' "$*" >&2; exit 2; }
 
 release_app_known() {
-  case "$1" in tape|sift|keep|relay|defer) return 0 ;; *) return 1 ;; esac
+  case "$1" in sift) return 0 ;; *) return 1 ;; esac
 }
 release_app_require() {
-  release_app_known "${1:-}" || release_refuse "unknown release app: ${1:-<none>} (known: tape sift keep relay defer)"
+  release_app_known "${1:-}" || release_refuse "unknown release app: ${1:-<none>} (known: sift)"
 }
 # Where the app's Cargo.toml, build.sh, and Dockerfile.release live.
 release_app_root() {

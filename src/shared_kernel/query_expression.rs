@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+// Keep this published V1 Rust enum and its wire shape stable.
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum QueryExpressionV1 {
     And {

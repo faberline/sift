@@ -38,7 +38,12 @@ pub(super) fn decode_logs_proto(
                     OtlpSignal::Logs,
                     project,
                     &resource,
-                    stable_id("log", project, &identity),
+                    stable_id(
+                        "log",
+                        project,
+                        &serde_json::to_string(&(&resource, &scope, identity))
+                            .expect("log identity"),
+                    ),
                     record.time_unix_nano,
                     record.observed_time_unix_nano,
                     json!({

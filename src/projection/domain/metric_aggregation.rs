@@ -128,10 +128,13 @@ fn merge_histogram_refs<'a>(
     Ok(merged)
 }
 
-pub(super) fn merge_counts(left: &mut [u64], right: &[u64]) {
+pub(super) fn merge_counts(left: &mut [u64], right: &[u64]) -> Result<(), MetricError> {
     for (left, right) in left.iter_mut().zip(right) {
-        *left = left.saturating_add(*right);
+        *left = left
+            .checked_add(*right)
+            .ok_or(MetricError::HistogramOverflow)?;
     }
+    Ok(())
 }
 
 pub(super) fn optional_min(left: Option<f64>, right: Option<f64>) -> Option<f64> {

@@ -30,6 +30,11 @@ rules:
   - apiGroups: [""]
     resources: ["services", "endpoints", "configmaps", "persistentvolumeclaims", "serviceaccounts"]
     verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  # Kubernetes requires the operator to hold the read verbs it delegates to
+  # each namespace-scoped metrics agent Role.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["statefulsets", "deployments", "daemonsets"]
     verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
@@ -102,7 +107,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: operator
-          image: ghcr.io/faberline/sift:0.1.2
+          image: ghcr.io/faberline/sift:0.2.0
           imagePullPolicy: IfNotPresent
           args: ["k8s", "operator", "run"]
           resources:

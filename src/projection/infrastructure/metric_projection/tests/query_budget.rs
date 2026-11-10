@@ -6,6 +6,27 @@ use crate::projection::domain::metric::{HistogramKind, MetricHistogramV1, Metric
 use super::*;
 
 #[test]
+fn retention_boundary_makes_a_truncated_window_explicit() {
+    let projection = MetricProjection::with_limits(10, 2).unwrap();
+    let id = "a".repeat(64);
+    let mut series = test_series(
+        &id,
+        Vec::new(),
+        vec![chunk(vec![
+            test_point(1, 1_000_000_000),
+            test_point(2, 2_000_000_000),
+            test_point(3, 3_000_000_000),
+        ])],
+    );
+    projection.evict_series_to_limit(&mut series, 3).unwrap();
+    projection.state.write().unwrap().series.insert(id, series);
+    let mut query = MetricQuery::for_project("project-a");
+    assert!(projection.query(&query).unwrap().incomplete);
+    query.start_time = Some("1970-01-01T00:00:02Z".into());
+    assert!(!projection.query(&query).unwrap().incomplete);
+}
+
+#[test]
 fn query_rejects_source_history_before_materializing_it() {
     let projection = MetricProjection::with_limits(10, 100).unwrap();
     let series_id = "a".repeat(64);
@@ -148,6 +169,8 @@ fn query_rejects_a_large_resident_histogram_by_byte_budget() {
         kind: HistogramKind::Explicit,
         count: 2_049,
         sum: 2_049.0,
+        sum_present: true,
+        zero_threshold: 0.0,
         explicit_bounds: (0..2_048).map(|value| value as f64).collect(),
         bucket_counts: vec![1; 2_049],
         scale: None,

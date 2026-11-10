@@ -5,6 +5,10 @@ use chrono::{DateTime, Utc};
 use crate::query::domain::query_failure::QueryFailure;
 use crate::shared_kernel::query_request::QueryRequestV1;
 
+pub(in crate::query) fn requires_archive_at(start: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    start < now - chrono::Duration::days(30)
+}
+
 pub(in crate::query) fn cold_query_requested_at(
     request: &QueryRequestV1,
     now: DateTime<Utc>,
@@ -13,7 +17,7 @@ pub(in crate::query) fn cold_query_requested_at(
         return false;
     };
     DateTime::parse_from_rfc3339(start)
-        .map(|start| start.with_timezone(&Utc) < now - chrono::Duration::days(30))
+        .map(|start| requires_archive_at(start.with_timezone(&Utc), now))
         .unwrap_or(false)
 }
 

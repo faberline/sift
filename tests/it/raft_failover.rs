@@ -1,6 +1,6 @@
-//! Three durable Sift voters retain acknowledged data across leader loss.
+//! Three durable Sift voters retain acknowledged data across repeated leader loss.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, future::pending, net::SocketAddr, sync::Arc, time::Duration};
 
 use raft_runtime::{
     FsyncPolicy, HostConfig, Membership, PeerTransport, RaftHost, RaftStateMachine, RaftStore,
@@ -9,9 +9,17 @@ use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair,
 };
-use sift::{journal::SiftStateMachine, DurableJournal, EventEnvelope, EventQuery, SignalKind};
+use sift::{
+    journal::SiftStateMachine, DurableJournal, EventEnvelope, EventQuery, SignalKind, StoredEvent,
+};
 use tempfile::TempDir;
-use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::oneshot,
+    task::{JoinHandle, JoinSet},
+};
+
+const WAIT: Duration = Duration::from_secs(10);
 
 struct Authority {
     cert: Certificate,
@@ -32,7 +40,7 @@ impl Authority {
 }
 
 struct PeerMaterial {
-    _dir: TempDir,
+    dir: TempDir,
     config: peer_tls::PeerTlsConfig,
 }
 
@@ -57,7 +65,7 @@ fn peer_material(authority: &Authority, id: u64) -> PeerMaterial {
     std::fs::write(&key_path, key.serialize_pem()).unwrap();
     std::fs::write(&ca_path, authority.cert.pem()).unwrap();
     PeerMaterial {
-        _dir: dir,
+        dir,
         config: peer_tls::PeerTlsConfig {
             cert: cert_path,
             key: key_path,
@@ -68,22 +76,124 @@ fn peer_material(authority: &Authority, id: u64) -> PeerMaterial {
 }
 
 struct Node {
-    host: Option<Arc<RaftHost>>,
-    journal: Arc<DurableJournal>,
-    _state_machine: Arc<SiftStateMachine>,
-    listener: JoinHandle<anyhow::Result<()>>,
-    shutdown: Option<oneshot::Sender<()>>,
-    _data: TempDir,
-    _material: PeerMaterial,
+    running: Option<RunningNode>,
+    data: TempDir,
+    material: PeerMaterial,
 }
 
-fn event(id: &str) -> EventEnvelope {
-    let mut event = EventEnvelope::for_project(
+struct RunningNode {
+    host: RaftHost,
+    journal: Arc<DurableJournal>,
+    listener: JoinHandle<anyhow::Result<()>>,
+    shutdown: oneshot::Sender<()>,
+}
+
+impl Node {
+    async fn start(&mut self, id: usize, peer_listener: TcpListener, urls: &[String]) {
+        assert!(self.running.is_none(), "voter {id} is already running");
+        let data = self.data.path();
+        let journal = Arc::new(DurableJournal::open(data).unwrap());
+        let state_machine = Arc::new(SiftStateMachine::open(data, journal.clone()).unwrap());
+        let transport = PeerTransport::from_config(&self.material.config).unwrap();
+        let peers = urls
+            .iter()
+            .enumerate()
+            .filter(|(peer, _)| *peer != id)
+            .map(|(peer, url)| (peer as u64, url.clone()))
+            .collect::<HashMap<_, _>>();
+        let host = RaftHost::spawn_with_peer_transport(
+            id as u64,
+            Membership {
+                voters: vec![0, 1, 2],
+                learners: Vec::new(),
+            },
+            peers,
+            RaftStore::open(data.to_str().unwrap(), id as u64, FsyncPolicy::Always).unwrap(),
+            state_machine as Arc<dyn RaftStateMachine>,
+            HostConfig::default(),
+            transport.clone(),
+        );
+        let local = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = local.local_addr().unwrap();
+        let router = host.router();
+        let (shutdown, stop) = oneshot::channel();
+        let listener = tokio::spawn(async move {
+            tokio::select! {
+                result = transport.serve(local, router, pending()) => result,
+                result = peer_link(peer_listener, target, stop) => result.map_err(Into::into),
+            }
+        });
+        self.running = Some(RunningNode {
+            host,
+            journal,
+            listener,
+            shutdown,
+        });
+    }
+
+    fn live(&self) -> &RunningNode {
+        self.running.as_ref().expect("running voter")
+    }
+
+    async fn crash(&mut self) {
+        let RunningNode {
+            host,
+            journal,
+            listener,
+            shutdown,
+        } = self.running.take().expect("running voter to stop");
+        let old_journal = Arc::downgrade(&journal);
+        drop(host);
+        drop(journal);
+        shutdown.send(()).expect("stop the peer link");
+        tokio::time::timeout(WAIT, listener)
+            .await
+            .expect("peer listener shutdown")
+            .expect("peer listener task")
+            .expect("peer listener result");
+        tokio::time::timeout(WAIT, async {
+            while old_journal.strong_count() != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("stopped voter released its journal");
+    }
+}
+
+// Cut every live socket on failure while leaving the real mTLS peer transport
+// responsible for handshakes and Raft requests.
+async fn peer_link(
+    listener: TcpListener,
+    target: SocketAddr,
+    mut stop: oneshot::Receiver<()>,
+) -> std::io::Result<()> {
+    let mut connections = JoinSet::new();
+    loop {
+        tokio::select! {
+            _ = &mut stop => break,
+            stream = listener.accept() => {
+                let (mut peer, _) = stream?;
+                connections.spawn(async move {
+                    let mut backend = TcpStream::connect(target).await?;
+                    tokio::io::copy_bidirectional(&mut peer, &mut backend).await
+                });
+            }
+            _ = connections.join_next(), if !connections.is_empty() => {}
+        }
+    }
+    connections.shutdown().await;
+    Ok(())
+}
+
+fn event(id: &str, observed_at: chrono::DateTime<chrono::Utc>) -> EventEnvelope {
+    let mut event = EventEnvelope::for_project_at(
         "project-a",
         "prod",
         id,
         SignalKind::Log,
         serde_json::json!({"message":"replicated"}),
+        observed_at,
     );
     event
         .resource
@@ -102,8 +212,8 @@ fn command(event: EventEnvelope) -> Vec<u8> {
 async fn wait_for_leader(nodes: &[Node]) -> usize {
     for _ in 0..400 {
         for (index, node) in nodes.iter().enumerate() {
-            if let Some(host) = &node.host {
-                if host.is_leader().await {
+            if let Some(running) = &node.running {
+                if running.host.is_leader().await {
                     return index;
                 }
             }
@@ -117,7 +227,8 @@ async fn wait_for_event(nodes: &[Node], id: &str, required: usize) {
     for _ in 0..400 {
         let present = nodes
             .iter()
-            .filter(|node| node.host.is_some() && has_event(&node.journal, id))
+            .filter_map(|node| node.running.as_ref())
+            .filter(|node| has_event(&node.journal, id))
             .count();
         if present >= required {
             return;
@@ -128,115 +239,128 @@ async fn wait_for_event(nodes: &[Node], id: &str, required: usize) {
 }
 
 fn has_event(journal: &DurableJournal, id: &str) -> bool {
+    events(journal)
+        .iter()
+        .any(|stored| stored.event.event_id == id)
+}
+
+fn events(journal: &DurableJournal) -> Vec<StoredEvent> {
     journal
         .query(EventQuery {
             limit: 100,
             ..EventQuery::default()
         })
         .unwrap()
-        .iter()
-        .any(|stored| stored.event.event_id == id)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn acknowledged_data_survives_leader_loss_over_mutual_tls() {
     let authority = Authority::generate();
+    let observed_at = chrono::Utc::now();
     let mut listeners = Vec::new();
+    let mut addresses = Vec::new();
     let mut urls = Vec::new();
     for _ in 0..3 {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        urls.push(format!(
-            "https://localhost:{}",
-            listener.local_addr().unwrap().port()
-        ));
+        let address = listener.local_addr().unwrap();
+        addresses.push(address);
+        urls.push(format!("https://localhost:{}", address.port()));
         listeners.push(listener);
     }
 
     let mut nodes = Vec::new();
     for (id, listener) in listeners.into_iter().enumerate() {
-        let id = id as u64;
-        let data = tempfile::tempdir().unwrap();
-        let journal = Arc::new(DurableJournal::open(data.path()).unwrap());
-        let state_machine = Arc::new(SiftStateMachine::open(data.path(), journal.clone()).unwrap());
-        let material = peer_material(&authority, id);
-        let transport = PeerTransport::from_config(&material.config).unwrap();
-        let peers = urls
-            .iter()
-            .enumerate()
-            .filter(|(peer, _)| *peer as u64 != id)
-            .map(|(peer, url)| (peer as u64, url.clone()))
-            .collect::<HashMap<_, _>>();
-        let host = Arc::new(RaftHost::spawn_with_peer_transport(
-            id,
-            Membership {
-                voters: vec![0, 1, 2],
-                learners: Vec::new(),
-            },
-            peers,
-            RaftStore::open(data.path().to_str().unwrap(), id, FsyncPolicy::Always).unwrap(),
-            state_machine.clone() as Arc<dyn RaftStateMachine>,
-            HostConfig::default(),
-            transport.clone(),
-        ));
-        let router = host.router();
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let listener_task = tokio::spawn(async move {
-            transport
-                .serve(listener, router, async {
-                    let _ = shutdown_rx.await;
-                })
-                .await
-        });
-        nodes.push(Node {
-            host: Some(host),
-            journal,
-            _state_machine: state_machine,
-            listener: listener_task,
-            shutdown: Some(shutdown_tx),
-            _data: data,
-            _material: material,
-        });
+        let mut node = Node {
+            running: None,
+            data: tempfile::tempdir().unwrap(),
+            material: peer_material(&authority, id as u64),
+        };
+        node.start(id, listener, &urls).await;
+        nodes.push(node);
     }
 
     let first_leader = wait_for_leader(&nodes).await;
     nodes[first_leader]
+        .live()
         .host
-        .as_ref()
-        .unwrap()
-        .propose(command(event("before-failure")))
+        .propose(command(event("before-failure", observed_at)))
         .await
         .expect("two durable voters acknowledge the first batch");
     wait_for_event(&nodes, "before-failure", 3).await;
+    let first_batch = events(&nodes[first_leader].live().journal);
+    assert_eq!(first_batch.len(), 1);
 
-    nodes[first_leader].listener.abort();
-    nodes[first_leader].shutdown.take();
-    nodes[first_leader].host.take();
+    nodes[first_leader].crash().await;
 
     let second_leader = wait_for_leader(&nodes).await;
     assert_ne!(second_leader, first_leader);
     nodes[second_leader]
+        .live()
         .host
-        .as_ref()
-        .unwrap()
-        .propose(command(event("after-failure")))
+        .propose(command(event("after-failure", observed_at)))
         .await
         .expect("the surviving quorum accepts a second batch");
     wait_for_event(&nodes, "after-failure", 2).await;
+    let second_batch = events(&nodes[second_leader].live().journal);
+    assert_eq!(second_batch.len(), 2);
+    assert_eq!(&second_batch[..1], first_batch);
 
-    for node in nodes.iter().filter(|node| node.host.is_some()) {
-        assert!(has_event(&node.journal, "before-failure"));
-        assert!(has_event(&node.journal, "after-failure"));
+    for running in nodes.iter().filter_map(|node| node.running.as_ref()) {
+        assert_eq!(events(&running.journal), second_batch);
     }
 
-    for node in &mut nodes {
-        if let Some(host) = node.host.take() {
-            let _ = host.shutdown().await;
-        }
-        if let Some(shutdown) = node.shutdown.take() {
-            let _ = shutdown.send(());
-        }
+    let restored = &mut nodes[first_leader];
+    let stopped_journal = DurableJournal::open(restored.data.path()).unwrap();
+    assert_eq!(events(&stopped_journal), first_batch);
+    drop(stopped_journal);
+    let listener = TcpListener::bind(addresses[first_leader]).await.unwrap();
+    restored.start(first_leader, listener, &urls).await;
+    wait_for_event(&nodes, "after-failure", 3).await;
+    assert_eq!(events(&nodes[first_leader].live().journal), second_batch);
+
+    let next_leader = wait_for_leader(&nodes).await;
+    assert_ne!(next_leader, first_leader);
+    nodes[next_leader].crash().await;
+    let final_leader = wait_for_leader(&nodes).await;
+    assert_ne!(final_leader, next_leader);
+    nodes[final_leader]
+        .live()
+        .host
+        .propose(command(event("after-second-failure", observed_at)))
+        .await
+        .expect("the quorum with the restored voter accepts a third batch");
+    wait_for_event(&nodes, "after-second-failure", 2).await;
+
+    let final_batch = events(&nodes[final_leader].live().journal);
+    assert_eq!(final_batch.len(), 3);
+    assert_eq!(&final_batch[..2], second_batch);
+    for running in nodes.iter().filter_map(|node| node.running.as_ref()) {
+        assert_eq!(events(&running.journal), final_batch);
     }
-    for node in nodes {
-        let _ = node.listener.await;
+    assert_eq!(events(&nodes[first_leader].live().journal), final_batch);
+
+    for (id, (mut node, address)) in nodes.into_iter().zip(addresses).enumerate() {
+        if node.running.is_some() {
+            node.crash().await;
+        }
+        let journal = DurableJournal::open(node.data.path()).unwrap();
+        let expected = if id == next_leader {
+            &second_batch
+        } else {
+            &final_batch
+        };
+        assert_eq!(&events(&journal), expected);
+        drop(journal);
+        TcpListener::bind(address)
+            .await
+            .expect("peer port released");
+        node.data.close().expect("remove temporary voter data");
+        node.material
+            .dir
+            .close()
+            .expect("remove temporary voter PKI");
     }
+    eprintln!(
+        "stopped leaders {first_leader} and {next_leader}; final leader {final_leader}; retained three acknowledged events"
+    );
 }

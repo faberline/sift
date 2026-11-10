@@ -41,6 +41,13 @@ impl MetricProjection {
                     store.mark_obsolete(mutation_cursor, std::slice::from_ref(&sealed.key))?;
                 }
                 series.sealed_chunks.remove(0);
+                series.dropped_through_time = Some(
+                    series
+                        .dropped_through_time
+                        .map_or(chunk.end_time_unix_nano, |t| {
+                            t.max(chunk.end_time_unix_nano)
+                        }),
+                );
                 series.point_count = series.point_count.saturating_sub(chunk.points.len());
                 work = work.saturating_add(chunk.points.len() as u64);
                 continue;

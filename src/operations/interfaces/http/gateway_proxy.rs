@@ -19,6 +19,22 @@ pub fn query_router(store_endpoint: &str, max_body_bytes: usize) -> Result<Route
     router(store_endpoint, None, max_body_bytes)
 }
 
+pub fn gateway_router_with_control(
+    store: &str,
+    query: &str,
+    control: &str,
+    max_body_bytes: usize,
+) -> Result<Router> {
+    service_http::reverse_proxy_router(
+        SiftRolePolicy::new(
+            endpoint(store, "store")?,
+            Some(endpoint(query, "query")?),
+            max_body_bytes,
+        )
+        .with_control(endpoint(control, "control")?),
+    )
+}
+
 fn router(
     store_endpoint: &str,
     query_endpoint: Option<&str>,

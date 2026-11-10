@@ -5,6 +5,8 @@
 pub(crate) mod json_logs_decoder;
 pub(crate) mod json_metrics_decoder;
 pub(crate) mod json_traces_decoder;
+pub(crate) mod metric_json_fields;
+pub(crate) mod metric_normalization;
 pub(crate) mod otlp_codec;
 pub(crate) mod otlp_event_builder;
 pub(crate) mod otlp_json_attributes;

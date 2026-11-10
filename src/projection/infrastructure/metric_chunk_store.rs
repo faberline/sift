@@ -79,6 +79,16 @@ impl MetricChunkStore {
     }
 
     pub(super) fn read(&self, sealed: &SealedMetricChunk) -> Result<MetricChunkV1> {
+        self.read_versioned(sealed, false)
+    }
+
+    pub(super) fn migrate_metadata(&self, sealed: &mut SealedMetricChunk) -> Result<()> {
+        let chunk = self.read_versioned(sealed, true)?;
+        sealed.materialized_bytes = metric_chunk_memory_bytes(&chunk)?;
+        Ok(())
+    }
+
+    fn read_versioned(&self, sealed: &SealedMetricChunk, migrate: bool) -> Result<MetricChunkV1> {
         let path = self.path_for(&sealed.key)?;
         let bytes = fs::read(&path)
             .with_context(|| format!("read sealed metric chunk {}", path.display()))?;
@@ -89,7 +99,7 @@ impl MetricChunkStore {
             serde_json::from_slice(&bytes).context("decode sealed metric chunk")?;
         if chunk.points.len() != sealed.point_count
             || bytes.len() != sealed.encoded_bytes
-            || metric_chunk_memory_bytes(&chunk)? != sealed.materialized_bytes
+            || (!migrate && metric_chunk_memory_bytes(&chunk)? != sealed.materialized_bytes)
             || chunk.start_time_unix_nano != sealed.start_time_unix_nano
             || chunk.end_time_unix_nano != sealed.end_time_unix_nano
             || chunk.points.is_empty()

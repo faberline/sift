@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const LOGGING_SCHEMA_VERSION: u32 = 3;
@@ -33,6 +34,25 @@ impl LogQuery {
 pub(in crate::projection) struct LoggingState {
     pub(in crate::projection) records: BTreeMap<u64, LogRecordV1>,
     pub(in crate::projection) projection_cursor: u64,
+    pub(in crate::projection) retention_boundary: Option<LogRetentionBoundary>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub(in crate::projection) struct LogRetentionBoundary {
+    pub through_cursor: u64,
+    pub latest_time: Option<DateTime<Utc>>,
+}
+
+impl LoggingState {
+    pub(in crate::projection) fn incomplete(&self, after: u64, bounds: &QueryBounds) -> bool {
+        self.retention_boundary.as_ref().is_some_and(|boundary| {
+            after < boundary.through_cursor
+                && bounds
+                    .start
+                    .zip(boundary.latest_time)
+                    .is_none_or(|(start, latest)| start <= latest)
+        })
+    }
 }
 
 pub(in crate::projection) struct QueryBounds {
@@ -47,6 +67,9 @@ pub(in crate::projection) fn record_matches(
     candidates: Option<&HashSet<String>>,
 ) -> bool {
     if record.project != query.project
+        || query
+            .max_cursor
+            .is_some_and(|cursor| record.cursor > cursor)
         || query
             .environment
             .as_ref()

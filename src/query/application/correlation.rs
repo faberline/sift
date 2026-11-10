@@ -54,11 +54,15 @@ pub(crate) fn correlate(
     log_query.service_name = request.service.clone();
     log_query.attribute_equals = attributes.clone();
     log_query.limit = request.limit;
-    let logs = state
+    let mut warnings = Vec::new();
+    let log_page = state
         .projections()
         .query_logs(&log_query)
-        .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
-        .records;
+        .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?;
+    if log_page.incomplete || log_page.has_more {
+        warnings.push("correlated logs exceed retained data or the requested limit".into());
+    }
+    let logs = log_page.records;
 
     let mut metric_query = projection::MetricQuery::for_project(&request.project);
     metric_query.environment = request.environment.clone();
@@ -71,11 +75,18 @@ pub(crate) fn correlate(
             .insert("service.name".into(), service.clone());
     }
     metric_query.limit = projection::MAX_METRIC_QUERY_LIMIT;
-    let mut metrics = state
+    let metric_page = state
         .projections()
         .query_metrics(&metric_query)
-        .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
-        .series;
+        .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?;
+    if metric_page.incomplete
+        || metric_page.has_more
+        || metric_page.overflowed_points > 0
+        || metric_page.overflowed_series > 0
+    {
+        warnings.push("correlated metrics exceed retained data or the source limit".into());
+    }
+    let mut metrics = metric_page.series;
     if request.trace_id.is_some() || request.span_id.is_some() {
         metrics.retain(|series| {
             series.points.iter().any(|point| {
@@ -92,16 +103,22 @@ pub(crate) fn correlate(
             })
         });
     }
+    if metrics.len() > request.limit {
+        warnings.push("correlated metrics exceed the requested limit".into());
+    }
     metrics.truncate(request.limit);
-
-    let mut warnings = Vec::new();
     let traces = if let Some(trace_id) = &request.trace_id {
         match state
             .projections()
             .get_trace(&request.project, trace_id)
             .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
         {
-            Some(trace) => vec![trace],
+            Some(trace) => {
+                if trace.partial {
+                    warnings.push("correlated trace has incomplete spans".into());
+                }
+                vec![trace]
+            }
             None => {
                 warnings.push(format!("trace `{trace_id}` was not found"));
                 Vec::new()
@@ -125,11 +142,16 @@ pub(crate) fn correlate(
         trace_query.service = request.service.clone();
         trace_query.attributes = attributes;
         trace_query.limit = request.limit;
-        let mut traces = state
+        let trace_page = state
             .projections()
             .query_traces(&trace_query)
-            .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?
-            .traces;
+            .map_err(|error| ApiError::bad_request("invalid_correlation", error.to_string()))?;
+        if trace_page.has_more || trace_page.traces.iter().any(|trace| trace.partial) {
+            warnings.push(
+                "correlated traces exceed the requested limit or have incomplete spans".into(),
+            );
+        }
+        let mut traces = trace_page.traces;
         if let Some(span_id) = &request.span_id {
             traces.retain(|trace| trace.spans.iter().any(|span| &span.span_id == span_id));
         }

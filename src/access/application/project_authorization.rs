@@ -20,6 +20,13 @@ pub(crate) fn authorize_project_read(
     authorize_project_role(principal, project, Role::Read)
 }
 
+pub(crate) fn authorize_project_admin(
+    principal: Option<&RoleMapPrincipal>,
+    project: &str,
+) -> Result<(), ApiError> {
+    authorize_project_role(principal, project, Role::Admin)
+}
+
 pub(crate) fn authorize_global_admin(principal: Option<&RoleMapPrincipal>) -> Result<(), ApiError> {
     match principal {
         None | Some(RoleMapPrincipal::Open) => Ok(()),

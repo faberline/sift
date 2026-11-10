@@ -28,9 +28,9 @@ pub(crate) async fn admin_backup(
     principal: Option<Extension<RoleMapPrincipal>>,
 ) -> Result<Response, ApiError> {
     authorize_global_admin(principal.as_ref().map(|principal| &principal.0))?;
-    let snapshot = state
-        .journal()
-        .snapshot_bytes()
+    let snapshot = tokio::task::spawn_blocking(move || state.journal().snapshot_bytes())
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
         .map_err(|error| ApiError::internal(format!("create durable journal snapshot: {error}")))?;
     tracing::info!(
         event = "backup_started",

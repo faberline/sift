@@ -2,6 +2,7 @@
 //! the thread-local counters of point measurements and materializations.
 
 mod chunk_metadata;
+mod migration;
 mod query_budget;
 
 use std::collections::BTreeMap;
@@ -19,6 +20,7 @@ use super::*;
 
 fn test_point(cursor: u64, time_unix_nano: i64) -> MetricPointV1 {
     MetricPointV1 {
+        start_time_unix_nano: None,
         cursor,
         event_id: format!("event-{cursor}"),
         occurred_at: "1970-01-01T00:00:10Z".into(),
@@ -55,6 +57,7 @@ fn test_series(
         resource: BTreeMap::new(),
         attributes: BTreeMap::new(),
         overflow: false,
+        dropped_through_time: None,
         sealed_chunks,
         chunks,
         point_count,

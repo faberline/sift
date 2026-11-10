@@ -59,6 +59,15 @@ spec:
                       additionalProperties: { type: string }
                 auth: { type: string, enum: ["off", "required", "kubernetes"] }
                 tokensSecret: { type: string }
+                alerting:
+                  type: object
+                  properties:
+                    webhookSecret: { type: string, minLength: 1 }
+                    allowedHosts:
+                      type: array
+                      maxItems: 32
+                      x-kubernetes-list-type: set
+                      items: { type: string, maxLength: 253, pattern: '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' }
                 gcpProjectId: { type: string, minLength: 1 }
                 gkeClusterName: { type: string, minLength: 1 }
                 gkeLocation: { type: string, minLength: 1 }

@@ -4,6 +4,7 @@ use crate::query::domain::api_port::SiftApiPort;
 use crate::shared_kernel::query_phase_one::{CorrelationRequestV1, LogTailRequestV1};
 use crate::shared_kernel::query_request::QueryRequestV1;
 use crate::shared_kernel::query_response::QueryResponseV1;
+use crate::shared_kernel::query_v2::{QueryRequestV2, QueryResponseV2};
 use anyhow::Result;
 use serde_json::Value;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ impl SiftApiClient {
     pub(crate) fn from_port(port: Arc<dyn SiftApiPort<Error = anyhow::Error>>) -> Self {
         Self { port }
     }
-    pub(in crate::query) fn with_token(&self, token: Option<String>) -> Self {
+    pub fn with_token(&self, token: Option<String>) -> Self {
         Self::from_port(self.port.with_token(token))
     }
     pub(in crate::query) fn endpoint_origin(&self) -> String {
@@ -25,6 +26,17 @@ impl SiftApiClient {
     }
     pub async fn query(&self, request: &QueryRequestV1) -> Result<QueryResponseV1> {
         self.port.query(request).await
+    }
+    pub async fn query_v2(&self, request: &QueryRequestV2) -> Result<QueryResponseV2> {
+        self.port.query_v2(request).await
+    }
+    pub async fn control_records(
+        &self,
+        project: &str,
+        collection: &str,
+        after: Option<&str>,
+    ) -> Result<Value> {
+        self.port.control_records(project, collection, after).await
     }
     pub(in crate::query) async fn query_value(&self, request: &QueryRequestV1) -> Result<Value> {
         self.port.query_value(request).await

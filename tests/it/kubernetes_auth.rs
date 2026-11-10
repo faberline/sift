@@ -133,7 +133,7 @@ async fn a_subject_access_review_deny_is_a_forbidden_response() {
 }
 
 #[tokio::test]
-async fn a_reviewed_project_admin_can_use_the_global_backup_handler() {
+async fn global_backup_requires_a_namespace_admin_review() {
     let backend = Arc::new(ReviewRecorder {
         allow: true,
         accesses: Mutex::new(Vec::new()),
@@ -157,6 +157,46 @@ async fn a_reviewed_project_admin_can_use_the_global_backup_handler() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let accesses = backend.accesses.lock().unwrap();
-    assert_eq!(accesses[0].name.as_deref(), Some("project-a"));
+    assert_eq!(accesses[0].name.as_deref(), None);
     assert_eq!(accesses[0].verb, "update");
+}
+
+#[tokio::test]
+async fn project_admin_cannot_write_control_records_in_another_project() {
+    let backend = Arc::new(ReviewRecorder {
+        allow: true,
+        accesses: Mutex::new(Vec::new()),
+    });
+    let verifier = Arc::new(
+        SiftVerifier::kubernetes(backend.clone(), "sift.axiom.dev", "observability").unwrap(),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let app = protected_router(Arc::new(ServiceState::open(dir.path()).unwrap()), verifier);
+    for (project, expected) in [
+        ("project-a", StatusCode::OK),
+        ("project-b", StatusCode::FORBIDDEN),
+    ] {
+        let value = serde_json::json!({"project":project,"request_id":format!("write-{project}"),"expected_revision":0,
+            "value":{"request":{"version":2,"project":project,"signal":{"kind":"metrics","expression":"up"}}}});
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/saved-queries/q")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer projected-service-account-token")
+                    .header("x-sift-project", "project-a")
+                    .body(Body::from(serde_json::to_vec(&value).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    let reviews = backend.accesses.lock().unwrap();
+    assert!(reviews
+        .iter()
+        .all(|review| review.name.as_deref() == Some("project-a")));
+    assert_eq!(reviews[0].verb, "update");
 }

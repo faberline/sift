@@ -1,0 +1,485 @@
+{
+  "prometheus_version": "3.5.0",
+  "interval_seconds": 30,
+  "evaluation_seconds": 180,
+  "series": [
+    {
+      "labels": {
+        "__name__": "requests_total",
+        "instance": "a",
+        "job": "api"
+      },
+      "values": [
+        0,
+        10,
+        20,
+        5,
+        15,
+        25,
+        35
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "requests_total",
+        "instance": "b",
+        "job": "api"
+      },
+      "values": [
+        0,
+        2,
+        4,
+        6,
+        8,
+        10,
+        12
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "failed_total",
+        "instance": "a",
+        "job": "api"
+      },
+      "values": [
+        0,
+        1,
+        2,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "failed_total",
+        "instance": "b",
+        "job": "api"
+      },
+      "values": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "cpu",
+        "instance": "a",
+        "job": "api"
+      },
+      "values": [
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        0.75
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "cpu",
+        "instance": "b",
+        "job": "api"
+      },
+      "values": [
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "latency_bucket",
+        "job": "api",
+        "le": "0.1"
+      },
+      "values": [
+        0,
+        2,
+        4,
+        6,
+        8,
+        10,
+        12
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "latency_bucket",
+        "job": "api",
+        "le": "1"
+      },
+      "values": [
+        0,
+        8,
+        16,
+        24,
+        32,
+        40,
+        48
+      ]
+    },
+    {
+      "labels": {
+        "__name__": "latency_bucket",
+        "job": "api",
+        "le": "+Inf"
+      },
+      "values": [
+        0,
+        10,
+        20,
+        30,
+        40,
+        50,
+        60
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "expression": "rate(requests_total[3m])",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 0.3
+          },
+          {
+            "labels": {
+              "instance": "b",
+              "job": "api"
+            },
+            "value": 0.06666666666666667
+          }
+        ]
+      }
+    },
+    {
+      "expression": "increase(requests_total[3m])",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 54
+          },
+          {
+            "labels": {
+              "instance": "b",
+              "job": "api"
+            },
+            "value": 12
+          }
+        ]
+      }
+    },
+    {
+      "expression": "sum by (job) (rate(requests_total[3m]))",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "job": "api"
+            },
+            "value": 0.36666666666666664
+          }
+        ]
+      }
+    },
+    {
+      "expression": "avg(cpu)",
+      "result": {
+        "vector": [
+          {
+            "labels": {},
+            "value": 0.5
+          }
+        ]
+      }
+    },
+    {
+      "expression": "max(cpu)",
+      "result": {
+        "vector": [
+          {
+            "labels": {},
+            "value": 0.75
+          }
+        ]
+      }
+    },
+    {
+      "expression": "min(cpu)",
+      "result": {
+        "vector": [
+          {
+            "labels": {},
+            "value": 0.25
+          }
+        ]
+      }
+    },
+    {
+      "expression": "count(cpu)",
+      "result": {
+        "vector": [
+          {
+            "labels": {},
+            "value": 2
+          }
+        ]
+      }
+    },
+    {
+      "expression": "requests_total / on(instance) failed_total",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "instance": "a"
+            },
+            "value": 7
+          },
+          {
+            "labels": {
+              "instance": "b"
+            },
+            "value": 12
+          }
+        ]
+      }
+    },
+    {
+      "expression": "requests_total + failed_total",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 40
+          },
+          {
+            "labels": {
+              "instance": "b",
+              "job": "api"
+            },
+            "value": 13
+          }
+        ]
+      }
+    },
+    {
+      "expression": "cpu * 100 - 5",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 70
+          },
+          {
+            "labels": {
+              "instance": "b",
+              "job": "api"
+            },
+            "value": 20
+          }
+        ]
+      }
+    },
+    {
+      "expression": "requests_total > 20",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "__name__": "requests_total",
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 35
+          }
+        ]
+      }
+    },
+    {
+      "expression": "requests_total > bool 20",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 1
+          },
+          {
+            "labels": {
+              "instance": "b",
+              "job": "api"
+            },
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "expression": "2 < cpu * 10",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 7.5
+          },
+          {
+            "labels": {
+              "instance": "b",
+              "job": "api"
+            },
+            "value": 2.5
+          }
+        ]
+      }
+    },
+    {
+      "expression": "cpu{instance=~\"a\"}",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "__name__": "cpu",
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 0.75
+          }
+        ]
+      }
+    },
+    {
+      "expression": "cpu{instance=~\"a.\"}",
+      "result": {
+        "vector": []
+      }
+    },
+    {
+      "expression": "cpu{zone=\"\"}",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "__name__": "cpu",
+              "instance": "a",
+              "job": "api"
+            },
+            "value": 0.75
+          },
+          {
+            "labels": {
+              "__name__": "cpu",
+              "instance": "b",
+              "job": "api"
+            },
+            "value": 0.25
+          }
+        ]
+      }
+    },
+    {
+      "expression": "histogram_quantile(0.5, sum by (job,le) (rate(latency_bucket[3m])))",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "job": "api"
+            },
+            "value": 0.5499999999999999
+          }
+        ]
+      }
+    },
+    {
+      "expression": "histogram_quantile(0.95, sum by (job,le) (rate(latency_bucket[3m])))",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "job": "api"
+            },
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "expression": "histogram_quantile(0.99, sum by (job,le) (rate(latency_bucket[3m])))",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "job": "api"
+            },
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "expression": "sum by (__name__) (cpu)",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "__name__": "cpu"
+            },
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "expression": "sum without(instance) (cpu)",
+      "result": {
+        "vector": [
+          {
+            "labels": {
+              "job": "api"
+            },
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "expression": "(2 + 3) * 4 / 2",
+      "result": {
+        "scalar": 10
+      }
+    }
+  ]
+}

@@ -64,7 +64,11 @@ fn json_log_event(
         OtlpSignal::Logs,
         project,
         resource,
-        stable_id("log", project, &identity),
+        stable_id(
+            "log",
+            project,
+            &serde_json::to_string(&(resource, &scope, identity)).expect("log identity"),
+        ),
         occurred_nanos,
         observed_nanos,
         record.clone(),
