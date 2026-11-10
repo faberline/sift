@@ -5,6 +5,7 @@ mod bounded_dedupe_window;
 mod bounded_journal;
 mod bounded_projections;
 mod bounded_raft_state;
+mod capability_evidence;
 mod cli_contract;
 mod collector_cri;
 mod collector_library_boundary;
