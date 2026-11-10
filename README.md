@@ -275,7 +275,7 @@ this repository. Sift owns the adapter and compatibility tests for every
 external contract that it adopts.
 
 The runtime OpenAPI document is available at `/openapi.json`. Each test listed
-below is an explicit Cargo test target under `e2e`.
+below is an explicit Cargo test target under `tests`.
 
 ## Capabilities
 
