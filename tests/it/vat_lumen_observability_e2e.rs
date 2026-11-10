@@ -270,10 +270,7 @@ async fn vat_runner_observability_probe() {
         "collection_create_or_extend"
     );
     assert_eq!(record["attributes"]["collection_id"]["value"], "vat-trace");
-    assert_eq!(
-        record["body_text"],
-        record["json_payload"]["body"]["stringValue"]
-    );
+    assert_eq!(record["body_text"], record["json_payload"]["message"]);
     assert!(record["body_text"]
         .as_str()
         .is_some_and(|value| !value.is_empty()));

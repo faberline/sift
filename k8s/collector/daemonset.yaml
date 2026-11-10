@@ -62,7 +62,7 @@ spec:
               mountPath: /var/lib/sift
       containers:
         - name: collector
-          image: ghcr.io/faberline/sift:0.1.2
+          image: ghcr.io/faberline/sift:0.2.0
           imagePullPolicy: IfNotPresent
           args:
             - collect

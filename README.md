@@ -9,9 +9,10 @@ Kubernetes resource. A small installation can run the `all` role. A larger GKE
 installation can run the same binary as `agent`, `gateway`, `query`, `store`,
 `control`, or `operator` roles.
 
-Sift is Agent First. Phase one has no Web UI. It exposes read-only tools for
-agents and operators. It does not expose the old generic event, profile, audit,
-evaluation, or separate error-report APIs.
+Sift is Agent First. It has no Web UI. Agents use read-only MCP tools.
+Operators manage error groups, alert rules, and saved queries through the
+same API and CLI. The old generic event, profile, audit, and evaluation APIs
+remain removed.
 
 Sift owns its storage engines. It does not require Loki, Mimir, Tempo,
 ClickHouse, or another external database. GCS is an optional long-term segment
@@ -39,7 +40,7 @@ The product direction follows these useful parts of mature products:
 
 Sift accepts the official OpenTelemetry Protocol, called OTLP.
 
-| Transport | Endpoint | Phase-one contract |
+| Transport | Endpoint | Contract |
 |---|---|---|
 | OTLP/HTTP | `POST /v1/logs` | JSON, Protobuf, gzip, and partial success |
 | OTLP/HTTP | `POST /v1/metrics` | JSON, Protobuf, gzip, and partial success |
@@ -49,6 +50,8 @@ Sift accepts the official OpenTelemetry Protocol, called OTLP.
 
 Remote Write 2.0 is experimental and is rejected. The removed `/v1/events`
 and `/v1/events:write` routes return `404`.
+Durable append failures return retryable errors. An OTLP partial-success
+response describes invalid input items. It does not acknowledge a failed write.
 
 The external Remote Write gate pins Prometheus compliance commit
 `67b8327a2e93dc28f64d4b21bbce00b362f565d5` and a digest-pinned Go image. It
@@ -75,6 +78,15 @@ The main product API is:
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/query` | Run a versioned logs, metrics, or traces query. |
+| `POST` | `/api/v2/query` | Run a bounded metric expression or exact log count. |
+| `GET` | `/api/v1/alert-rules` | Read alert rules. |
+| `PUT`, `DELETE` | `/api/v1/alert-rules/{id}` | Change an alert rule. |
+| `GET` | `/api/v1/alerts` | Read alert state. |
+| `PUT` | `/api/v1/alerts/{id}/mute` | Set or clear a mute. |
+| `GET` | `/api/v1/error-groups` | Read error groups. |
+| `PUT` | `/api/v1/error-groups/{id}` | Set the error status. |
+| `GET` | `/api/v1/saved-queries` | Read saved queries. |
+| `PUT`, `DELETE` | `/api/v1/saved-queries/{id}` | Change a saved query. |
 | `POST` | `/api/v1/logs/tail` | Wait for new matching logs for a bounded time. |
 | `GET` | `/api/v1/traces/{trace_id}` | Read one trace with explicit gap diagnostics. |
 | `POST` | `/api/v1/correlate` | Find related signals by trace, span, service, exemplar, or time. |
@@ -100,13 +112,17 @@ The MCP endpoint is `/mcp`. The same Rust binary also supports:
 sift mcp serve --stdio --endpoint http://127.0.0.1:7380
 ```
 
-Phase one exposes only these read-only MCP tools:
+The MCP endpoint exposes these read-only tools:
 
 - `sift_query`
 - `sift_get_trace`
 - `sift_correlate`
 - `sift_list_services`
 - `sift_tail_logs`
+- `sift_list_alert_rules`
+- `sift_list_alerts`
+- `sift_list_error_groups`
+- `sift_list_saved_queries`
 
 The CLI and MCP clients call the same Sift API and use the same JSON schemas.
 
@@ -180,6 +196,10 @@ promise after six hours. This limit does not change telemetry retention.
 Telemetry stays queryable for up to 180 days under the fixed hot and archive
 policy.
 
+The in-memory trace view keeps the latest 100,000 spans by default. It evicts
+the oldest spans and their lookup entries as it fills. It applies the same cap
+when restoring a snapshot. The durable journal has its own retention policy.
+
 ## Deployment model
 
 The one Sift binary supports these roles:
@@ -205,7 +225,7 @@ docker compose -f compose.yaml up --build
 Removing the container does not remove the `sift-data` volume.
 
 The Kubernetes operator creates gateway and query Deployments, store and
-control StatefulSets, an agent DaemonSet, Services, PVCs, disruption budgets,
+control StatefulSets, log and metric agent DaemonSets, Services, PVCs, disruption budgets,
 and a NetworkPolicy. Each stateful or local-state role mounts a PVC at
 `/var/lib/sift`. The agent keeps its checkpoint under `/var/lib/sift/agent`.
 The gateway and query roles keep their spool and job state under the same root.
@@ -248,16 +268,17 @@ does not print bearer tokens or private key material in normal errors.
 
 ## Current limits
 
-This implementation is a phase-one foundation. These limits are important:
+Production acceptance for 0.2.0 is pending. These limits remain:
 
-- PromQL supports metric selectors and `sum`, `avg`, `min`, `max`, `count`, and `rate`. It is not a full PromQL implementation.
+- V2 supports metric selectors, grouped aggregation, `rate`, `increase`, arithmetic, comparisons, one-to-one label matching, and `histogram_quantile`. Unsupported functions, many-to-many joins, and subqueries return errors.
 - Logs support structured search, bounded text search, facets, context, and tail. They do not yet have production-scale load evidence.
 - Traces support trace reads, search filters, gaps, and critical paths. Tail sampling and a complete service dependency engine are not complete.
 - Local and emulated GCS archive, outage, lifecycle, and fresh-volume restore tests pass. A live GCS recovery drill has not run for this candidate.
-- Three local voters pass a mutual-TLS leader-loss test. The required 30-minute GKE MVP run has not run for this candidate.
+- Local store and control voters pass mutual-TLS leader-loss tests. GKE fault and recovery drills remain required.
 - The fixed 30-day hot and 180-day total retention worker is implemented. It keeps WAL during a GCS outage, rewrites mixed-age segments, removes expired blobs, and resumes safe cleanup after restart. Exact event-ID idempotency is a separate six-hour window.
-- The 10,000-item-per-second MVP target has not been proven on GKE. The later 100,000-item-per-second and 24-hour production gates also remain unproven.
-- Alerts, saved queries, SLOs, incidents, on-call, runbooks, synthetics, RUM, profiles, and cost analysis are later phases.
+- The 10,000-item-per-second target needs both 30-minute and 24-hour GKE evidence. Neither gate has run. The later 100,000-item-per-second target remains outside this release.
+- The 128-event drain and reopen test covers `baseline-ingest-and-restart-resilience`. The sustained load claim `ingest-query-replay-soak` stays pending.
+- Error groups, alerts, and saved queries are implemented. Live Webhook delivery and a complete source comparison remain required. A fresh installation can compare generated input with Sift output. Seven-day dual-write is optional for an existing-service migration. SLOs, incidents, on-call, runbooks, synthetics, RUM, profiles, and cost analysis are later work.
 
 Do not use a green unit or local integration test as evidence for a live GKE or
 production performance claim.
@@ -394,6 +415,9 @@ below is an explicit Cargo test target under `tests`.
 
 ## Supporting documents
 
+- [Roadmap](ROADMAP.md) defines the 0.2.0 delivery phases.
+- [Status](STATUS.md) records current evidence and pending gates.
+- [Production contract](docs/production-v1.md) defines load, recovery, and cutover gates.
 - [High availability operations](docs/operations/ha.md) explains role deployment, peer TLS, backup, and recovery limits.
 - [Structured stdout observability](docs/operations/structured-stdout.md) explains application and collector ownership.
 - [Agent context](llms.txt) lists the supported build, test, and safety commands.

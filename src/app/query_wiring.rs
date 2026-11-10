@@ -28,6 +28,41 @@ impl QueryJobService {
     }
 }
 
+impl ServiceState {
+    pub(crate) fn validate_metric_expression(
+        &self,
+        expression: &str,
+    ) -> Result<(), crate::app::interfaces::http::api_error::ApiError> {
+        use crate::query::domain::metric_expression::ExpressionParser;
+        crate::query::infrastructure::promql_parser::PromqlParser
+            .parse(expression)
+            .map(|_| ())
+            .map_err(|error| {
+                crate::app::interfaces::http::api_error::ApiError::bad_request(
+                    "unsupported_query",
+                    error,
+                )
+            })
+    }
+    pub(crate) fn execute_query_v2(
+        &self,
+        principal: Option<&service_auth::RoleMapPrincipal>,
+        request: &crate::query::application::query_v2::QueryRequestV2,
+    ) -> Result<
+        crate::query::application::query_v2::QueryResponseV2,
+        crate::app::interfaces::http::api_error::ApiError,
+    > {
+        let result = crate::query::application::query_v2::QueryServiceV2::new(Arc::new(
+            crate::query::infrastructure::promql_parser::PromqlParser,
+        ))
+        .execute(self, principal, request);
+        if result.is_err() {
+            self.record_query_failure();
+        }
+        result
+    }
+}
+
 pub fn query_role_router(
     state: Arc<ServiceState>,
     store_endpoint: &str,

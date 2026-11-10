@@ -7,3 +7,6 @@ pub(crate) mod sift_api_client;
 pub(crate) mod store_query_client;
 
 pub(crate) mod api_port_adapter;
+#[cfg(test)]
+mod oracle_tests;
+pub(crate) mod promql_parser;

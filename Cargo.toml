@@ -1,6 +1,6 @@
 [package]
 name = "sift"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 authors = ["Faberline contributors"]
 license = "MIT"
@@ -31,6 +31,7 @@ kube = { version = "0.98", features = ["runtime", "derive", "client"] }
 index-text = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
 prost = "0.13"
 prost14 = { package = "prost", version = "0.14" }
+promql-parser = "=0.11.0"
 regex = "1.11"
 reqwest = { version = "0.12", default-features = false, features = ["charset", "http2", "system-proxy", "rustls-tls-native-roots", "json", "cookies", "gzip", "brotli", "multipart", "stream"] }
 rmcp = { version = "3.1.4", features = ["server", "transport-io", "transport-streamable-http-server"] }

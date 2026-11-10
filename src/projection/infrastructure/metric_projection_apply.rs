@@ -26,6 +26,8 @@ use crate::SignalKind;
 
 #[derive(Deserialize)]
 struct MetricSnapshot {
+    #[serde(default = "legacy_snapshot_version")]
+    schema_version: u32,
     state: MetricState,
     cardinality_limit: usize,
     retained_points_per_series: usize,
@@ -33,15 +35,22 @@ struct MetricSnapshot {
 
 #[derive(Serialize)]
 struct MetricSnapshotRef<'a> {
+    schema_version: u32,
     state: &'a MetricState,
     cardinality_limit: usize,
     retained_points_per_series: usize,
+}
+
+fn legacy_snapshot_version() -> u32 {
+    7
 }
 
 #[derive(Default, Deserialize)]
 struct MetricPayload {
     #[serde(default)]
     histogram: Option<MetricHistogramV1>,
+    #[serde(default, rename = "startTimeUnixNano", alias = "start_time_unix_nano")]
+    start_time_unix_nano: Option<u64>,
 }
 
 impl Projection for MetricProjection {
@@ -121,6 +130,7 @@ impl Projection for MetricProjection {
             event_id: event.event_id.clone(),
             occurred_at: event.occurred_at.clone(),
             time_unix_nano: timestamp,
+            start_time_unix_nano: payload.start_time_unix_nano,
             value: metric.value,
             stale: metric.stale,
             histogram: payload.histogram,
@@ -149,6 +159,7 @@ impl Projection for MetricProjection {
                             event.attributes.clone()
                         },
                         overflow,
+                        dropped_through_time: None,
                         sealed_chunks: Vec::new(),
                         chunks: Vec::new(),
                         point_count: 0,
@@ -185,6 +196,12 @@ impl Projection for MetricProjection {
                 points.sort_by(point_order);
                 let removed = points.len().saturating_sub(self.retained_points_per_series);
                 if removed > 0 {
+                    let through = points[removed - 1].time_unix_nano;
+                    series.dropped_through_time = Some(
+                        series
+                            .dropped_through_time
+                            .map_or(through, |t| t.max(through)),
+                    );
                     points.drain(..removed);
                 }
                 let touched = points.len() as u64 + removed as u64;
@@ -221,6 +238,7 @@ impl Projection for MetricProjection {
     fn snapshot(&self) -> Result<Vec<u8>> {
         let state = self.state.read().expect("metric projection lock poisoned");
         serde_json::to_vec(&MetricSnapshotRef {
+            schema_version: METRIC_SCHEMA_VERSION,
             state: &state,
             cardinality_limit: self.cardinality_limit,
             retained_points_per_series: self.retained_points_per_series,
@@ -231,6 +249,10 @@ impl Projection for MetricProjection {
     fn restore(&self, bytes: &[u8]) -> Result<()> {
         let snapshot: MetricSnapshot =
             serde_json::from_slice(bytes).context("decode metric projection snapshot")?;
+        if !matches!(snapshot.schema_version, 7 | 8) {
+            bail!("unsupported metric snapshot version");
+        }
+        let migrate = snapshot.schema_version == 7;
         if snapshot.cardinality_limit != self.cardinality_limit
             || snapshot.retained_points_per_series != self.retained_points_per_series
         {
@@ -243,8 +265,15 @@ impl Projection for MetricProjection {
             if !series.sealed_chunks.is_empty() && self.chunk_store.is_none() {
                 bail!("metric snapshot contains disk chunks but projection has no chunk store");
             }
-            for sealed in &series.sealed_chunks {
-                self.read_sealed_chunk(sealed)?;
+            for sealed in &mut series.sealed_chunks {
+                if migrate {
+                    self.chunk_store
+                        .as_ref()
+                        .context("metric chunk store required")?
+                        .migrate_metadata(sealed)?;
+                } else {
+                    self.read_sealed_chunk(sealed)?;
+                }
             }
             series.point_count = series
                 .sealed_chunks
@@ -253,14 +282,25 @@ impl Projection for MetricProjection {
                 .chain(series.chunks.iter().map(|chunk| chunk.point_count))
                 .sum();
             series.rollups.clear();
+            if migrate
+                && series.point_count >= self.retained_points_per_series
+                && series.dropped_through_time.is_none()
+            {
+                series.dropped_through_time = series
+                    .sealed_chunks
+                    .first()
+                    .map(|c| c.start_time_unix_nano)
+                    .or_else(|| series.chunks.first().map(|c| c.start_time_unix_nano));
+            }
             for chunk in &mut series.chunks {
                 if chunk.point_count != chunk.points.len() || chunk.point_count == 0 {
                     bail!("resident metric chunk point metadata mismatch");
                 }
                 let measured = metric_chunk_memory_bytes(&chunk.chunk)?;
-                if chunk.materialized_bytes != measured || measured == 0 {
+                if measured == 0 || (!migrate && chunk.materialized_bytes != measured) {
                     bail!("resident metric chunk byte metadata mismatch");
                 }
+                chunk.materialized_bytes = measured;
             }
             series.resident_bytes = metric_series_memory_bytes(series)?;
             memtable_bytes = memtable_bytes

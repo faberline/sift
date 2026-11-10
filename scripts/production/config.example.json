@@ -1,0 +1,20 @@
+{
+  "project": "REPLACE_WITH_GCP_PROJECT",
+  "cluster": "REPLACE_WITH_STANDARD_GKE_CLUSTER",
+  "location": "REPLACE_WITH_GKE_LOCATION",
+  "namespace": "REPLACE_WITH_APP_NAMESPACE",
+  "name": "sift",
+  "archive_uri": "gs://REPLACE_WITH_BUCKET/production-020",
+  "peer_tls_secret": "sift-peer-tls",
+  "webhook_secret": "sift-webhooks",
+  "webhook_hosts": ["REPLACE_WITH_EXACT_WEBHOOK_HOST"],
+  "services": [{"project": "REPLACE_WITH_GCP_PROJECT", "namespace": "REPLACE_WITH_APP_NAMESPACE", "container": "REPLACE_WITH_APP_CONTAINER"}],
+  "reference_origin": "generated",
+  "comparison_hours": 0.5,
+  "cost_cap_usd": 0,
+  "estimated_hourly_cost_usd": 0,
+  "estimated_fixed_cost_usd": 0,
+  "measured_store_bytes_per_item": 0,
+  "store_pvc_gib": 0,
+  "control_pvc_gib": 0
+}

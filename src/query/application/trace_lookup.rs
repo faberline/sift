@@ -23,14 +23,19 @@ pub(crate) async fn get_trace(
             "trace id must not be empty",
         ));
     }
-    state
-        .journal()
-        .ensure_queryable()
-        .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
-    state
-        .projections()
-        .catch_up(projection::PROJECTION_TRACE_STORE)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let catching_up = state.clone();
+    tokio::task::spawn_blocking(move || {
+        catching_up
+            .journal()
+            .ensure_queryable()
+            .map_err(|error| ApiError::temporarily_unavailable(error.to_string()))?;
+        catching_up
+            .projections()
+            .catch_up(projection::PROJECTION_TRACE_STORE)
+            .map_err(|error| ApiError::internal(error.to_string()))
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))??;
     let projection_cursor = state
         .projections()
         .wait_for_min_cursor(
@@ -40,16 +45,21 @@ pub(crate) async fn get_trace(
         )
         .await
         .map_err(ApiError::projection_lag)?;
-    let mut trace = state
-        .projections()
-        .get_trace(&project, &id)
-        .map_err(|error| ApiError::bad_request("invalid_trace_query", error.to_string()))?
-        .ok_or_else(|| {
-            ApiError::not_found(
-                "trace_not_found",
-                format!("trace `{id}` was not found in project `{}`", project),
-            )
-        })?;
+    let reading = state.clone();
+    let lookup_project = project.clone();
+    let lookup_id = id.clone();
+    let mut trace = tokio::task::spawn_blocking(move || {
+        reading.projections().get_trace(&lookup_project, &lookup_id)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.to_string()))?
+    .map_err(|error| ApiError::bad_request("invalid_trace_query", error.to_string()))?
+    .ok_or_else(|| {
+        ApiError::not_found(
+            "trace_not_found",
+            format!("trace `{id}` was not found in project `{}`", project),
+        )
+    })?;
     trace.projection_cursor = projection_cursor;
     Ok(trace)
 }

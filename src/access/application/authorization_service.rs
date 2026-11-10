@@ -76,7 +76,12 @@ impl AuthorizationService {
             ));
         }
         let role = http_role(method, path);
-        let principal = self.authenticate_project(headers, project, role).await?;
+        let scope = if path.starts_with("/admin/") {
+            "*"
+        } else {
+            project
+        };
+        let principal = self.authenticate_project(headers, scope, role).await?;
         Ok(service_auth::ScopedAuthorizationOutcome::Authorized(
             principal,
         ))

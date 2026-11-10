@@ -124,7 +124,7 @@ impl SiftVerifier {
                     "sift.axiom.dev",
                     namespace.as_ref(),
                     "projects",
-                    Some(project.to_string()),
+                    (project != "*").then(|| project.to_string()),
                     role_verb(role.into()),
                 );
                 authenticator
@@ -133,14 +133,7 @@ impl SiftVerifier {
                     .map_err(AuthError::from)?;
                 Ok(RoleMapPrincipal::Token(TokenClaims {
                     subject: caller.username(),
-                    roles: HashMap::from([(
-                        if role == Role::Admin {
-                            "*".to_string()
-                        } else {
-                            project.to_string()
-                        },
-                        role,
-                    )]),
+                    roles: HashMap::from([(project.to_string(), role)]),
                 }))
             }
         }

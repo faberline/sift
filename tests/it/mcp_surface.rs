@@ -28,6 +28,10 @@ fn mcp_exposes_only_the_phase_one_read_tools() {
         [
             "sift_correlate",
             "sift_get_trace",
+            "sift_list_alert_rules",
+            "sift_list_alerts",
+            "sift_list_error_groups",
+            "sift_list_saved_queries",
             "sift_list_services",
             "sift_query",
             "sift_tail_logs",

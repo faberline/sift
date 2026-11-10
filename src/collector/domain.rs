@@ -4,6 +4,8 @@
 
 pub(crate) mod config;
 pub(crate) mod cri;
+pub(crate) mod log_format;
+pub(crate) mod prometheus_text;
 pub(crate) mod quarantine;
 pub(crate) mod record;
 pub(crate) mod record_decoder;

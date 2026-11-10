@@ -15,10 +15,14 @@ pub(crate) async fn correlate_v1(
 ) -> Result<Json<CorrelationResponseV1>, ApiError> {
     let Json(request) =
         payload.map_err(|error| ApiError::bad_request("invalid_json", error.body_text()))?;
-    crate::query::application::correlation::correlate(
-        &state,
-        principal.as_ref().map(|value| &value.0),
-        request,
-    )
+    tokio::task::spawn_blocking(move || {
+        crate::query::application::correlation::correlate(
+            &state,
+            principal.as_ref().map(|value| &value.0),
+            request,
+        )
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("correlation worker failed: {error}")))?
     .map(Json)
 }

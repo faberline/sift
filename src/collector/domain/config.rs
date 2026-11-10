@@ -24,6 +24,8 @@ pub struct CriMetadata {
 pub struct CriSourceConfig {
     pub root: PathBuf,
     pub metadata: CriMetadata,
+    /// Collect only this namespace. None keeps the explicit node-wide mode.
+    pub namespace: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,6 +121,9 @@ impl CollectorConfig {
             return Err(CollectorConfigError::CheckpointIsQuarantine);
         }
         if let SourceSpec::Cri(cri) = &self.source {
+            if let Some(namespace) = &cri.namespace {
+                validate_metadata("namespace", namespace)?;
+            }
             validate_metadata("gcp_project", &cri.metadata.gcp_project)?;
             for (name, value) in [
                 ("cluster", cri.metadata.cluster.as_deref()),

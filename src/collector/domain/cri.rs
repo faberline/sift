@@ -15,7 +15,7 @@ use crate::AttributeValue;
 
 const MAX_WORKLOAD_ID_BYTES: usize = 253;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(in crate::collector) struct WorkloadIdentity {
     namespace: String,
     pod: String,
@@ -24,9 +24,24 @@ pub(in crate::collector) struct WorkloadIdentity {
     restart: u32,
 }
 
+impl WorkloadIdentity {
+    pub(in crate::collector) fn in_namespace(&self, namespace: Option<&str>) -> bool {
+        namespace.is_none_or(|namespace| self.namespace == namespace)
+    }
+
+    pub(in crate::collector) fn source_key(&self) -> String {
+        format!(
+            "{}:{}:{}:{}:{}",
+            self.namespace, self.pod, self.pod_uid, self.container, self.restart
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(in crate::collector) struct DiscoveredFile {
     pub(in crate::collector) identity: String,
+    pub(in crate::collector) physical_identity: String,
+    pub(in crate::collector) birth_nanos: u64,
     pub(in crate::collector) path: PathBuf,
     pub(in crate::collector) relative_path: String,
     pub(in crate::collector) len: u64,
@@ -47,6 +62,7 @@ pub(in crate::collector) enum CriTag {
 }
 
 pub(in crate::collector) struct CriFrame {
+    pub(in crate::collector) timestamp: String,
     pub(in crate::collector) stream: CriStream,
     pub(in crate::collector) tag: CriTag,
     pub(in crate::collector) content: Vec<u8>,
@@ -96,6 +112,7 @@ pub(in crate::collector) fn parse_cri_frame(line: &[u8]) -> Result<CriFrame, Cri
         _ => return Err(CriError::InvalidTag),
     };
     Ok(CriFrame {
+        timestamp: timestamp.into(),
         stream,
         tag,
         content: line[third + 1..].to_vec(),

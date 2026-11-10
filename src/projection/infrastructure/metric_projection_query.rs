@@ -50,12 +50,16 @@ impl MetricProjection {
             .map_or(Unbounded, |series_id| Excluded(series_id.clone()));
         let scan_start = start.map(|start| start.saturating_sub(MAX_ROLLUP_LOOKBACK_NANOS));
         let mut candidates = Vec::new();
+        let mut incomplete = false;
         for series in state
             .series
             .range((start_series, Unbounded))
             .map(|(_, series)| series)
             .filter(|series| metric_series_matches(series, query))
         {
+            incomplete |= series
+                .dropped_through_time
+                .is_some_and(|through| start.is_none_or(|start| start <= through));
             if self.scan_point_count(series, start, end)? > 0 {
                 candidates.push(series);
             }
@@ -140,6 +144,7 @@ impl MetricProjection {
             has_more,
             overflowed_series: state.overflowed_identities.len() as u64,
             overflowed_points: state.overflowed_points,
+            incomplete,
         })
     }
 }

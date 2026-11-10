@@ -8,11 +8,14 @@ mod backup;
 mod cli;
 mod collect;
 mod connect;
+mod control;
 mod k8s;
 mod mcp;
 mod meta;
 mod query;
 mod restore;
+mod restore_complete;
+mod scrape;
 mod serve;
 mod serve_args;
 mod snapshot;
@@ -45,10 +48,13 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Serve(args) => serve(args).await,
         Command::Collect(args) => collect(*args).await,
+        Command::Control(args) => control::control(args).await,
+        Command::Scrape(args) => scrape::scrape(args).await,
         Command::Query(args) => query(args).await,
         Command::Mcp(args) => mcp(args).await,
-        Command::Snapshot(args) => snapshot(args),
-        Command::Restore(args) => restore(args),
+        Command::Snapshot(args) => tokio::task::spawn_blocking(move || snapshot(args)).await?,
+        Command::Restore(args) => tokio::task::spawn_blocking(move || restore(args)).await?,
+        Command::RestoreComplete(args) => restore_complete::run(args).await,
         Command::Backup(args) => backup(args).await,
         Command::Dockerfile(args) => dockerfile(args),
         Command::K8s(args) => k8s(args).await,

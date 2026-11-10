@@ -10,6 +10,7 @@ pub(crate) mod archive_receipts;
 pub(crate) mod archive_watermarks;
 pub(crate) mod catalog_manifest;
 pub(crate) mod cloud_logging_event_id;
+pub(crate) mod control_record;
 pub(crate) mod dedupe_receipt;
 pub(crate) mod dedupe_stats;
 pub(crate) mod event;
@@ -20,6 +21,7 @@ pub(crate) mod idempotency_window;
 pub(crate) mod instance_spec;
 pub(crate) mod port_future;
 pub(crate) mod query_limit;
+pub(crate) mod recovery_record;
 pub(crate) mod retained_prefix_reconcile_stats;
 pub(crate) mod retention_boundary;
 pub(crate) mod retention_fence;
@@ -45,6 +47,7 @@ pub(crate) mod projection_trace;
 pub(crate) mod query_expression;
 
 pub(crate) mod query_request;
+pub(crate) mod query_v2;
 
 pub(crate) mod query_response;
 

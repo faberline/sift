@@ -66,8 +66,13 @@ pub(super) async fn backup(args: BackupArgs) -> Result<()> {
             .await?
         }
         (None, Some(data_dir)) => {
-            let journal = DurableJournal::open(data_dir)?;
-            sift::operations::backup_journal(&journal, &args.dest, args.retention_secs)?
+            let data_dir = data_dir.to_owned();
+            let destination = args.dest.clone();
+            tokio::task::spawn_blocking(move || {
+                let journal = DurableJournal::open(data_dir)?;
+                sift::operations::backup_journal(&journal, &destination, args.retention_secs)
+            })
+            .await??
         }
         _ => anyhow::bail!(
             "choose exactly one backup source: live --url or legacy offline --data-dir"

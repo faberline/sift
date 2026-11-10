@@ -64,6 +64,8 @@ pub struct LogQuery {
     pub after_cursor: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_cursor: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cursor: Option<u64>,
     #[serde(default = "default_query_limit")]
     pub limit: usize,
 }
@@ -74,6 +76,12 @@ pub struct LogPage {
     pub next_cursor: u64,
     pub projection_cursor: u64,
     pub has_more: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub incomplete: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl LogQuery {
@@ -94,6 +102,7 @@ impl LogQuery {
             attribute_equals: BTreeMap::new(),
             after_cursor: 0,
             min_cursor: None,
+            max_cursor: None,
             limit: default_query_limit(),
         }
     }

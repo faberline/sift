@@ -12,10 +12,14 @@ pub(crate) async fn list_services_v1(
     principal: Option<Extension<RoleMapPrincipal>>,
     Query(query): Query<ServiceQueryV1>,
 ) -> Result<Json<ServiceListResponseV1>, ApiError> {
-    crate::query::application::service_listing::list_services(
-        &state,
-        principal.as_ref().map(|value| &value.0),
-        query,
-    )
+    tokio::task::spawn_blocking(move || {
+        crate::query::application::service_listing::list_services(
+            &state,
+            principal.as_ref().map(|value| &value.0),
+            query,
+        )
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("service list worker failed: {error}")))?
     .map(Json)
 }

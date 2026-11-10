@@ -53,7 +53,15 @@ async fn request_roles_project_trim_and_mcp_bypass_reach_the_shared_port() {
     }
     assert_eq!(
         *probe.calls.lock().unwrap(),
-        routes.map(|(_, _, role)| ("project-a".into(), role))
+        routes.map(|(_, path, role)| (
+            if path.starts_with("/admin/") {
+                "*"
+            } else {
+                "project-a"
+            }
+            .into(),
+            role
+        ))
     );
     assert!(matches!(
         service

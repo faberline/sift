@@ -8,6 +8,8 @@ pub(crate) mod domain;
 pub(crate) mod infrastructure;
 pub(crate) mod interfaces;
 
+pub use crate::shared_kernel::query_v2::{QueryRequestV2, QueryResponseV2, QuerySignalV2};
+
 pub use crate::query::{
     application::sift_api_service::SiftApiClient,
     domain::{

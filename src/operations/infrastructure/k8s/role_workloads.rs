@@ -57,6 +57,9 @@ pub(super) fn full_role_selector(cx: &RenderCtx<'_>, role: &str) -> BTreeMap<Str
         ),
         ("app.kubernetes.io/component".to_string(), role.to_string()),
     ]);
+    if role == "agent" {
+        selector.remove("app.kubernetes.io/component");
+    }
     selector.extend(role_selector_labels(role));
     selector
 }
@@ -133,6 +136,12 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
         }
     }
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
+        if let Some(archive) = &spec.archive {
+            if archive.destination.starts_with("gs://") {
+                env.push(json!({"name":"SIFT_RECOVERY_DESTINATION","value":archive.destination}));
+                env.push(json!({"name":"SIFT_RECOVERY_PROJECT","value":cx.name}));
+            }
+        }
         env.extend([
             json!({"name":"POD_NAME", "valueFrom":{"fieldRef":{"fieldPath":"metadata.name"}}}),
             json!({"name":"SHARD_COUNT", "value":"1"}),
@@ -148,6 +157,21 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
             json!({"name":"SIFT_PEER_TLS_KEY", "value":"/var/run/secrets/sift/peer-tls/tls.key"}),
             json!({"name":"SIFT_PEER_TLS_CA", "value":"/var/run/secrets/sift/peer-tls/ca.crt"}),
         ]);
+    }
+    if role == CONTROL_COMPONENT {
+        env.push(json!({"name":"SIFT_CONTROL_PROJECTS","value":cx.name}));
+        env.push(json!({"name":"SIFT_WEBHOOK_SECRET_DIRECTORY","value":"/var/run/secrets/sift/webhooks"}));
+        env.push(json!({"name":"SIFT_WEBHOOK_ALLOWED_HOSTS","value":spec.alerting.allowed_hosts.join(",")}));
+        if matches!(spec.auth, AuthMode::Kubernetes) {
+            env.push(
+                json!({"name":"SIFT_TOKEN_FILE","value":"/var/run/secrets/sift/client/token"}),
+            );
+        }
+        if matches!(spec.auth, AuthMode::Required) {
+            if let Some(secret) = &spec.tokens_secret {
+                env.push(json!({"name":"SIFT_TOKEN","valueFrom":{"secretKeyRef":{"name":secret,"key":"admin-token"}}}));
+            }
+        }
     }
     if matches!(spec.auth, AuthMode::Kubernetes) {
         env.extend([
@@ -167,6 +191,17 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
 fn role_support_volumes(spec: &SiftSpec, role: &str) -> (Vec<Value>, Vec<Value>) {
     let mut volumes = Vec::new();
     let mut mounts = Vec::new();
+    if role == CONTROL_COMPONENT {
+        if let Some(secret) = &spec.alerting.webhook_secret {
+            volumes
+                .push(json!({"name":"webhooks","secret":{"secretName":secret,"defaultMode":288}}));
+            mounts.push(json!({"name":"webhooks","mountPath":"/var/run/secrets/sift/webhooks","readOnly":true}));
+        }
+        if matches!(spec.auth, AuthMode::Kubernetes) {
+            volumes.push(super::agent_workloads::projected_client_token_volume());
+            mounts.push(super::agent_workloads::projected_client_token_mount());
+        }
+    }
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
         volumes.push(json!({
             "name":"peer-tls", "secret":{"secretName":spec.peer_tls_secret}
@@ -229,8 +264,8 @@ fn role_container_plan(
 
 fn role_pod_plan(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> render::PodPlan {
     let (volumes, mounts) = role_support_volumes(spec, role);
-    let service_account = if role == STORE_COMPONENT {
-        format!("{}-store", cx.name)
+    let service_account = if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
+        format!("{}-{role}", cx.name)
     } else {
         cx.name.to_string()
     };

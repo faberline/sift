@@ -45,7 +45,13 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
     if matches!(args.role, RunRole::All | RunRole::Store) {
         if let Ok(manifest_uri) = std::env::var("SIFT_BOOTSTRAP_ARCHIVE_MANIFEST_URI") {
             if !manifest_uri.trim().is_empty() {
-                match sift::archive::bootstrap_gcs_if_needed(&manifest_uri, data_dir)? {
+                let source_uri = manifest_uri.clone();
+                let bootstrap_root = data_dir.to_owned();
+                let manifest = tokio::task::spawn_blocking(move || {
+                    sift::archive::bootstrap_gcs_if_needed(&source_uri, bootstrap_root)
+                })
+                .await??;
+                match manifest {
                     Some(manifest) => tracing::info!(
                         source_manifest = manifest_uri,
                         source_cluster_id = manifest.source_cluster_id,
@@ -61,7 +67,14 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
         }
     }
 
-    let state = Arc::new(ServiceState::open_with_role(data_dir, args.role.into())?);
+    // Reopening an archived volume can verify GCS catalogs. Keep that work
+    // off the asynchronous server runtime before starting transports.
+    let state_root = data_dir.to_owned();
+    let storage_role = args.role.into();
+    let state = Arc::new(
+        tokio::task::spawn_blocking(move || ServiceState::open_with_role(state_root, storage_role))
+            .await??,
+    );
     let grace = Duration::from_secs(config.grace_secs.max(1));
     let reserve = Duration::from_secs((config.grace_secs / 10).min(5));
     let supervisor = server_lifecycle::TaskSupervisor::new(grace, reserve)?;
@@ -214,12 +227,55 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
         )?;
     }
     let internal_endpoint = local_http_endpoint(&args.host, args.port);
+    if let Some(worker) = state.start_recovery_worker(&internal_endpoint).await? {
+        let worker = Arc::new(tokio::sync::Mutex::new(Some(worker)));
+        supervisor.register_hook(
+            server_lifecycle::HookStage::BackgroundStop,
+            "sift-recovery-worker",
+            move |_| {
+                let worker = worker.clone();
+                async move {
+                    if let Some(worker) = worker.lock().await.take() {
+                        worker.stop().await;
+                    }
+                    Ok(())
+                }
+            },
+        )?;
+    }
+    if let Some(worker) = state.start_control_worker(&internal_endpoint)? {
+        let worker = Arc::new(tokio::sync::Mutex::new(Some(worker)));
+        supervisor.register_hook(
+            server_lifecycle::HookStage::BackgroundStop,
+            "sift-control-worker",
+            move |_| {
+                let worker = worker.clone();
+                async move {
+                    if let Some(worker) = worker.lock().await.take() {
+                        worker.stop().await;
+                    }
+                    Ok(())
+                }
+            },
+        )?;
+    }
     let data_plane = match args.role {
         RunRole::Gateway => {
             let store = std::env::var("SIFT_STORE_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
             let query = std::env::var("SIFT_QUERY_ENDPOINT").unwrap_or_else(|_| store.clone());
-            sift::operations::gateway_router(&store, &query, config.body_limit_bytes)?
+            let gateway = match std::env::var("SIFT_CONTROL_ENDPOINT") {
+                Ok(control) => sift::operations::gateway_router_with_control(
+                    &store,
+                    &query,
+                    &control,
+                    config.body_limit_bytes,
+                )?,
+                Err(_) => {
+                    sift::operations::gateway_router(&store, &query, config.body_limit_bytes)?
+                }
+            };
+            gateway
                 .merge(sift::query::mcp_http_router(&internal_endpoint)?)
                 .layer(axum::middleware::from_fn_with_state(
                     Arc::new(sift::access::AuthorizationService::from_verifier(verifier)),

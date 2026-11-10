@@ -13,8 +13,9 @@ use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::shared_kernel::stored_event::StoredEvent;
 
 pub(crate) struct SegmentEventReader {
-    paths: VecDeque<PathBuf>,
+    paths: VecDeque<(PathBuf, u64)>,
     current: Option<storage_durable::FramedLogCursor>,
+    current_last: u64,
     after: u64,
 }
 
@@ -79,8 +80,12 @@ impl SegmentStore {
         drop(state);
         paths.sort_by_key(|(first, _, _)| *first);
         Ok(SegmentEventReader {
-            paths: paths.into_iter().map(|(_, _, path)| path).collect(),
+            paths: paths
+                .into_iter()
+                .map(|(_, last, path)| (path, last))
+                .collect(),
             current: None,
+            current_last: after,
             after,
         })
     }
@@ -147,9 +152,17 @@ impl SegmentEventReader {
     pub(crate) fn next_event(&mut self) -> Result<Option<StoredEvent>> {
         loop {
             if self.current.is_none() {
-                let Some(path) = self.paths.pop_front() else {
+                let Some((path, last)) = self.paths.pop_front() else {
                     return Ok(None);
                 };
+                if !path.exists() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("local segment is missing: {}", path.display()),
+                    )
+                    .into());
+                }
+                self.current_last = last;
                 self.current = Some(storage_durable::FramedLogCursor::open(path)?);
             }
             let Some(frame) = self
@@ -158,9 +171,19 @@ impl SegmentEventReader {
                 .expect("segment cursor exists")
                 .next_frame()?
             else {
+                if self.after < self.current_last {
+                    bail!(
+                        "local segment ended at cursor {} before committed cursor {}",
+                        self.after,
+                        self.current_last
+                    );
+                }
                 self.current = None;
                 continue;
             };
+            if frame.seq <= self.after {
+                continue;
+            }
             let event: StoredEvent = serde_json::from_slice(&frame.payload)?;
             if event.cursor != frame.seq {
                 bail!(
@@ -168,9 +191,6 @@ impl SegmentEventReader {
                     frame.seq,
                     event.cursor
                 );
-            }
-            if event.cursor <= self.after {
-                continue;
             }
             self.after = event.cursor;
             return Ok(Some(event));

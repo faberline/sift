@@ -26,6 +26,7 @@ pub(crate) struct InstanceSettings {
     pub auth: InstanceAuth,
     pub tokens_secret: Option<String>,
     pub backup: Option<InstanceBackup>,
+    pub alerting: InstanceAlerting,
     pub gcp_project_id: String,
     pub gke_cluster_name: String,
     pub gke_location: String,
@@ -44,6 +45,11 @@ pub(crate) struct InstanceBackup {
     pub destination: String,
     pub retention_secs: Option<u64>,
     pub admin_token_secret: Option<String>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct InstanceAlerting {
+    pub webhook_secret: Option<String>,
+    pub allowed_hosts: Vec<String>,
 }
 #[derive(Clone, Debug)]
 pub(crate) struct InstanceArchive {

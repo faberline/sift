@@ -47,6 +47,8 @@ pub struct SiftSpec {
     #[serde(default)]
     pub backup: Option<BackupSpec>,
     #[serde(default)]
+    pub alerting: AlertingSpec,
+    #[serde(default)]
     pub gcp_project_id: String,
     #[serde(default)]
     pub gke_cluster_name: String,
@@ -72,6 +74,14 @@ pub struct BackupSpec {
     pub retention_secs: Option<u64>,
     #[serde(default)]
     pub admin_token_secret: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AlertingSpec {
+    /// Secret keys are reference-name.json with an HTTPS URL and optional bearer_token.
+    pub webhook_secret: Option<String>,
+    pub allowed_hosts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

@@ -27,17 +27,26 @@ pub(super) fn discover(
             continue;
         };
         let metadata = std::fs::symlink_metadata(&path)?;
-        #[cfg(unix)]
-        let identity = {
-            use std::os::unix::fs::MetadataExt;
-            format!("{}:{}", metadata.dev(), metadata.ino())
+        let physical_identity = file_identity(&metadata)?;
+        let birth_nanos = file_birth(&metadata);
+        let scoped_identity = format!("{physical_identity}:{}", workload.source_key());
+        let legacy_identity = legacy_identity(&metadata)?;
+        let identity = if known.contains_key(&scoped_identity) {
+            scoped_identity
+        } else if known.get(&legacy_identity).is_some_and(|file| {
+            file.workload == workload && (file.birth_nanos == 0 || file.birth_nanos == birth_nanos)
+        }) {
+            // Keep old cursor and event identities for a known unchanged file.
+            legacy_identity
+        } else {
+            scoped_identity
         };
-        #[cfg(not(unix))]
-        bail!("CRI device/inode collection requires Unix");
         let relative_path = relative.to_string_lossy().to_string();
         files.push(DiscoveredFile {
             known_before: known.contains_key(&identity),
             identity,
+            physical_identity,
+            birth_nanos,
             path,
             relative_path,
             len: metadata.len(),
@@ -45,6 +54,36 @@ pub(super) fn discover(
         });
     }
     Ok(files)
+}
+
+pub(super) fn file_identity(metadata: &std::fs::Metadata) -> Result<String> {
+    Ok(format!(
+        "{}:{}",
+        legacy_identity(metadata)?,
+        file_birth(metadata)
+    ))
+}
+
+fn file_birth(metadata: &std::fs::Metadata) -> u64 {
+    metadata
+        .created()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|duration| duration.as_nanos().try_into().ok())
+        .unwrap_or(0)
+}
+
+fn legacy_identity(metadata: &std::fs::Metadata) -> Result<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok(format!("{}:{}", metadata.dev(), metadata.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        bail!("CRI device/inode collection requires Unix")
+    }
 }
 
 fn visit_regular_files(

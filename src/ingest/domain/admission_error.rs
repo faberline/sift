@@ -60,4 +60,13 @@ impl AdmissionError {
             Some(5),
         )
     }
+    pub fn remote_protection_backpressure(message: impl Into<String>) -> Self {
+        Self::new(
+            AdmissionStatus::ServiceUnavailable,
+            "remote_protection_behind",
+            message,
+            true,
+            Some(5),
+        )
+    }
 }

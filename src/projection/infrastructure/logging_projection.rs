@@ -13,9 +13,9 @@ use index_text::{
 use serde::{Deserialize, Serialize};
 
 use crate::projection::domain::log::{
-    projection_row_key, record_matches, LogPage, LogQuery, LogRecordV1, LoggingState,
-    DEFAULT_RETAINED_LOG_RECORDS, LOGGING_SCHEMA_VERSION, PROJECTION_LOGGING_STORE, RESOURCE_TYPE,
-    SERVICE_NAME,
+    projection_row_key, record_matches, LogPage, LogQuery, LogRecordV1, LogRetentionBoundary,
+    LoggingState, DEFAULT_RETAINED_LOG_RECORDS, LOGGING_SCHEMA_VERSION, PROJECTION_LOGGING_STORE,
+    RESOURCE_TYPE, SERVICE_NAME,
 };
 use crate::projection::domain::log_record_normalizer::normalize;
 use crate::projection::domain::projection::Projection;
@@ -30,6 +30,8 @@ struct LoggingSnapshot {
     records: BTreeMap<u64, LogRecordV1>,
     projection_cursor: u64,
     max_records: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retention_boundary: Option<LogRetentionBoundary>,
 }
 
 #[derive(Serialize)]
@@ -37,6 +39,8 @@ struct SemanticState<'a> {
     records: &'a BTreeMap<u64, LogRecordV1>,
     projection_cursor: u64,
     max_records: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retention_boundary: &'a Option<LogRetentionBoundary>,
 }
 
 pub struct LoggingProjection {
@@ -102,6 +106,7 @@ impl LoggingProjection {
             next_cursor,
             projection_cursor,
             has_more,
+            incomplete: state.incomplete(query.after_cursor, &bounds),
         })
     }
 
@@ -148,7 +153,20 @@ impl Projection for LoggingProjection {
                 break;
             };
             self.text_index.delete(&projection_row_key(oldest), None)?;
-            state.records.remove(&oldest);
+            let removed = state.records.remove(&oldest).expect("retained log exists");
+            let time = chrono::DateTime::parse_from_rfc3339(&removed.occurred_at)
+                .ok()
+                .map(|t| t.with_timezone(&chrono::Utc));
+            state.retention_boundary = Some(match state.retention_boundary.take() {
+                Some(previous) => LogRetentionBoundary {
+                    through_cursor: previous.through_cursor.max(oldest),
+                    latest_time: previous.latest_time.zip(time).map(|(a, b)| a.max(b)),
+                },
+                None => LogRetentionBoundary {
+                    through_cursor: oldest,
+                    latest_time: time,
+                },
+            });
         }
         Ok(())
     }
@@ -163,6 +181,7 @@ impl Projection for LoggingProjection {
             records: state.records.clone(),
             projection_cursor: state.projection_cursor,
             max_records: self.max_records,
+            retention_boundary: state.retention_boundary.clone(),
         })
     }
 
@@ -176,6 +195,18 @@ impl Projection for LoggingProjection {
                 self.max_records
             );
         }
+        let retention_boundary = snapshot.retention_boundary.or_else(|| {
+            (snapshot.records.len() == self.max_records).then(|| LogRetentionBoundary {
+                through_cursor: snapshot
+                    .records
+                    .keys()
+                    .next()
+                    .copied()
+                    .unwrap_or(1)
+                    .saturating_sub(1),
+                latest_time: None,
+            })
+        });
         match snapshot.text_index {
             Some(text_index) if self.text_index.restore(&text_index).is_ok() => {}
             _ => self
@@ -189,6 +220,7 @@ impl Projection for LoggingProjection {
             .expect("logging projection state lock poisoned") = LoggingState {
             records: snapshot.records,
             projection_cursor: snapshot.projection_cursor,
+            retention_boundary,
         };
         Ok(())
     }
@@ -202,6 +234,7 @@ impl Projection for LoggingProjection {
             records: &state.records,
             projection_cursor: state.projection_cursor,
             max_records: self.max_records,
+            retention_boundary: &state.retention_boundary,
         })?))
     }
 }
@@ -259,4 +292,44 @@ fn index_document(record: &LogRecordV1) -> TextDocument {
 fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let value: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(value)?)?;
     serde_json::to_vec(&value).map_err(Into::into)
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+    #[test]
+    fn eviction_boundary_survives_restart_and_detects_out_of_order_time() {
+        let projection = LoggingProjection::with_max_records(2).unwrap();
+        for (cursor, time) in [
+            (1, "2026-10-02T00:00:09Z"),
+            (2, "2026-10-02T00:00:01Z"),
+            (3, "2026-10-02T00:00:10Z"),
+        ] {
+            let mut event = crate::EventEnvelope::for_project(
+                "p",
+                "prod",
+                format!("e{cursor}"),
+                SignalKind::Log,
+                serde_json::json!({"message":"test"}),
+            );
+            event.occurred_at = time.into();
+            projection
+                .apply_idempotent(&StoredEvent {
+                    cursor,
+                    acknowledged_at: event.observed_at.clone(),
+                    event,
+                })
+                .unwrap();
+        }
+        let restored = LoggingProjection::with_max_records(2).unwrap();
+        restored.restore(&projection.snapshot().unwrap()).unwrap();
+        let mut query = LogQuery::for_project("p");
+        query.start_time = Some("2026-10-02T00:00:02Z".into());
+        assert!(restored.query(&query).unwrap().incomplete);
+        query.start_time = Some("2026-10-02T00:00:10Z".into());
+        assert!(!restored.query(&query).unwrap().incomplete);
+        query.start_time = None;
+        query.after_cursor = 1;
+        assert!(!restored.query(&query).unwrap().incomplete);
+    }
 }

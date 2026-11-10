@@ -20,6 +20,10 @@ pub struct MetricHistogramV1 {
     pub kind: HistogramKind,
     pub count: u64,
     pub sum: f64,
+    #[serde(default = "sum_present", skip_serializing_if = "is_true")]
+    pub sum_present: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub zero_threshold: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub explicit_bounds: Vec<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -48,6 +52,8 @@ pub struct MetricPointV1 {
     pub event_id: String,
     pub occurred_at: String,
     pub time_unix_nano: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time_unix_nano: Option<u64>,
     pub value: f64,
     #[serde(default, skip_serializing_if = "is_false")]
     pub stale: bool,
@@ -148,6 +154,8 @@ pub struct MetricPage {
     pub has_more: bool,
     pub overflowed_series: u64,
     pub overflowed_points: u64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub incomplete: bool,
 }
 
 impl MetricQuery {
@@ -170,4 +178,13 @@ impl MetricQuery {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+fn is_true(value: &bool) -> bool {
+    *value
+}
+fn sum_present() -> bool {
+    true
+}
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
 }

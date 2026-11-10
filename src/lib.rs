@@ -3,9 +3,12 @@
 //! second source of truth.
 
 pub mod access;
+pub mod alerting;
 mod app;
 pub mod archive;
 pub mod collector;
+pub mod control;
+pub mod error_reporting;
 pub mod ingest;
 pub mod journal;
 pub mod node;
