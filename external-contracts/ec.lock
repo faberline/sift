@@ -75,7 +75,7 @@ digest = "sha256:0e8c7630acb560093f220d36134bde99a5a988aa09c101a7545cc40ae9162d7
 [[cases]]
 id = "sift-long-running-stability-resilience"
 capability_id = "long-running-stability"
-claim_id = "ingest-query-replay-soak"
+claim_id = "baseline-ingest-and-restart-resilience"
 contract_id = "sift.resilience.v1"
 dimension = "stability"
 source_ref = "apps/sift/external-contracts/long-running-stability/sift-resilience.md#sift-long-running-stability-resilience"
