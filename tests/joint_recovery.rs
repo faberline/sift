@@ -169,7 +169,10 @@ async fn joint_record_restores_exact_events_control_state_and_notification_ids()
     .await;
     let control = state.start_control_worker(&endpoint).unwrap().unwrap();
     let mut firing = false;
-    for _ in 0..200 {
+    // Rules are evaluated every 15 s (control_jobs.rs: next_evaluation = now + 15),
+    // and the first evaluation runs in the same second as the seeded log, which
+    // falls outside its window. The next evaluation must be awaited: 20 s > 15 s.
+    for _ in 0..400 {
         if records(&http, &endpoint, "alerts")
             .await
             .iter()
