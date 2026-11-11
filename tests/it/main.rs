@@ -40,6 +40,7 @@ mod phase_one_surface;
 mod production_workflow;
 mod projection_runtime;
 mod prometheus_api;
+mod prometheus_comparison_script;
 mod prometheus_semantics;
 mod query_pagination;
 mod raft_batch;
