@@ -11,6 +11,7 @@ The image digest and cloud values are fixtures. This check does not build or
 pull containers, deploy workloads, or test API-server admission.
 """
 
+import copy
 import hashlib
 import json
 import os
@@ -46,6 +47,8 @@ FIXTURES = {
     "REPLACE_ME__GKE_LOCATION": "asia-east1-a",
     "REPLACE_ME__NAME": "sift-artifact",
     "REPLACE_ME__NAMESPACE": "sift-artifact",
+    "REPLACE_ME__SIFT_PUBLIC_HOST": "sift.example.invalid",
+    "REPLACE_ME__SIFT_PUBLIC_STATIC_IP_NAME": "sift-artifact-ip",
 }
 
 
@@ -73,8 +76,28 @@ def objects(text, source):
     return result
 
 
+def check_public_tls(manifests, profile):
+    if profile != "prod":
+        return
+    ingress = manifests.get(("Ingress", "sift-public"))
+    require(ingress is not None, "prod: public API has no Ingress")
+    certificate = manifests.get(("ManagedCertificate", "sift-public"))
+    require(certificate is not None, "prod: public API has no managed certificate")
+    annotations = ingress["metadata"].get("annotations", {})
+    require(annotations.get("kubernetes.io/ingress.allow-http") == "false"
+            and annotations.get("networking.gke.io/managed-certificates") == "sift-public",
+            "prod: public API allows plain HTTP or has no certificate")
+    rule = ingress["spec"]["rules"][0]
+    backend = rule["http"]["paths"][0]["backend"]["service"]
+    require(backend == {"name": "sift-gateway", "port": {"number": 7380}},
+            "prod: public Ingress does not reach the gateway Service")
+    require(certificate["spec"]["domains"] == [rule["host"]],
+            "prod: certificate domain differs from the Ingress host")
+
+
 def validate_overlay(text, profile):
     manifests = objects(text, profile)
+    check_public_tls(manifests, profile)
     name, namespace, auth = PROFILES[profile]
     crd = manifests["CustomResourceDefinition", "sifts.sift.axiom.dev"]
     require(crd["apiVersion"] == "apiextensions.k8s.io/v1", "unexpected Sift CRD API version")
@@ -109,6 +132,50 @@ def validate_overlay(text, profile):
                 for rule in role["rules"]), f"{profile}: operator cannot manage network policies")
 
 
+def check_public_tls_rejects_plain_http():
+    host = "sift.example.invalid"
+    good = {
+        ("Ingress", "sift-public"): {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "Ingress",
+            "metadata": {"name": "sift-public", "namespace": "production", "annotations": {
+                "kubernetes.io/ingress.class": "gce",
+                "networking.gke.io/managed-certificates": "sift-public",
+                "kubernetes.io/ingress.allow-http": "false",
+                "kubernetes.io/ingress.global-static-ip-name": "sift-artifact-ip",
+            }},
+            "spec": {"rules": [{"host": host, "http": {"paths": [{
+                "path": "/", "pathType": "Prefix",
+                "backend": {"service": {"name": "sift-gateway", "port": {"number": 7380}}},
+            }]}}]},
+        },
+        ("ManagedCertificate", "sift-public"): {
+            "apiVersion": "networking.gke.io/v1",
+            "kind": "ManagedCertificate",
+            "metadata": {"name": "sift-public", "namespace": "production"},
+            "spec": {"domains": [host]},
+        },
+    }
+    check_public_tls(good, "prod")
+    bad_copies = []
+    no_ingress = copy.deepcopy(good)
+    del no_ingress[("Ingress", "sift-public")]
+    bad_copies.append(no_ingress)
+    plain = copy.deepcopy(good)
+    plain[("Ingress", "sift-public")]["metadata"]["annotations"]["kubernetes.io/ingress.allow-http"] = "true"
+    bad_copies.append(plain)
+    wrong_port = copy.deepcopy(good)
+    wrong_port[("Ingress", "sift-public")]["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]["port"] = {"number": 80}
+    bad_copies.append(wrong_port)
+    for bad in bad_copies:
+        try:
+            check_public_tls(bad, "prod")
+        except SystemExit:
+            continue
+        raise SystemExit("public TLS check accepts plain HTTP or a missing Ingress")
+    print("Public TLS check rejects plain HTTP")
+
+
 def render(directory, sift, version):
     k8s = directory / "k8s"
     shutil.copytree(ROOT / "k8s", k8s)
@@ -124,6 +191,11 @@ def render(directory, sift, version):
                       instance.read_text())
         require("REPLACE_" not in text, f"{profile}: unresolved fixture placeholder")
         instance.write_text(text)
+        for extra in sorted(overlay.glob("*.yaml")):
+            if extra.name in ("kustomization.yaml", "sift.yaml"):
+                continue
+            extra.write_text(re.sub(r"REPLACE_ME__[A-Z0-9_]+",
+                                    lambda token: FIXTURES.get(token[0], token[0]), extra.read_text()))
         text = run("kubectl", "kustomize", overlay)
         validate_overlay(text, profile)
         artifacts[profile] = text
@@ -179,6 +251,7 @@ def render(directory, sift, version):
 
 def main():
     revision = run("git", "rev-parse", "HEAD").strip()
+    check_public_tls_rejects_plain_http()
     require(not run("git", "status", "--porcelain", "--untracked-files=no"), "tracked source is dirty")
     target = ROOT / os.environ.get("CARGO_TARGET_DIR", "target")
     env = dict(os.environ, SIFT_SOURCE_REVISION=revision)
