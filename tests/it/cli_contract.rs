@@ -259,11 +259,7 @@ async fn tail_reads_stored_logs_and_resumes_after_its_cursor() {
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let first_request = temp.path().join("tail-first.json");
-    std::fs::write(
-        &first_request,
-        tail_request("cli-tail", None).to_string(),
-    )
-    .unwrap();
+    std::fs::write(&first_request, tail_request("cli-tail", None).to_string()).unwrap();
     let first: serde_json::Value = serde_json::from_str(
         &sift_stdout(isolated_sift().args([
             "tail",
@@ -359,11 +355,7 @@ async fn correlate_returns_the_stored_trace_and_log() {
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let request = temp.path().join("correlate.json");
-    std::fs::write(
-        &request,
-        correlate_request("cli-correlate").to_string(),
-    )
-    .unwrap();
+    std::fs::write(&request, correlate_request("cli-correlate").to_string()).unwrap();
     let value: serde_json::Value = serde_json::from_str(
         &sift_stdout(isolated_sift().args([
             "correlate",
