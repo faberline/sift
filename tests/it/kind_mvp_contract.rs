@@ -1,6 +1,8 @@
 use std::path::Path;
 
 const SCRIPT: &str = include_str!("../../scripts/kind-mvp.sh");
+const KIND_WORKFLOW: &str = include_str!("../../.github/workflows/sift-kind.yml");
+const CI_WORKFLOW: &str = include_str!("../../.github/workflows/ci.yml");
 
 #[test]
 fn kind_gate_is_a_local_three_worker_preflight() {
@@ -41,6 +43,39 @@ fn kind_gate_is_a_local_three_worker_preflight() {
     assert!(!SCRIPT.contains("gcloud"));
     assert!(!SCRIPT.contains("terraform"));
     assert!(!SCRIPT.contains("fqdnnetworkpolicies.networking.gke.io"));
+}
+
+#[test]
+fn kind_workflow_is_manual_and_not_in_the_gate() {
+    for required in [
+        "workflow_dispatch:",
+        "scripts/kind-mvp.sh",
+        "SIFT_KIND_EVIDENCE_DIR",
+        "actions/upload-artifact@",
+        "if: always()",
+        "kind-linux-amd64.sha256sum",
+    ] {
+        assert!(
+            KIND_WORKFLOW.contains(required),
+            "sift-kind workflow is missing: {required}"
+        );
+    }
+
+    for forbidden in ["pull_request", "push:", "schedule:"] {
+        assert!(
+            !KIND_WORKFLOW.contains(forbidden),
+            "sift-kind workflow must stay manual, found: {forbidden}"
+        );
+    }
+
+    assert!(
+        !CI_WORKFLOW.contains("sift-kind"),
+        "ci.yml must not run the sift-kind workflow"
+    );
+    assert!(
+        !CI_WORKFLOW.contains("kind-mvp"),
+        "ci.yml must not run the Kind journey in gate"
+    );
 }
 
 #[test]
