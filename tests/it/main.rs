@@ -41,6 +41,7 @@ mod production_workflow;
 mod projection_runtime;
 mod prometheus_api;
 mod prometheus_semantics;
+mod query_pagination;
 mod raft_batch;
 mod raft_dedupe_determinism;
 mod raft_failover;
