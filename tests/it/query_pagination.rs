@@ -28,7 +28,7 @@ fn metric(project: &str, name: &str) -> EventEnvelope {
     let mut event = EventEnvelope::for_project(
         project,
         "prod",
-        &format!("event-{name}"),
+        format!("event-{name}"),
         SignalKind::Metric,
         serde_json::json!({}),
     );
@@ -50,7 +50,7 @@ fn span(project: &str, trace_id: &str) -> EventEnvelope {
     let mut event = EventEnvelope::for_project(
         project,
         "prod",
-        &format!("span-{trace_id}"),
+        format!("span-{trace_id}"),
         SignalKind::Span,
         serde_json::json!({
             "name": "POST /checkout",
