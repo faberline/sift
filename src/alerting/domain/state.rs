@@ -178,3 +178,6 @@ impl AlertState {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests;

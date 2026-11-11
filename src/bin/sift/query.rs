@@ -23,6 +23,49 @@ pub(super) struct QueryArgs {
     request_timeout_secs: u64,
 }
 
+#[derive(Args)]
+pub(super) struct ApiRequestArgs {
+    /// Request JSON file, or `-` for stdin.
+    #[arg(value_name = "REQUEST")]
+    request: String,
+    /// Sift service base URL.
+    #[arg(long, env = "SIFT_URL", default_value = "http://127.0.0.1:7380")]
+    endpoint: String,
+    /// Optional Sift bearer token.
+    #[arg(long, env = "SIFT_TOKEN")]
+    token: Option<String>,
+    #[arg(long, default_value_t = 30)]
+    request_timeout_secs: u64,
+}
+
+pub(super) async fn tail(args: ApiRequestArgs) -> Result<()> {
+    let source = read_json_input(&args.request)?;
+    let request: sift::query::LogTailRequestV1 =
+        serde_json::from_slice(&source).context("parse LogTailRequestV1")?;
+    request.validate().context("validate LogTailRequestV1")?;
+    let api = sift::query::SiftApiClient::new(
+        &args.endpoint,
+        args.token,
+        Duration::from_secs(args.request_timeout_secs),
+    )?;
+    print_json_terminal(api.tail_logs(&request).await?)
+}
+
+pub(super) async fn correlate(args: ApiRequestArgs) -> Result<()> {
+    let source = read_json_input(&args.request)?;
+    let request: sift::query::CorrelationRequestV1 =
+        serde_json::from_slice(&source).context("parse CorrelationRequestV1")?;
+    request
+        .validate()
+        .context("validate CorrelationRequestV1")?;
+    let api = sift::query::SiftApiClient::new(
+        &args.endpoint,
+        args.token,
+        Duration::from_secs(args.request_timeout_secs),
+    )?;
+    print_json_terminal(api.correlate(&request).await?)
+}
+
 pub(super) async fn query(args: QueryArgs) -> Result<()> {
     let source = read_json_input(&args.request)?;
     let value: serde_json::Value = serde_json::from_slice(&source).context("parse query JSON")?;

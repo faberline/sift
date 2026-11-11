@@ -355,6 +355,13 @@ fn execute_query_inner(
             }
             let filtered_more = traces.len() > request.limit;
             traces.truncate(request.limit);
+            // A page can hold more matches than the public limit. Resume
+            // after the last returned trace, so no trace is skipped.
+            let scanned_cursor = if filtered_more {
+                traces.last().map(|trace| trace.trace_id.clone())
+            } else {
+                scanned_cursor
+            };
             let has_more = filtered_more || page.has_more;
             let next_cursor = has_more
                 .then(|| {

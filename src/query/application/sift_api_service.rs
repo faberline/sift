@@ -41,13 +41,10 @@ impl SiftApiClient {
     pub(in crate::query) async fn query_value(&self, request: &QueryRequestV1) -> Result<Value> {
         self.port.query_value(request).await
     }
-    pub(in crate::query) async fn tail_logs(&self, request: &LogTailRequestV1) -> Result<Value> {
+    pub async fn tail_logs(&self, request: &LogTailRequestV1) -> Result<Value> {
         self.port.tail_logs(request).await
     }
-    pub(in crate::query) async fn correlate(
-        &self,
-        request: &CorrelationRequestV1,
-    ) -> Result<Value> {
+    pub async fn correlate(&self, request: &CorrelationRequestV1) -> Result<Value> {
         self.port.correlate(request).await
     }
     pub(in crate::query) async fn get_trace(

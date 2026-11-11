@@ -11,7 +11,7 @@ use crate::connect::ConnectArgs;
 use crate::k8s::{DockerfileArgs, K8sArgs};
 use crate::mcp::McpArgs;
 use crate::meta::{IssueArgs, LlmArgs, SpecArgs, UpgradeArgs};
-use crate::query::QueryArgs;
+use crate::query::{ApiRequestArgs, QueryArgs};
 use crate::restore::RestoreArgs;
 use crate::serve_args::ServeArgs;
 use crate::snapshot::SnapshotArgs;
@@ -39,6 +39,10 @@ pub(super) enum Command {
     Control(crate::control::ControlArgs),
     /// Run one versioned logs, metrics, or traces query through the Sift API.
     Query(QueryArgs),
+    /// Read new logs after a cursor through the Sift API.
+    Tail(ApiRequestArgs),
+    /// Correlate logs, metrics and traces by trace, span, service or attributes through the Sift API.
+    Correlate(ApiRequestArgs),
     /// Serve the read-only Sift MCP tools.
     Mcp(McpArgs),
     /// Write a consistent Sift journal snapshot to stdout or a local file.
