@@ -47,6 +47,8 @@ FIXTURES = {
     "REPLACE_ME__GKE_LOCATION": "asia-east1-a",
     "REPLACE_ME__NAME": "sift-artifact",
     "REPLACE_ME__NAMESPACE": "sift-artifact",
+    "REPLACE_ME__SIFT_PUBLIC_HOST": "sift.example.invalid",
+    "REPLACE_ME__SIFT_PUBLIC_STATIC_IP_NAME": "sift-artifact-ip",
 }
 
 
@@ -74,8 +76,28 @@ def objects(text, source):
     return result
 
 
+def check_public_tls(manifests, profile):
+    if profile != "prod":
+        return
+    ingress = manifests.get(("Ingress", "sift-public"))
+    require(ingress is not None, "prod: public API has no Ingress")
+    certificate = manifests.get(("ManagedCertificate", "sift-public"))
+    require(certificate is not None, "prod: public API has no managed certificate")
+    annotations = ingress["metadata"].get("annotations", {})
+    require(annotations.get("kubernetes.io/ingress.allow-http") == "false"
+            and annotations.get("networking.gke.io/managed-certificates") == "sift-public",
+            "prod: public API allows plain HTTP or has no certificate")
+    rule = ingress["spec"]["rules"][0]
+    backend = rule["http"]["paths"][0]["backend"]["service"]
+    require(backend == {"name": "sift-gateway", "port": {"number": 7380}},
+            "prod: public Ingress does not reach the gateway Service")
+    require(certificate["spec"]["domains"] == [rule["host"]],
+            "prod: certificate domain differs from the Ingress host")
+
+
 def validate_overlay(text, profile):
     manifests = objects(text, profile)
+    check_public_tls(manifests, profile)
     name, namespace, auth = PROFILES[profile]
     crd = manifests["CustomResourceDefinition", "sifts.sift.axiom.dev"]
     require(crd["apiVersion"] == "apiextensions.k8s.io/v1", "unexpected Sift CRD API version")
@@ -169,6 +191,11 @@ def render(directory, sift, version):
                       instance.read_text())
         require("REPLACE_" not in text, f"{profile}: unresolved fixture placeholder")
         instance.write_text(text)
+        for extra in sorted(overlay.glob("*.yaml")):
+            if extra.name in ("kustomization.yaml", "sift.yaml"):
+                continue
+            extra.write_text(re.sub(r"REPLACE_ME__[A-Z0-9_]+",
+                                    lambda token: FIXTURES.get(token[0], token[0]), extra.read_text()))
         text = run("kubectl", "kustomize", overlay)
         validate_overlay(text, profile)
         artifacts[profile] = text
