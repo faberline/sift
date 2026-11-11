@@ -126,7 +126,11 @@ For a whole-disk restore, use the recovery record. Save one
 restore, and start each store and control data directory empty:
 
 ```sh
-sift restore-complete --record-file recovery/latest.json
+sift restore-complete \
+  --source <GCS archive prefix that contains recovery/latest.json> \
+  --store-dir <empty store data directory> \
+  --control-dir <empty control data directory> \
+  --record-file recovery/latest.json
 ```
 
 **Healthy**
@@ -143,7 +147,8 @@ sift restore-complete --record-file recovery/latest.json
   fixed membership group.
 
 Source: `docs/operations/ha.md` ("Backup and archive"); `docs/production-v1.md`
-(whole-disk restore with `sift restore-complete --record-file`).
+(whole-disk restore with `sift restore-complete --record-file`);
+`src/bin/sift/restore_complete.rs` (`RestoreCompleteArgs`).
 
 ## Collector replay after restart
 
