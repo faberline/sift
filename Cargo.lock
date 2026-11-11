@@ -3937,7 +3937,6 @@ dependencies = [
  "promql-parser",
  "prost 0.13.5",
  "prost 0.14.4",
- "raft-core",
  "raft-runtime",
  "rcgen",
  "regex",

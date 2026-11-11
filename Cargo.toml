@@ -52,7 +52,6 @@ metrics-remote-write = { git = "https://github.com/faberline/core", tag = "v0.4.
 service-observability = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
 service-projection = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
 server-lifecycle = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
-raft-core = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
 raft-runtime = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
 peer-tls = { git = "https://github.com/faberline/core", tag = "v0.4.14" }
 schemars = "0.8"

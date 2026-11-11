@@ -307,7 +307,7 @@ below is an explicit Cargo test target under `tests`.
 | Signal ingest | `signal-ingest` | Send logs, metrics, and traces through standard telemetry protocols. | `sift`<br>`external:opentelemetry`<br>`external:prometheus` |
 | Unified investigation | `unified-investigation` | Query and correlate every phase-one signal through one product API. | `sift`<br>`core/index-text` |
 | Durable local data | `durable-local-data` | Keep accepted data in one private and versioned persistent root. | `sift`<br>`core/storage-durable` |
-| Replicated availability | `replicated-availability` | Keep acknowledged data after one voter fails. | `sift`<br>`core/raft-core`<br>`core/raft-runtime`<br>`core/peer-tls` |
+| Replicated availability | `replicated-availability` | Keep acknowledged data after one voter fails. | `sift`<br>`core/raft-runtime`<br>`core/peer-tls` |
 | Archive and restore | `archive-and-restore` | Commit immutable Parquet archives and restore their exact events. | `sift`<br>`core/storage-segment`<br>`core/service-projection`<br>`core/service-backup`<br>`external:apache-parquet` |
 | Agent and CLI access | `agent-and-cli-access` | Let people and agents use the same read-only product schemas. | `sift`<br>`core/cli-std`<br>`external:model-context-protocol` |
 | Kubernetes operation | `kubernetes-operation` | Run one Sift product as secure role-based GKE workloads. | `sift`<br>`core/service-k8s`<br>`core/service-auth` |
@@ -355,7 +355,6 @@ below is an explicit Cargo test target under `tests`.
 - Promise: Acknowledge replicated batches through a three-voter quorum and keep them after leader loss.
 - Sources:
   - `sift` maps Sift batches into the shared Raft state machine and role topology.
-  - `core/raft-core` supplies the consensus log and quorum rules.
   - `core/raft-runtime` supplies durable host, transport, apply, and snapshot behavior.
   - `core/peer-tls` supplies required mutual TLS for dedicated peer traffic.
 - Gate: `bash ./test.sh --test it -- raft_batch::`
