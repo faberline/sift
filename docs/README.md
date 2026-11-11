@@ -14,6 +14,7 @@ and [`llms.txt`](../llms.txt).
 | [domain/contexts.md](domain/contexts.md) | One section per context: what it owns, its services, ports and adapters. |
 | [adr/](adr/0001-ddd-layout.md) | Architecture decisions and the reasons behind them. |
 | [operations/ha.md](operations/ha.md) | High availability: role deployment, peer TLS, backup, and recovery limits. |
+| [operations/upgrade.md](operations/upgrade.md) | Version compatibility policy, rolling upgrade order and rollback rule. |
 | [operations/runbook.md](operations/runbook.md) | Data-plane runbook: health, metrics, voter loss, restore, collector replay, rejected data. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
 | [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
