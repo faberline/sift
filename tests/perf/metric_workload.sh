@@ -11,6 +11,8 @@ set -euo pipefail
 #   WORKLOAD_QUERIES   range queries (default 20)
 #   WORKLOAD_PROJECT   project name (default perf)
 #   WORKLOAD_OUT       optional file that also receives the JSON line
+#   WORKLOAD_BASE_MS   optional first sample time in ms (whole number); default: now
+#   WORKLOAD_KEEP_RESPONSES  optional directory that keeps the query responses q_<k>.json
 
 repo_root="${SIFT_REPO_ROOT:-$(git -c core.fsmonitor=false rev-parse --show-toplevel)}"
 
@@ -35,6 +37,8 @@ items="${WORKLOAD_ITEMS:-1000}"
 queries="${WORKLOAD_QUERIES:-20}"
 project="${WORKLOAD_PROJECT:-perf}"
 out_file="${WORKLOAD_OUT:-}"
+base_ms_setting="${WORKLOAD_BASE_MS:-}"
+keep_dir="${WORKLOAD_KEEP_RESPONSES:-}"
 
 check_number() {
   local name="$1" value="$2"
@@ -46,6 +50,9 @@ check_number() {
 check_number WORKLOAD_REQUESTS "$requests"
 check_number WORKLOAD_ITEMS "$items"
 check_number WORKLOAD_QUERIES "$queries"
+if [[ -n "$base_ms_setting" ]]; then
+  check_number WORKLOAD_BASE_MS "$base_ms_setting"
+fi
 
 if (( items > 1000 )); then
   echo "WORKLOAD_ITEMS must be at most 1000: $items" >&2
@@ -111,7 +118,7 @@ if (( ready == 0 )); then
 fi
 
 # Build every payload before the timed window.
-base_ms=$(( $(date +%s) * 1000 ))
+base_ms="${base_ms_setting:-$(( $(date +%s) * 1000 ))}"
 for (( i = 0; i < requests; i++ )); do
   "$sift_bin" acceptance-payload --kind prometheus-remote-write-v1 \
     --items "$items" --project "$project" --event-prefix "wl-$i" \
@@ -220,6 +227,10 @@ with open(out_path, "w") as handle:
     handle.write(line + "\n")
 print(line)
 PY
+
+if [[ -n "$keep_dir" ]]; then
+  mkdir -p "$keep_dir" && cp "$work_root"/q_*.json "$keep_dir"/
+fi
 
 result_file="$work_root/result.json"
 if ! python3 -I -c "$stats_py" "$work_root" "$sift_pid" "$requests" "$items" \
