@@ -24,3 +24,18 @@ Use [the small trial](docs/pilot.md) to check generated data before paid GKE tes
 
 Later work includes a web UI, GCP managed-service inputs, full PromQL, and
 100,000 items per second. The first release has fixed membership and shards.
+
+## Core-owned operations
+
+These parts of Sift are still Sift's own code, although core owns, or will own,
+the same work. Each row moves in its own pull request after its dependency is ready.
+
+| Row | What moves | Core crate | Needs | Sift release |
+| --- | --- | --- | --- | --- |
+| 1 | Restore flow, archive upload intent, commit state and GC-pending (about 934 restore lines; more in `src/archive/**`) | `service-backup` | The tag from faberline/core#147. `BackupSetV1` and `RestoreLedger` are on core `main` but in no tag yet. | After the core tag (#66) |
+| 2 | Operator CRD backup spec, status patch and manual `peer_tls_secret` (about 1,393 lines in `src/operations`) | `service-k8s` | faberline/core#148 (service profile) and a core tag after faberline/core#147 | After the core tag (#66) |
+| 3 | Directory swap for the dedupe index (`dedupe_replace.rs`, `dedupe_tree_copy.rs`, 304 lines) | `storage-durable` (`generation`) | The tag from faberline/core#147, if the API is not in v0.4.14 | After the core tag (#66) |
+| 4 | `ephemeral_file_object_store.rs` (177 lines) | `storage-object` | None known; check the crate when the row starts | After the core tag (#66) |
+| 5 | The unused `raft-core` line in `Cargo.toml` | Remove | None | 0.2.0 (#65) |
+
+The tracking issue is #38; the children are #65 and #66.
