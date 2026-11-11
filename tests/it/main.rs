@@ -9,6 +9,7 @@ mod capability_evidence;
 mod cli_contract;
 mod collector_cri;
 mod collector_library_boundary;
+mod control_admin_rights;
 mod deployment_cli;
 mod durable_signal_wal;
 mod event_v2_governance;
