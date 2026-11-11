@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use axum::{extract::Query, http::HeaderMap, routing::get, Json, Router};
 use serde_json::json;
+use sift::{EventEnvelope, SignalKind};
 use tokio::net::TcpListener;
 
 #[test]
@@ -242,6 +243,261 @@ async fn query_reads_a_stored_log_from_a_live_local_sift() {
     );
 
     server.abort();
+}
+
+#[tokio::test]
+async fn tail_reads_stored_logs_and_resumes_after_its_cursor() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(sift::ServiceState::open(temp.path()).unwrap());
+    state
+        .journal()
+        .append(log("cli-tail", "tail-1", "trace-1"))
+        .unwrap();
+    let app = sift::router(state.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let first_request = temp.path().join("tail-first.json");
+    std::fs::write(&first_request, tail_request("cli-tail", None).to_string()).unwrap();
+    let first: serde_json::Value = serde_json::from_str(
+        &sift_stdout(isolated_sift().args([
+            "tail",
+            first_request.to_str().unwrap(),
+            "--endpoint",
+            endpoint.as_str(),
+        ]))
+        .await,
+    )
+    .expect("sift tail prints JSON");
+    assert_eq!(first["next"], "done");
+    assert_eq!(first["data"]["records"].as_array().unwrap().len(), 1);
+    assert_eq!(first["data"]["records"][0]["event_id"], "tail-1");
+    let cursor = first["next_cursor"].as_str().expect("tail cursor");
+    assert!(cursor.starts_with("logs:"), "{first}");
+
+    state
+        .journal()
+        .append(log("cli-tail", "tail-2", "trace-1"))
+        .unwrap();
+    let resumed_request = temp.path().join("tail-resumed.json");
+    std::fs::write(
+        &resumed_request,
+        tail_request("cli-tail", Some(cursor)).to_string(),
+    )
+    .unwrap();
+    let resumed: serde_json::Value = serde_json::from_str(
+        &sift_stdout(isolated_sift().args([
+            "tail",
+            resumed_request.to_str().unwrap(),
+            "--endpoint",
+            endpoint.as_str(),
+        ]))
+        .await,
+    )
+    .expect("sift tail prints JSON");
+    assert_eq!(resumed["next"], "done");
+    assert_eq!(resumed["data"]["records"].as_array().unwrap().len(), 1);
+    assert_eq!(resumed["data"]["records"][0]["event_id"], "tail-2");
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn tail_does_not_cross_projects() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(sift::ServiceState::open(temp.path()).unwrap());
+    state
+        .journal()
+        .append(log("cli-tail-a", "a-1", "trace-1"))
+        .unwrap();
+    let app = sift::router(state.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let request = temp.path().join("tail-other.json");
+    std::fs::write(&request, tail_request("cli-tail-b", None).to_string()).unwrap();
+    let other: serde_json::Value = serde_json::from_str(
+        &sift_stdout(isolated_sift().args([
+            "tail",
+            request.to_str().unwrap(),
+            "--endpoint",
+            endpoint.as_str(),
+        ]))
+        .await,
+    )
+    .expect("sift tail prints JSON");
+    assert_eq!(other["next"], "done");
+    assert!(
+        other["data"]["records"].as_array().unwrap().is_empty(),
+        "another project must not see the record: {other}"
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn correlate_returns_the_stored_trace_and_log() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(sift::ServiceState::open(temp.path()).unwrap());
+    state
+        .journal()
+        .append(log("cli-correlate", "log-1", "trace-1"))
+        .unwrap();
+    state
+        .journal()
+        .append(span("cli-correlate", "trace-1"))
+        .unwrap();
+    let app = sift::router(state.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let request = temp.path().join("correlate.json");
+    std::fs::write(&request, correlate_request("cli-correlate").to_string()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(
+        &sift_stdout(isolated_sift().args([
+            "correlate",
+            request.to_str().unwrap(),
+            "--endpoint",
+            endpoint.as_str(),
+        ]))
+        .await,
+    )
+    .expect("sift correlate prints JSON");
+    assert_eq!(value["next"], "done");
+    assert_eq!(value["partial"], false);
+    assert_eq!(value["logs"][0]["event_id"], "log-1");
+    assert_eq!(value["traces"][0]["trace_id"], "trace-1");
+
+    let other_request = temp.path().join("correlate-other.json");
+    std::fs::write(
+        &other_request,
+        correlate_request("cli-correlate-other").to_string(),
+    )
+    .unwrap();
+    let other: serde_json::Value = serde_json::from_str(
+        &sift_stdout(isolated_sift().args([
+            "correlate",
+            other_request.to_str().unwrap(),
+            "--endpoint",
+            endpoint.as_str(),
+        ]))
+        .await,
+    )
+    .expect("sift correlate prints JSON");
+    assert_eq!(other["next"], "done");
+    assert!(other["logs"].as_array().unwrap().is_empty(), "{other}");
+    assert!(other["traces"].as_array().unwrap().is_empty(), "{other}");
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn tail_and_correlate_reject_an_invalid_request_before_calling_the_api() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let bad_tail = temp.path().join("bad-tail.json");
+    std::fs::write(
+        &bad_tail,
+        json!({"version": 1, "project": "p", "limit": 0}).to_string(),
+    )
+    .unwrap();
+    let tail = isolated_sift()
+        .args([
+            "tail",
+            bad_tail.to_str().unwrap(),
+            "--endpoint",
+            "http://127.0.0.1:9",
+        ])
+        .output()
+        .await
+        .expect("run sift tail");
+    assert!(!tail.status.success(), "{tail:?}");
+    assert!(
+        String::from_utf8_lossy(&tail.stderr).contains("limit must be between"),
+        "{tail:?}"
+    );
+
+    let bad_correlate = temp.path().join("bad-correlate.json");
+    std::fs::write(
+        &bad_correlate,
+        json!({"version": 1, "project": "p", "limit": 10}).to_string(),
+    )
+    .unwrap();
+    let correlate = isolated_sift()
+        .args([
+            "correlate",
+            bad_correlate.to_str().unwrap(),
+            "--endpoint",
+            "http://127.0.0.1:9",
+        ])
+        .output()
+        .await
+        .expect("run sift correlate");
+    assert!(!correlate.status.success(), "{correlate:?}");
+    assert!(
+        String::from_utf8_lossy(&correlate.stderr).contains("correlation requires trace_id"),
+        "{correlate:?}"
+    );
+}
+
+fn log(project: &str, id: &str, trace_id: &str) -> EventEnvelope {
+    let mut event = EventEnvelope::for_project(
+        project,
+        "prod",
+        id,
+        SignalKind::Log,
+        json!({"message": "checkout failed"}),
+    );
+    event.trace_id = Some(trace_id.into());
+    event
+        .resource
+        .insert("service.name".into(), "checkout".into());
+    event
+}
+
+fn span(project: &str, trace_id: &str) -> EventEnvelope {
+    let mut event = EventEnvelope::for_project(
+        project,
+        "prod",
+        "span-1",
+        SignalKind::Span,
+        json!({
+            "name": "checkout",
+            "start_time_unix_nano": 10,
+            "end_time_unix_nano": 20,
+            "status": {"code": "error"}
+        }),
+    );
+    event.trace_id = Some(trace_id.into());
+    event.span_id = Some("root".into());
+    event
+        .resource
+        .insert("service.name".into(), "checkout".into());
+    event
+}
+
+fn tail_request(project: &str, after_cursor: Option<&str>) -> serde_json::Value {
+    json!({
+        "version": 1,
+        "project": project,
+        "environment": "prod",
+        "after_cursor": after_cursor,
+        "wait_ms": 0,
+        "limit": 10
+    })
+}
+
+fn correlate_request(project: &str) -> serde_json::Value {
+    json!({
+        "version": 1,
+        "project": project,
+        "environment": "prod",
+        "trace_id": "trace-1",
+        "limit": 10
+    })
 }
 
 fn query_request(project: &str) -> serde_json::Value {

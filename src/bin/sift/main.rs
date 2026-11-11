@@ -33,7 +33,7 @@ use crate::connect::connect;
 use crate::k8s::{dockerfile, k8s};
 use crate::mcp::mcp;
 use crate::meta::{issue, spec, LLM_TOPICS, TOOL};
-use crate::query::query;
+use crate::query::{correlate, query, tail};
 use crate::restore::restore;
 use crate::serve::serve;
 use crate::snapshot::snapshot;
@@ -51,6 +51,8 @@ async fn main() -> Result<()> {
         Command::Control(args) => control::control(args).await,
         Command::Scrape(args) => scrape::scrape(args).await,
         Command::Query(args) => query(args).await,
+        Command::Tail(args) => tail(args).await,
+        Command::Correlate(args) => correlate(args).await,
         Command::Mcp(args) => mcp(args).await,
         Command::Snapshot(args) => tokio::task::spawn_blocking(move || snapshot(args)).await?,
         Command::Restore(args) => tokio::task::spawn_blocking(move || restore(args)).await?,
