@@ -15,6 +15,7 @@ and [`llms.txt`](../llms.txt).
 | [adr/](adr/0001-ddd-layout.md) | Architecture decisions and the reasons behind them. |
 | [operations/ha.md](operations/ha.md) | High availability: role deployment, peer TLS, backup, and recovery limits. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
+| [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
 
 The architecture contract itself is [`ddd.toml`](../ddd.toml) at the repository
 root, checked by the workspace's rust-arch contract
