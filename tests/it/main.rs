@@ -26,6 +26,7 @@ mod logging_store;
 mod mcp_library_boundary;
 mod mcp_surface;
 mod metric_store;
+mod metric_workload_script;
 mod operational_cli;
 mod operator_reconcile_oracle;
 mod otlp_gcp_ingest;
