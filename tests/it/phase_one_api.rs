@@ -253,3 +253,76 @@ async fn async_query_job_is_persisted_and_read_after_restart() {
         "log-1"
     );
 }
+
+#[tokio::test]
+async fn log_tail_cursor_survives_a_restart_without_crossing_projects() {
+    let temp = tempfile::tempdir().unwrap();
+    let tail_body = |after_cursor: Option<&str>| {
+        serde_json::json!({
+            "version": 1,
+            "project": "project-a",
+            "environment": "prod",
+            "filter": {"op": "eq", "field": "trace_id", "value": "trace-1"},
+            "after_cursor": after_cursor,
+            "wait_ms": 0,
+            "limit": 10
+        })
+    };
+    let first_cursor: String;
+    {
+        let state = Arc::new(ServiceState::open(temp.path()).unwrap());
+        state.journal().append(log("first", "trace-1")).unwrap();
+        let mut foreign = log("foreign", "trace-1");
+        foreign.project = "project-b".into();
+        state.journal().append(foreign).unwrap();
+        let app = router(Arc::clone(&state));
+
+        let page = post(&app, "/api/v1/logs/tail", tail_body(None)).await;
+        assert_eq!(page.status(), StatusCode::OK);
+        let page = body_json(page).await;
+        assert_eq!(page["partial"], false);
+        let records = page["data"]["records"].as_array().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["event_id"], "first");
+        first_cursor = page["next_cursor"]
+            .as_str()
+            .expect("first tail cursor")
+            .to_string();
+    }
+
+    let reopened = Arc::new(ServiceState::open(temp.path()).unwrap());
+    reopened.journal().append(log("second", "trace-1")).unwrap();
+    let mut foreign_again = log("foreign-2", "trace-1");
+    foreign_again.project = "project-b".into();
+    reopened.journal().append(foreign_again).unwrap();
+    let app = router(Arc::clone(&reopened));
+
+    let page = post(
+        &app,
+        "/api/v1/logs/tail",
+        tail_body(Some(first_cursor.as_str())),
+    )
+    .await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let page = body_json(page).await;
+    assert_eq!(page["partial"], false);
+    let records = page["data"]["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["event_id"], "second");
+    let second_cursor = page["next_cursor"]
+        .as_str()
+        .expect("second tail cursor")
+        .to_string();
+    assert_ne!(second_cursor, first_cursor);
+
+    let page = post(
+        &app,
+        "/api/v1/logs/tail",
+        tail_body(Some(second_cursor.as_str())),
+    )
+    .await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let page = body_json(page).await;
+    assert!(page["data"]["records"].as_array().unwrap().is_empty());
+    assert_eq!(page["next_cursor"], second_cursor);
+}
