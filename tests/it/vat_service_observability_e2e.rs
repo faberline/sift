@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 const SERVICES: [&str; 4] = ["lumen", "tape", "relay", "defer"];
 const PARENT_SPAN: &str = "b7ad6b7169203331";
 const CANARY: &str = "sift-vat-synthetic-authorization-canary";
+// Core drops some Defer access logs under concurrent probes (faberline/sift#18, Core 1c8507e); remove the retry when the pinned Core has the repair.
+const DEFER_ATTEMPTS: u32 = 3;
 
 fn debug_binary(name: &str) -> PathBuf {
     if name == "sift" {
@@ -395,40 +397,69 @@ async fn exercise_producers(
             _ => unreachable!("unexpected producer"),
         };
         for (outcome, status) in [200, 401].into_iter().enumerate() {
-            let trace = format!("{:032x}", 1 + phase * 16 + index * 2 + outcome);
-            let mut request = client
-                .request(method.clone(), format!("{}{}", producer.endpoint, path))
-                .header("traceparent", format!("00-{trace}-{PARENT_SPAN}-01"));
-            if status == 401 {
-                request = request.bearer_auth(CANARY);
+            let attempts = if producer.name == "defer" {
+                DEFER_ATTEMPTS
+            } else {
+                1
+            };
+            for attempt in 0..attempts {
+                let trace = format!(
+                    "{:032x}",
+                    1 + phase * 16 + index * 2 + outcome + (attempt as usize) * 0x1000
+                );
+                let mut request = client
+                    .request(method.clone(), format!("{}{}", producer.endpoint, path))
+                    .header("traceparent", format!("00-{trace}-{PARENT_SPAN}-01"));
+                if status == 401 {
+                    request = request.bearer_auth(CANARY);
+                }
+                if !body.is_empty() {
+                    request = request
+                        .header("content-type", "application/json")
+                        .body(body);
+                }
+                let response = request.send().await.unwrap();
+                assert_eq!(
+                    response.status().as_u16(),
+                    status,
+                    "{} {path}",
+                    producer.name
+                );
+                assert!(!response.text().await.unwrap().contains(CANARY));
+                let last_attempt = attempt + 1 == attempts;
+                let span = if producer.name == "defer" && !last_attempt {
+                    try_access_log(producer, &trace, status, Duration::from_secs(5)).await
+                } else {
+                    Some(wait_for_access_log(producer, &trace, status).await)
+                };
+                if let Some(span) = span {
+                    observed.push(ObservedRequest {
+                        service: producer.name,
+                        trace,
+                        span,
+                        status,
+                    });
+                    break;
+                }
             }
-            if !body.is_empty() {
-                request = request
-                    .header("content-type", "application/json")
-                    .body(body);
-            }
-            let response = request.send().await.unwrap();
-            assert_eq!(
-                response.status().as_u16(),
-                status,
-                "{} {path}",
-                producer.name
-            );
-            assert!(!response.text().await.unwrap().contains(CANARY));
-            let span = wait_for_access_log(producer, &trace, status).await;
-            observed.push(ObservedRequest {
-                service: producer.name,
-                trace,
-                span,
-                status,
-            });
         }
     }
     observed
 }
 
 async fn wait_for_access_log(producer: &Producer, trace: &str, status: u16) -> String {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    try_access_log(producer, trace, status, Duration::from_secs(10))
+        .await
+        .unwrap_or_else(|| panic!("missing {} access log for trace {trace}", producer.name))
+}
+
+async fn try_access_log(
+    producer: &Producer,
+    trace: &str,
+    status: u16,
+    wait: Duration,
+) -> Option<String> {
+    let deadline = Instant::now() + wait;
     loop {
         let source = std::fs::read_to_string(&producer.stdout).expect("read VAT stdout");
         assert!(
@@ -450,15 +481,60 @@ async fn wait_for_access_log(producer: &Producer, trace: &str, status: u16) -> S
             assert_eq!(event["trace_flags"], "01");
             let span = event["span_id"].as_str().expect("local response span");
             assert!(span.len() == 16 && span != PARENT_SPAN && span != "0000000000000000");
-            return span.to_owned();
+            return Some(span.to_owned());
         }
-        assert!(
-            Instant::now() < deadline,
-            "missing {} access log for trace {trace}",
-            producer.name
-        );
+        if Instant::now() >= deadline {
+            return None;
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+fn defer_producer_with_stdout(root: &tempfile::TempDir, stdout: &str) -> Producer {
+    let stdout_path = root.path().join("defer.stdout.jsonl");
+    let stderr_path = root.path().join("defer.stderr.log");
+    std::fs::write(&stdout_path, stdout).unwrap();
+    std::fs::write(&stderr_path, "").unwrap();
+    Producer {
+        name: "defer",
+        endpoint: String::new(),
+        stdout: stdout_path,
+        stderr: stderr_path,
+    }
+}
+
+#[tokio::test]
+async fn access_log_wait_gives_up_when_trace_never_appears() {
+    let root = tempfile::tempdir().unwrap();
+    let producer = defer_producer_with_stdout(
+        &root,
+        "{\"trace_id\":\"00000000000000000000000000000001\",\"attributes\":{\"target\":\"http.access\",\"status\":200}}\n",
+    );
+    let span = try_access_log(
+        &producer,
+        "00000000000000000000000000000007",
+        200,
+        Duration::from_millis(150),
+    )
+    .await;
+    assert_eq!(span, None);
+}
+
+#[tokio::test]
+async fn access_log_wait_returns_span_of_matching_trace() {
+    let root = tempfile::tempdir().unwrap();
+    let producer = defer_producer_with_stdout(
+        &root,
+        "{\"schema\":\"axiom.service.log.v1\",\"service\":{\"name\":\"defer\"},\"trace_id\":\"00000000000000000000000000000007\",\"parent_span_id\":\"b7ad6b7169203331\",\"span_id\":\"1111111111111111\",\"trace_flags\":\"01\",\"attributes\":{\"target\":\"http.access\",\"status\":200}}\n",
+    );
+    let span = try_access_log(
+        &producer,
+        "00000000000000000000000000000007",
+        200,
+        Duration::from_millis(150),
+    )
+    .await;
+    assert_eq!(span, Some("1111111111111111".to_owned()));
 }
 
 fn checkpoint_path(producer: &Producer) -> PathBuf {
