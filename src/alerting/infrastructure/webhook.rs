@@ -89,3 +89,6 @@ impl WebhookPort for ConfiguredWebhook {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
