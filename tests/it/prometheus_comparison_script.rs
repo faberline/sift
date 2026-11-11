@@ -54,7 +54,10 @@ ThreadingHTTPServer((host, int(port)), Handler).serve_forever()
 "##;
 
 fn script() -> &'static str {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/perf/prometheus_comparison.sh")
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/perf/prometheus_comparison.sh"
+    )
 }
 
 fn unique_dir(name: &str) -> PathBuf {
@@ -133,7 +136,9 @@ fn run_comparison(run: &Run) -> Output {
             command.env_remove("PROMETHEUS_SHA256_OVERRIDE_FOR_TESTS");
         }
     }
-    command.output().expect("run prometheus_comparison.sh with bash")
+    command
+        .output()
+        .expect("run prometheus_comparison.sh with bash")
 }
 
 #[test]
@@ -162,7 +167,11 @@ fn comparison_prints_both_sides_and_reports_differences() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 1, "stdout must hold exactly one line: {stdout:?}");
+    assert_eq!(
+        lines.len(),
+        1,
+        "stdout must hold exactly one line: {stdout:?}"
+    );
 
     let json: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(json["prometheus_version"], "3.16.0");
