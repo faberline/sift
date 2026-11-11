@@ -307,3 +307,160 @@ async fn v2_hot_history_survives_without_archive_and_cold_history_stays_retryabl
         }
     }
 }
+
+fn span_of(trace_id: &str) -> EventEnvelope {
+    let mut event = EventEnvelope::for_project(
+        "project-a",
+        "prod",
+        format!("span-{trace_id}"),
+        SignalKind::Span,
+        serde_json::json!({
+            "name": "POST /checkout",
+            "start_time_unix_nano": 10,
+            "end_time_unix_nano": 2_000_010,
+            "status": {"code": "error"}
+        }),
+    );
+    event.trace_id = Some(trace_id.into());
+    event.span_id = Some("root".into());
+    event
+        .resource
+        .insert("service.name".into(), "checkout".into());
+    event
+}
+
+async fn traces_page(
+    app: &axum::Router,
+    signal: serde_json::Value,
+    limit: usize,
+    cursor: Option<&str>,
+) -> serde_json::Value {
+    let mut request = serde_json::json!({
+        "version": 1,
+        "project": "project-a",
+        "environment": "prod",
+        "signal": signal,
+        "limit": limit,
+        "mode": "sync"
+    });
+    if let Some(cursor) = cursor {
+        request["cursor"] = serde_json::json!(cursor);
+    }
+    body_json(post_json(app, "/api/v1/query", request).await).await
+}
+
+fn trace_ids(body: &serde_json::Value) -> Vec<String> {
+    body["data"]["traces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|trace| trace["trace_id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Follows `next_cursor` from `first` until it is absent, at most 10 pages.
+async fn read_pages(
+    app: &axum::Router,
+    signal: serde_json::Value,
+    limit: usize,
+    first: Option<String>,
+) -> Vec<Vec<String>> {
+    let mut pages = Vec::new();
+    let mut cursor = first;
+    for _ in 0..10 {
+        let body = traces_page(app, signal.clone(), limit, cursor.as_deref()).await;
+        pages.push(trace_ids(&body));
+        cursor = body["next_cursor"].as_str().map(str::to_string);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    pages
+}
+
+async fn read_all_traces(
+    app: &axum::Router,
+    signal: serde_json::Value,
+    limit: usize,
+) -> Vec<Vec<String>> {
+    read_pages(app, signal, limit, None).await
+}
+
+#[tokio::test]
+async fn traces_pages_follow_the_last_returned_trace() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(ServiceState::open(temp.path()).unwrap());
+    for id in ["trace-1", "trace-2", "trace-3", "trace-4", "trace-5"] {
+        state.journal().append(span_of(id)).unwrap();
+    }
+    let app = router(state);
+
+    let pages = read_all_traces(&app, serde_json::json!({"kind": "traces"}), 2).await;
+
+    assert_eq!(
+        pages.iter().map(Vec::len).collect::<Vec<_>>(),
+        vec![2, 2, 1],
+        "pages: {pages:?}"
+    );
+    assert_eq!(
+        pages.concat(),
+        ["trace-1", "trace-2", "trace-3", "trace-4", "trace-5"]
+    );
+}
+
+#[tokio::test]
+async fn traces_append_after_page_one_does_not_skip_traces() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(ServiceState::open(temp.path()).unwrap());
+    for id in ["trace-1", "trace-2", "trace-3", "trace-4", "trace-5"] {
+        state.journal().append(span_of(id)).unwrap();
+    }
+    let app = router(state.clone());
+    let signal = serde_json::json!({"kind": "traces"});
+
+    let first = traces_page(&app, signal.clone(), 2, None).await;
+    assert_eq!(trace_ids(&first), ["trace-1", "trace-2"]);
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("page 1 has a cursor")
+        .to_string();
+
+    state.journal().append(span_of("trace-6")).unwrap();
+    let rest = read_pages(&app, signal, 2, Some(cursor)).await;
+
+    let mut all = trace_ids(&first);
+    all.extend(rest.concat());
+    assert_eq!(
+        all,
+        ["trace-1", "trace-2", "trace-3", "trace-4", "trace-5", "trace-6"]
+    );
+}
+
+#[tokio::test]
+async fn traces_with_a_filter_do_not_skip_traces_between_pages() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = Arc::new(ServiceState::open(temp.path()).unwrap());
+    for id in ["trace-1", "trace-2", "trace-3", "trace-4"] {
+        state.journal().append(span_of(id)).unwrap();
+    }
+    let app = router(state);
+
+    let pages = read_all_traces(
+        &app,
+        serde_json::json!({"kind": "traces", "service": "checkout"}),
+        1,
+    )
+    .await;
+
+    let (last, before) = pages.split_last().expect("at least one page");
+    assert!(
+        before.iter().all(|page| page.len() == 1),
+        "every page before the last holds one trace: {pages:?}"
+    );
+    assert!(last.len() <= 1, "last page: {last:?}");
+    assert_eq!(
+        pages.concat(),
+        ["trace-1", "trace-2", "trace-3", "trace-4"],
+        "pages: {pages:?}"
+    );
+}
