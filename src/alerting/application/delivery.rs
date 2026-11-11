@@ -73,3 +73,6 @@ impl DeliveryService {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
