@@ -267,3 +267,40 @@ fn resident_checkpoint_keeps_bytes_and_rejections() {
         "resident",
     );
 }
+
+#[test]
+fn previous_format_checkpoints_decode_and_reencode_identically() {
+    let dir = std::path::Path::new(FIXTURES);
+    let archive = std::fs::read(dir.join("checkpoint-archive.bin")).unwrap();
+    let decoded = read_archive_checkpoint(&mut archive.as_slice()).unwrap();
+    assert_eq!((decoded.applied_index, decoded.raw_cursor), (19, 3));
+    let mut encoded = Vec::new();
+    write_archive_checkpoint(&decoded, &mut encoded).unwrap();
+    assert_eq!(encoded, archive);
+    let mut flipped = archive.clone();
+    let last = flipped.len() - 1;
+    flipped[last] ^= 0x01;
+    assert!(read_archive_checkpoint(&mut flipped.as_slice()).is_err());
+
+    let local = std::fs::read(dir.join("checkpoint-local.bin")).unwrap();
+    let decoded = read_local_checkpoint(&mut local.as_slice()).unwrap();
+    assert_eq!((decoded.applied_index, decoded.raw_cursor), (19, 3));
+    let mut encoded = Vec::new();
+    write_local_checkpoint(&decoded, &mut encoded).unwrap();
+    assert_eq!(encoded, local);
+    let mut flipped = local.clone();
+    let last = flipped.len() - 1;
+    flipped[last] ^= 0x01;
+    assert!(read_local_checkpoint(&mut flipped.as_slice()).is_err());
+
+    let resident = std::fs::read(dir.join("checkpoint-resident.bin")).unwrap();
+    let decoded = read_resident_checkpoint(&mut resident.as_slice()).unwrap();
+    assert_eq!((decoded.applied_index, decoded.raw_cursor), (19, 3));
+    let mut encoded = Vec::new();
+    write_resident_checkpoint(&decoded, &mut encoded).unwrap();
+    assert_eq!(encoded, resident);
+    let mut flipped = resident.clone();
+    let last = flipped.len() - 1;
+    flipped[last] ^= 0x01;
+    assert!(read_resident_checkpoint(&mut flipped.as_slice()).is_err());
+}
