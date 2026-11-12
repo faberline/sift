@@ -383,3 +383,120 @@ async fn acknowledged_data_survives_leader_loss_over_mutual_tls() {
         "stopped leaders {first_leader} and {next_leader}; final leader {final_leader}; retained three acknowledged events"
     );
 }
+
+fn event_ids(journal: &DurableJournal) -> Vec<String> {
+    events(journal)
+        .into_iter()
+        .map(|stored| stored.event.event_id)
+        .collect()
+}
+
+fn missing_acknowledged(acknowledged: &[String], stored: &[String]) -> Vec<String> {
+    acknowledged
+        .iter()
+        .filter(|id| !stored.contains(id))
+        .cloned()
+        .collect()
+}
+
+async fn acknowledge(nodes: &[Node], id: &str, observed_at: chrono::DateTime<chrono::Utc>) {
+    for _ in 0..40 {
+        let leader = wait_for_leader(nodes).await;
+        if nodes[leader]
+            .live()
+            .host
+            .propose(command(event(id, observed_at)))
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("event {id} was never acknowledged");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rolling_restart_of_three_voters_keeps_every_acknowledged_event() {
+    let authority = Authority::generate();
+    let observed_at = chrono::Utc::now();
+    let mut listeners = Vec::new();
+    let mut addresses = Vec::new();
+    let mut urls = Vec::new();
+    for _ in 0..3 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        addresses.push(address);
+        urls.push(format!("https://localhost:{}", address.port()));
+        listeners.push(listener);
+    }
+
+    let mut nodes = Vec::new();
+    for (id, listener) in listeners.into_iter().enumerate() {
+        let mut node = Node {
+            running: None,
+            data: tempfile::tempdir().unwrap(),
+            material: peer_material(&authority, id as u64),
+        };
+        node.start(id, listener, &urls).await;
+        nodes.push(node);
+    }
+
+    let mut acknowledged: Vec<String> = Vec::new();
+    acknowledge(&nodes, "before-restart", observed_at).await;
+    acknowledged.push("before-restart".to_string());
+    wait_for_event(&nodes, "before-restart", 3).await;
+
+    for id in 0..3 {
+        nodes[id].crash().await;
+        let listener = TcpListener::bind(addresses[id]).await.unwrap();
+        nodes[id].start(id, listener, &urls).await;
+        wait_for_leader(&nodes).await;
+        let next = format!("after-restart-{id}");
+        acknowledge(&nodes, &next, observed_at).await;
+        acknowledged.push(next.clone());
+        wait_for_event(&nodes, &next, 3).await;
+        for running in nodes.iter().filter_map(|node| node.running.as_ref()) {
+            let stored = event_ids(&running.journal);
+            let missing = missing_acknowledged(&acknowledged, &stored);
+            assert!(
+                missing.is_empty(),
+                "voter lost acknowledged events after restarting voter {id}: {missing:?}"
+            );
+        }
+    }
+
+    let expected = events(&nodes[0].live().journal);
+    assert_eq!(expected.len(), 4);
+    for running in nodes.iter().filter_map(|node| node.running.as_ref()) {
+        assert_eq!(events(&running.journal), expected);
+    }
+
+    for (mut node, address) in nodes.into_iter().zip(addresses) {
+        if node.running.is_some() {
+            node.crash().await;
+        }
+        let journal = DurableJournal::open(node.data.path()).unwrap();
+        assert_eq!(events(&journal), expected);
+        drop(journal);
+        TcpListener::bind(address)
+            .await
+            .expect("peer port released");
+        node.data.close().expect("remove temporary voter data");
+        node.material
+            .dir
+            .close()
+            .expect("remove temporary voter PKI");
+    }
+}
+
+#[test]
+fn a_missing_acknowledged_event_is_detected() {
+    let acknowledged = vec!["before-restart".to_string(), "after-restart-0".to_string()];
+    let stored = vec!["before-restart".to_string()];
+    assert_eq!(
+        missing_acknowledged(&acknowledged, &stored),
+        vec!["after-restart-0".to_string()]
+    );
+    assert!(missing_acknowledged(&acknowledged, &acknowledged.clone()).is_empty());
+}
