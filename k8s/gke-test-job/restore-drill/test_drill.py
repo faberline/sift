@@ -6,6 +6,8 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -83,6 +85,91 @@ class PodSpecTest(unittest.TestCase):
         }])
         self.assertEqual(spec["serviceAccountName"], "sift-restore-drill")
         self.assertEqual(pod["metadata"]["labels"]["app.kubernetes.io/part-of"], "sift-restore-drill")
+
+
+class FakeResponse:
+    def __init__(self, status, body):
+        self.status = status
+        self._body = body
+
+    def read(self):
+        return self._body.encode()
+
+
+class FakeConnection:
+    instances = []
+    status = 200
+    body = ""
+
+    def __init__(self, *args, **kwargs):
+        self.headers = None
+        FakeConnection.instances.append(self)
+
+    def request(self, method, path, body=None, headers=None):
+        self.method, self.path, self.headers = method, path, headers
+
+    def getresponse(self):
+        return FakeResponse(FakeConnection.status, FakeConnection.body)
+
+    def close(self):
+        pass
+
+
+class KubeApiTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        Path(self.tmp.name, "token").write_text("abc")
+        self.patches = [
+            mock.patch.object(drill, "SERVICE_ACCOUNT", Path(self.tmp.name)),
+            mock.patch.object(drill.ssl, "create_default_context"),
+            mock.patch.object(drill.http.client, "HTTPSConnection", FakeConnection),
+        ]
+        for patch in self.patches:
+            patch.start()
+        FakeConnection.instances = []
+
+    def tearDown(self):
+        for patch in self.patches:
+            patch.stop()
+        self.tmp.cleanup()
+
+    def respond(self, status, body):
+        FakeConnection.status = status
+        FakeConnection.body = body
+
+    def test_log_read_accepts_text_plain(self):
+        self.respond(200, '{"object": {"key": "k"}}\n')
+        result = drill.kube_api("GET", "/api/v1/namespaces/sift/pods/p/log")
+        self.assertEqual(result, '{"object": {"key": "k"}}\n')
+        self.assertIsInstance(result, str)
+        self.assertEqual(FakeConnection.instances[0].headers["Accept"], "text/plain, */*")
+
+    def test_json_read_accepts_json(self):
+        self.respond(200, '{"a": 1}')
+        result = drill.kube_api("GET", "/api/v1/namespaces/sift/pods/p")
+        self.assertEqual(result, {"a": 1})
+        self.assertEqual(FakeConnection.instances[0].headers["Accept"], "application/json")
+
+    def test_error_carries_body(self):
+        self.respond(406, "not acceptable: no matching media type")
+        with self.assertRaises(RuntimeError) as raised:
+            drill.kube_api("GET", "/api/v1/namespaces/sift/pods/p/log")
+        message = str(raised.exception)
+        self.assertIn("HTTP 406", message)
+        self.assertIn("not acceptable: no matching media type", message)
+
+    def test_404_get_returns_none(self):
+        self.respond(404, "")
+        self.assertIsNone(drill.kube_api("GET", "/api/v1/namespaces/sift/pods/p"))
+
+    def test_error_body_is_truncated(self):
+        self.respond(500, "x" * 2000)
+        with self.assertRaises(RuntimeError) as raised:
+            drill.kube_api("GET", "/api/v1/namespaces/sift/pods/p/log")
+        message = str(raised.exception)
+        self.assertLess(len(message), 700)
+        self.assertIn("x" * 500, message)
+        self.assertNotIn("x" * 501, message)
 
 
 if __name__ == "__main__":
