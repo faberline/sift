@@ -29,6 +29,7 @@ from pathlib import Path
 
 
 SERVICE_ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+LOG_ACCEPT = "text/plain, */*"
 SOURCE = Path("event.jsonl")
 SERVICE_NAME = "sift-restore-drill"
 SERVICE_URL = "http://sift-restore-drill:7380"
@@ -155,14 +156,15 @@ def core(resource, name=""):
 
 def kube_api(method, path, body=None, content_type="application/json"):
     """Call the Kubernetes API with the pod's token. Returns parsed JSON, or the
-    text for a `/log` path. Returns None for HTTP 404 on GET. Other non-2xx raise."""
+    text for a `/log` path, which accepts `text/plain, */*`. Returns None for HTTP 404
+    on GET. Other non-2xx raise, and the error carries the first 500 characters of the body."""
     token = (SERVICE_ACCOUNT / "token").read_text().strip()
     context = ssl.create_default_context(cafile=SERVICE_ACCOUNT / "ca.crt")
     connection = http.client.HTTPSConnection("kubernetes.default.svc", context=context, timeout=10)
     is_log = path.endswith("/log")
     headers = {
         "Authorization": f"Bearer {token}",
-        "Accept": "text/plain" if is_log else "application/json",
+        "Accept": LOG_ACCEPT if is_log else "application/json",
     }
     payload = None
     if body is not None:
@@ -175,7 +177,7 @@ def kube_api(method, path, body=None, content_type="application/json"):
         if method == "GET" and response.status == 404:
             return None
         if not 200 <= response.status < 300:
-            raise RuntimeError(f"Kubernetes {method} {path} returned HTTP {response.status}")
+            raise RuntimeError(f"Kubernetes {method} {path} returned HTTP {response.status}: {text[:500]}")
         if is_log:
             return text
         return json.loads(text) if text else None
