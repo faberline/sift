@@ -232,6 +232,31 @@ def render(directory, sift, version):
                 "ports": [{"port": service["ports"][0]["port"], "protocol": "TCP"}],
             }], "smoke network policy must allow only the probe to reach the service port")
 
+    restore = k8s / "overlays/gke-restore-drill"
+    kustomization = restore / "kustomization.yaml"
+    config = yaml.safe_load(kustomization.read_text())
+    config["images"] = [{"name": "sift", "newName": IMAGE_NAME, "digest": DIGEST}]
+    kustomization.write_text(yaml.safe_dump(config))
+    artifacts["gke-restore-drill"] = run("kubectl", "kustomize", restore)
+    artifacts["gke-restore-drill-job"] = run("kubectl", "kustomize", k8s / "gke-test-job/restore-drill")
+    drill = objects(artifacts["gke-restore-drill"], "gke-restore-drill")
+    drill_job = objects(artifacts["gke-restore-drill-job"], "gke-restore-drill-job")
+    drill_template = drill["StatefulSet", "sift-restore-drill"]["spec"]["template"]
+    drill_container, = drill_template["spec"]["containers"]
+    require(drill_container["image"] == IMAGE
+            and drill_template["spec"]["serviceAccountName"] == "sift-restore-drill"
+            and drill_template["spec"]["automountServiceAccountToken"] is False
+            and drill["ServiceAccount", "sift-restore-drill"]["automountServiceAccountToken"] is False,
+            "restore drill workload must use its own service account, the image digest, and no token mount")
+    for source_name, manifests in (("gke-restore-drill", drill), ("gke-restore-drill-job", drill_job)):
+        for key, item in manifests.items():
+            require(item["metadata"].get("namespace") == "sift",
+                    f"{source_name}: {key} is not in namespace sift")
+            labels = [item["metadata"].get("labels", {}),
+                      item.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})]
+            require(not any("lane" in label for label in labels) and item["metadata"].get("namespace") != "sift-smoke",
+                    f"{source_name}: {key} must not carry a lane label or the sift-smoke namespace")
+
     for variant, filename in (("source", "Dockerfile"), ("release", "Dockerfile.release")):
         output = directory / filename
         run(sift, "dockerfile", "render", "--variant", variant, "--version", version, "--out", output)

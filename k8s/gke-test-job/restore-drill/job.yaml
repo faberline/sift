@@ -1,0 +1,199 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sift-restore-drill-probe
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sift-restore-drill-probe
+rules:
+  # Kubernetes RBAC cannot limit create by resourceNames, so create has its own rules.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods]
+    resourceNames: [sift-restore-drill-0, sift-restore-drill-backup, sift-restore-drill-restore]
+    verbs: [get, list, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    resourceNames: [sift-restore-drill-backup, sift-restore-drill-restore]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    resourceNames: [data-sift-restore-drill-0]
+    verbs: [get, list, delete]
+  - apiGroups: ["apps"]
+    resources: [statefulsets]
+    resourceNames: [sift-restore-drill]
+    verbs: [get]
+  - apiGroups: ["apps"]
+    resources: [statefulsets/scale]
+    resourceNames: [sift-restore-drill]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sift-restore-drill-probe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sift-restore-drill-probe
+subjects:
+  - kind: ServiceAccount
+    name: sift-restore-drill-probe
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sift-restore-drill-probe
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sift-restore-drill-probe
+    spec:
+      serviceAccountName: sift-restore-drill-probe
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      nodeSelector:
+        faberline.dev/pool: sift-client
+      tolerations:
+        - key: faberline.dev/pool
+          operator: Equal
+          value: sift-client
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: fixture
+          image: docker.io/library/python:3.13-alpine@sha256:d76f585fb0d5107dd47143da5e61554fd9cae656a30f3470f815cb8475769b6a
+          command: [python, -B, /scripts/drill.py, fixture]
+          workingDir: /work
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: work
+              mountPath: /work
+        - name: collector
+          image: sift
+          args:
+            - collect
+            - --source
+            - /work/event.jsonl
+            - --source-id
+            - sift-restore-drill-$(POD_UID)
+            - --endpoint
+            - http://sift-restore-drill:7380
+            - --project
+            - local
+            - --environment
+            - test
+            - --checkpoint
+            - /work/checkpoint.json
+            - --quarantine
+            - /work/rejected.jsonl
+            - --batch-size
+            - "50"
+            - --max-retries
+            - "2"
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      containers:
+        - name: verify
+          image: docker.io/library/python:3.13-alpine@sha256:d76f585fb0d5107dd47143da5e61554fd9cae656a30f3470f815cb8475769b6a
+          command: [python, -B, /scripts/drill.py, verify]
+          workingDir: /work
+          env:
+            - name: SIFT_URL
+              value: http://sift-restore-drill:7380
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: work
+              mountPath: /work
+            - name: probe-api
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: sift-restore-drill-scripts
+        - name: work
+          emptyDir:
+            sizeLimit: 4Mi
+        - name: probe-api
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
