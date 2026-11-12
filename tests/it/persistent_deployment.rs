@@ -73,6 +73,86 @@ fn the_official_compose_example_uses_a_named_volume() {
 }
 
 #[test]
+fn the_official_compose_example_builds_from_the_repository_root() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("compose.yaml");
+    let body = fs::read_to_string(path).expect("official compose example must exist");
+    let compose: serde_yaml::Value = serde_yaml::from_str(&body).expect("parse compose yaml");
+    assert_eq!(compose["services"]["sift"]["build"]["context"], ".");
+}
+
+/// Returns the problems in the `## Quickstart` section of `readme`: required
+/// items it does not name, required or linked paths that do not exist under
+/// `root`. Empty when the section is sound.
+fn quickstart_missing_paths(readme: &str, root: &std::path::Path) -> Vec<String> {
+    const REQUIRED: [&str; 8] = [
+        "install.sh",
+        "Dockerfile",
+        "compose.yaml",
+        "k8s/overlays/template",
+        "k8s/crd",
+        "k8s/operator",
+        "docs/operations/ha.md",
+        "docs/pilot.md",
+    ];
+    let start = readme
+        .lines()
+        .position(|line| line == "## Quickstart")
+        .unwrap_or_else(|| panic!("README has no ## Quickstart section"));
+    let section = readme
+        .lines()
+        .skip(start + 1)
+        .take_while(|line| !line.starts_with("## "))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut missing = Vec::new();
+    for item in REQUIRED {
+        if !section.contains(item) {
+            missing.push(format!("missing from quickstart: {item}"));
+        }
+        if !root.join(item).exists() {
+            missing.push(item.to_string());
+        }
+    }
+    let mut rest = section.as_str();
+    while let Some(at) = rest.find("](") {
+        let after = &rest[at + 2..];
+        let Some(end) = after.find(')') else { break };
+        let target = &after[..end];
+        rest = &after[end + 1..];
+        if target.starts_with("http") || target.starts_with('#') {
+            continue;
+        }
+        let path = target.split('#').next().unwrap_or(target);
+        if !root.join(path).exists() {
+            missing.push(target.to_string());
+        }
+    }
+    missing.sort();
+    missing.dedup();
+    missing
+}
+
+#[test]
+fn the_readme_quickstart_names_only_existing_paths() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("README.md")).expect("README must exist");
+    let missing = quickstart_missing_paths(&readme, &root);
+    assert!(missing.is_empty(), "quickstart problems: {missing:?}");
+}
+
+#[test]
+fn the_quickstart_check_rejects_a_missing_path() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let readme = "## Quickstart\nsee [x](scripts/does-not-exist.sh)\n## Next\n";
+    let missing = quickstart_missing_paths(readme, &root);
+    assert!(
+        missing.contains(&"scripts/does-not-exist.sh".to_string()),
+        "expected the missing link target, got {missing:?}"
+    );
+}
+
+#[test]
 fn every_operator_role_uses_the_common_private_persistent_root() {
     let objects = sift_resource().render();
     for (kind, name, role) in [

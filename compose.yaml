@@ -1,7 +1,7 @@
 services:
   sift:
     build:
-      context: ../..
+      context: .
       dockerfile: Dockerfile
     image: sift:dev
     ports:

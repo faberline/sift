@@ -1,0 +1,33 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-prod-public-tls" tracker="1606" reason="Terminate TLS for the public Sift API at a GKE Ingress."
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: sift-public
+  namespace: production
+spec:
+  domains:
+    - REPLACE_ME__SIFT_PUBLIC_HOST
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sift-public
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.class: gce
+    networking.gke.io/managed-certificates: sift-public
+    kubernetes.io/ingress.allow-http: "false"
+    kubernetes.io/ingress.global-static-ip-name: REPLACE_ME__SIFT_PUBLIC_STATIC_IP_NAME
+spec:
+  rules:
+    - host: REPLACE_ME__SIFT_PUBLIC_HOST
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sift-gateway
+                port:
+                  number: 7380
+# HANDWRITE-END
