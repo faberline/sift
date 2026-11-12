@@ -145,6 +145,9 @@ jobs:
       - name: deployment artifacts
         run: |
           "$RUNNER_TEMP/venv/bin/python" scripts/verify-deployment-artifacts.py
+      - name: restore drill unit tests
+        working-directory: k8s/gke-test-job/restore-drill
+        run: python3 -m unittest test_drill -v
 
   gate:
     name: gate
