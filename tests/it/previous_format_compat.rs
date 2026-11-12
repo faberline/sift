@@ -8,7 +8,7 @@ use sift::{
     StoredEvent,
 };
 
-const FIXED_TIME: &str = "2026-01-01T00:00:00Z";
+const FIXED_TIME: &str = "2099-01-01T00:00:00Z";
 
 fn fixture_root() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wal-v1/root")
