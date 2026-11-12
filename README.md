@@ -200,6 +200,55 @@ The in-memory trace view keeps the latest 100,000 spans by default. It evicts
 the oldest spans and their lookup entries as it fills. It applies the same cap
 when restoring a snapshot. The durable journal has its own retention policy.
 
+## Quickstart
+
+Pick one path. Each command below exists in this repository.
+
+### Local binary
+
+```sh
+sh ./install.sh
+sift serve --role all --data-dir ./sift-data
+```
+
+Check it with `curl -fsS http://127.0.0.1:7380/readyz`. `install.sh` installs
+the newest `sift@X.Y.Z` GitHub release into `~/.local/bin`. Pin one with
+`SIFT_VERSION=sift@X.Y.Z`. No release is published yet, so until then build
+with `cargo build --locked --release -p sift` and run
+`target/release/sift serve --role all --data-dir ./sift-data`.
+
+### Docker
+
+```sh
+docker compose -f compose.yaml up --build
+```
+
+In another shell, check it with `curl -fsS http://127.0.0.1:7380/readyz`.
+The `sift-data` named volume keeps the data (see [Dockerfile](Dockerfile) and
+[compose.yaml](compose.yaml)).
+
+### GKE
+
+1. Copy [k8s/overlays/template](k8s/overlays/template) to a new directory
+   under `k8s/overlays/` and replace each `REPLACE_ME__` value in its
+   `sift.yaml`.
+2. Create the peer TLS Secret named in `spec.peerTlsSecret`, as described in
+   [docs/operations/ha.md](docs/operations/ha.md).
+3. Run `kubectl apply -k k8s/overlays/<your-copy>`. This installs the CRD in
+   [k8s/crd](k8s/crd), the operator in [k8s/operator](k8s/operator) and the
+   Sift instance.
+4. Run `kubectl -n <namespace> get sift`.
+
+### Releases
+
+Release tags look like `sift@X.Y.Z`. Find the newest one on the
+[releases page](https://github.com/faberline/sift/releases), or run
+`gh release list --repo faberline/sift`. No release exists until the first
+one is published.
+
+Next: [docs/operations/ha.md](docs/operations/ha.md) for high availability and
+[docs/pilot.md](docs/pilot.md) for a small trial.
+
 ## Deployment model
 
 The one Sift binary supports these roles:
