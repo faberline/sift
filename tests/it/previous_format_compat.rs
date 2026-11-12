@@ -1,16 +1,17 @@
-//! The current binary opens the WAL format that `main` at cb80ef0 wrote.
+//! The current binary opens the data root that `DurableJournal` wrote at the
+//! `main` commit recorded in `tests/fixtures/wal-v1/README.md`.
 
 use std::{collections::BTreeMap, fs, path::Path};
 
 use sift::{
-    journal::SignalWal, DurableJournal, EventEnvelope, EventQuery, MetricPoint, MetricTemporality,
-    SignalKind, StoredEvent,
+    DurableJournal, EventEnvelope, EventQuery, MetricPoint, MetricTemporality, SignalKind,
+    StoredEvent,
 };
 
 const FIXED_TIME: &str = "2026-01-01T00:00:00Z";
 
-fn fixture_wal() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wal-v1/wal")
+fn fixture_root() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wal-v1/root")
 }
 
 fn event(id: &str, signal: SignalKind) -> EventEnvelope {
@@ -63,8 +64,22 @@ fn expected_events() -> Vec<StoredEvent> {
     .collect()
 }
 
+/// Compares the events without `acknowledged_at`: the journal sets it to the
+/// clock on append, so the fixture's value is not fixed.
 fn assert_same_events(got: &[StoredEvent], want: &[StoredEvent]) {
-    if serde_json::to_value(got).unwrap() != serde_json::to_value(want).unwrap() {
+    let normalize = |events: &[StoredEvent]| -> Vec<StoredEvent> {
+        events
+            .iter()
+            .map(|stored| StoredEvent {
+                cursor: stored.cursor,
+                acknowledged_at: FIXED_TIME.into(),
+                event: stored.event.clone(),
+            })
+            .collect()
+    };
+    if serde_json::to_value(normalize(got)).unwrap()
+        != serde_json::to_value(normalize(want)).unwrap()
+    {
         panic!("events differ");
     }
 }
@@ -82,10 +97,10 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// Opens a temporary copy of the fixture, so the fixture is never written to.
+/// Opens a temporary copy of the fixture data root, so the fixture is never written to.
 fn open_copy() -> (tempfile::TempDir, DurableJournal) {
     let temp = tempfile::tempdir().unwrap();
-    copy_dir(&fixture_wal(), &temp.path().join("wal"));
+    copy_dir(&fixture_root(), temp.path());
     let journal = DurableJournal::open(temp.path()).unwrap();
     (temp, journal)
 }
@@ -95,16 +110,23 @@ fn capture_wal_v1_fixture() {
     if std::env::var_os("SIFT_CAPTURE_WAL_V1").is_none() {
         return;
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wal-v1");
-    let wal = SignalWal::open(&root).unwrap();
-    for stored in expected_events() {
-        wal.append(&stored).unwrap();
+    let root = fixture_root();
+    match fs::remove_dir_all(&root) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("{error}"),
     }
+    fs::create_dir_all(&root).unwrap();
+    let journal = DurableJournal::open(&root).unwrap();
+    for stored in expected_events() {
+        journal.append(stored.event.clone()).unwrap();
+    }
+    drop(journal);
 }
 
 #[test]
 fn current_binary_opens_the_previous_format_wal() {
-    let (temp, journal) = open_copy();
+    let (_temp, journal) = open_copy();
     let got = journal
         .query(EventQuery {
             signal: None,
@@ -112,16 +134,10 @@ fn current_binary_opens_the_previous_format_wal() {
             limit: 10,
         })
         .unwrap();
-    assert_same_events(&got, &expected_events());
-
-    let cursors: Vec<u64> = SignalWal::open(temp.path())
-        .unwrap()
-        .recovered_events()
-        .unwrap()
-        .iter()
-        .map(|stored| stored.cursor)
-        .collect();
+    assert_eq!(got.len(), 3);
+    let cursors: Vec<u64> = got.iter().map(|stored| stored.cursor).collect();
     assert_eq!(cursors, vec![1, 2, 3]);
+    assert_same_events(&got, &expected_events());
 }
 
 #[test]
