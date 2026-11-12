@@ -57,6 +57,7 @@ jobs:
   resolve:
     name: resolve immutable source
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
@@ -73,6 +74,7 @@ jobs:
     name: verify candidate contract
     needs: resolve
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -105,6 +107,7 @@ jobs:
     name: build (${{ matrix.target }})
     needs: [resolve, candidate]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +160,7 @@ jobs:
     name: publish ghcr test image
     needs: [resolve, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       image: ${{ steps.digest.outputs.image }}
       digest: ${{ steps.push.outputs.digest }}
