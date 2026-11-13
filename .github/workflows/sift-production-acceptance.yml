@@ -1,0 +1,125 @@
+# Manual dispatch only. A default dispatch (dry_run true) creates no paid resource.
+name: sift-production-acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Run id of the sift-release-candidate run whose candidate manifest is used.
+        required: true
+        type: string
+      cost_cap_usd:
+        description: Approved cost cap in USD. The guard stops when the projected cost passes it.
+        required: true
+        type: string
+      cluster:
+        description: GKE cluster name of the run. Its node pools must contain sift-prod-acc.
+        required: true
+        type: string
+      location:
+        description: GKE cluster location of the run.
+        required: true
+        type: string
+      dry_run:
+        description: When true, only the cost guard runs. No paid resource is created.
+        type: boolean
+        default: true
+
+permissions: {}
+concurrency:
+  group: sift-production-acceptance
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: cost guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cost guard
+        env:
+          CAP: ${{ inputs.cost_cap_usd }}
+        run: |
+          set -euo pipefail
+          python3 -B scripts/production/cost_model.py --inputs scripts/production/cost-inputs.020.json --format json > "$RUNNER_TEMP/cost.json"
+          hourly=$(jq -r .config_values.estimated_hourly_cost_usd "$RUNNER_TEMP/cost.json")
+          fixed=$(jq -r .config_values.estimated_fixed_cost_usd "$RUNNER_TEMP/cost.json")
+          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$fixed" --hourly-usd "$hourly" --hours-left 25
+
+  live:
+    name: live acceptance
+    needs: guard
+    if: ${{ !inputs.dry_run }}
+    environment: production-acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1800
+    permissions:
+      contents: read
+    env:
+      WORK: ${{ runner.temp }}/sift-production
+      CAP: ${{ inputs.cost_cap_usd }}
+      RUN_ID: ${{ inputs.candidate_run_id }}
+      CLUSTER: ${{ inputs.cluster }}
+      LOCATION: ${{ inputs.location }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: sign-in and private inputs (not set up)
+        run: |
+          echo "GCP sign-in is not set up for the production acceptance: a person must add it and the private inputs, see docs/operations/production-acceptance-runbook.md, section Open items."
+          exit 1
+      - name: start clock
+        run: |
+          set -euo pipefail
+          echo "START=$(date +%s)" >> "$GITHUB_ENV"
+          python3 -B scripts/production/cost_model.py --inputs scripts/production/cost-inputs.020.json --format json > "$RUNNER_TEMP/cost.json"
+          echo "HOURLY=$(jq -r .config_values.estimated_hourly_cost_usd "$RUNNER_TEMP/cost.json")" >> "$GITHUB_ENV"
+          echo "FIXED=$(jq -r .config_values.estimated_fixed_cost_usd "$RUNNER_TEMP/cost.json")" >> "$GITHUB_ENV"
+      - name: cost guard before setup
+        run: |
+          used=$(awk -v s="$START" -v n="$(date +%s)" 'BEGIN{printf "%.4f",(n-s)/3600}')
+          left=$(awk -v u="$used" 'BEGIN{l=25-u; if(l<0)l=0; printf "%.4f",l}')
+          spent=$(awk -v f="$FIXED" -v h="$HOURLY" -v u="$used" 'BEGIN{printf "%.4f",f+h*u}')
+          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$spent" --hourly-usd "$HOURLY" --hours-left "$left"
+      - name: setup
+        run: |
+          python3 -B scripts/production/prepare.py --candidate-manifest "$WORK/final-candidate-manifest.json" --config "$WORK/config.json" --cluster "$WORK/cluster.json" --samples "$WORK/samples.json" --output-dir "$WORK/prepared"
+          python3 -B scripts/production/verify_runtime.py --candidate-manifest "$WORK/final-candidate-manifest.json" --prepared-dir "$WORK/prepared" --kubeconfig "$WORK/kubeconfig" --output "$WORK/runtime-check.json"
+      - name: cost guard before load_30m
+        run: |
+          used=$(awk -v s="$START" -v n="$(date +%s)" 'BEGIN{printf "%.4f",(n-s)/3600}')
+          left=$(awk -v u="$used" 'BEGIN{l=25-u; if(l<0)l=0; printf "%.4f",l}')
+          spent=$(awk -v f="$FIXED" -v h="$HOURLY" -v u="$used" 'BEGIN{printf "%.4f",f+h*u}')
+          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$spent" --hourly-usd "$HOURLY" --hours-left "$left"
+      - name: load_30m
+        run: |
+          python3 -B scripts/production/run_load.py --candidate-manifest "$WORK/final-candidate-manifest.json" --prepared-dir "$WORK/prepared" --samples "$WORK/samples.json" --kubeconfig "$WORK/kubeconfig" --token-file "$WORK/admin-token" --webhook-reference validation --gate load_30m --output-dir "$WORK/load-30m"
+      - name: cost guard before load_24h
+        run: |
+          used=$(awk -v s="$START" -v n="$(date +%s)" 'BEGIN{printf "%.4f",(n-s)/3600}')
+          left=$(awk -v u="$used" 'BEGIN{l=25-u; if(l<0)l=0; printf "%.4f",l}')
+          spent=$(awk -v f="$FIXED" -v h="$HOURLY" -v u="$used" 'BEGIN{printf "%.4f",f+h*u}')
+          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$spent" --hourly-usd "$HOURLY" --hours-left "$left"
+      - name: load_24h
+        run: |
+          python3 -B scripts/production/run_load.py --candidate-manifest "$WORK/final-candidate-manifest.json" --prepared-dir "$WORK/prepared" --samples "$WORK/samples.json" --kubeconfig "$WORK/kubeconfig" --token-file "$WORK/admin-token" --webhook-reference validation --gate load_24h --output-dir "$WORK/load-24h"
+      - name: cost guard after load_24h
+        run: |
+          used=$(awk -v s="$START" -v n="$(date +%s)" 'BEGIN{printf "%.4f",(n-s)/3600}')
+          left=$(awk -v u="$used" 'BEGIN{l=25-u; if(l<0)l=0; printf "%.4f",l}')
+          spent=$(awk -v f="$FIXED" -v h="$HOURLY" -v u="$used" 'BEGIN{printf "%.4f",f+h*u}')
+          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$spent" --hourly-usd "$HOURLY" --hours-left "$left"
+      - name: cleanup check
+        if: always()
+        run: |
+          set -euo pipefail
+          gcloud container node-pools list --cluster "$CLUSTER" --location "$LOCATION" --format=json > "$RUNNER_TEMP/nodepools.json"
+          gcloud compute disks list --format=json > "$RUNNER_TEMP/disks.json"
+          gcloud compute instances list --format=json > "$RUNNER_TEMP/instances.json"
+          python3 -B scripts/production/check_cleanup.py --nodepools "$RUNNER_TEMP/nodepools.json" --disks "$RUNNER_TEMP/disks.json" --instances "$RUNNER_TEMP/instances.json"
