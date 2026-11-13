@@ -133,6 +133,8 @@ sift restore-complete \
   --record-file recovery/latest.json
 ```
 
+One live GCS backup and restore drill passed on the single-voter path with `sift backup` and `sift restore`. See [restore-drill-2026-11-13.md](restore-drill-2026-11-13.md).
+
 **Healthy**
 
 - The restore command exits 0.
