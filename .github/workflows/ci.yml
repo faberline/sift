@@ -156,6 +156,9 @@ jobs:
       - name: production acceptance dry run
         working-directory: scripts/production
         run: python3 -B dry_run.py --fixture
+      - name: production acceptance guard unit tests
+        working-directory: scripts/production
+        run: python3 -B -m unittest test_cost_guard test_check_cleanup -v
 
   gate:
     name: gate
