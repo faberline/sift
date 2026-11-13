@@ -322,7 +322,7 @@ Production acceptance for 0.2.0 is pending. These limits remain:
 - V2 supports metric selectors, grouped aggregation, `rate`, `increase`, arithmetic, comparisons, one-to-one label matching, and `histogram_quantile`. Unsupported functions, many-to-many joins, and subqueries return errors.
 - Logs support structured search, bounded text search, facets, context, and tail. They do not yet have production-scale load evidence.
 - Traces support trace reads, search filters, gaps, and critical paths. Tail sampling and a complete service dependency engine are not complete.
-- Local and emulated GCS archive, outage, lifecycle, and fresh-volume restore tests pass. A live GCS recovery drill has not run for this candidate.
+- Local and emulated GCS archive, outage, lifecycle, and fresh-volume restore tests pass. One live GCS backup and restore drill passed on the single-voter path; see [docs/operations/restore-drill-2026-11-13.md](docs/operations/restore-drill-2026-11-13.md).
 - Local store and control voters pass mutual-TLS leader-loss tests. GKE fault and recovery drills remain required.
 - The fixed 30-day hot and 180-day total retention worker is implemented. It keeps WAL during a GCS outage, rewrites mixed-age segments, removes expired blobs, and resumes safe cleanup after restart. Exact event-ID idempotency is a separate six-hour window.
 - The 10,000-item-per-second target needs both 30-minute and 24-hour GKE evidence. Neither gate has run. The later 100,000-item-per-second target remains outside this release.
