@@ -150,7 +150,9 @@ jobs:
         run: python3 -m unittest test_drill -v
       - name: production acceptance unit tests
         working-directory: scripts/production
-        run: python3 -B -m unittest test_dry_run -v
+        run: |
+          python3 -B -m unittest test_cost_model -v
+          python3 -B -m unittest test_dry_run -v
       - name: production acceptance dry run
         working-directory: scripts/production
         run: python3 -B dry_run.py --fixture
