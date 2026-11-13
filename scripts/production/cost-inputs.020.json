@@ -1,0 +1,29 @@
+{
+  "schema": "sift.production-cost-inputs/v1",
+  "node_count": 3,
+  "node_usd_per_hour": 0.78,
+  "driver_count": 1,
+  "driver_usd_per_hour": 0.15,
+  "phases_hours": {
+    "setup": 1.0,
+    "load_30m": 0.5,
+    "load_24h": 24.0,
+    "faults": 1.0,
+    "comparison": 0.5
+  },
+  "store_replicas": 3,
+  "control_replicas": 3,
+  "control_pvc_gib": 5,
+  "pvc_usd_per_gib_month": 0.17,
+  "measured_store_bytes_per_item": 1000,
+  "rated_items_per_second": 10000,
+  "local_hot_retention_seconds": 2592000,
+  "gcs_gib": 50,
+  "gcs_usd_per_gib_month": 0.026,
+  "egress_gib": 10,
+  "egress_usd_per_gib": 0.12,
+  "uptime_check_usd": 1.0,
+  "usd_per_twd": 0.031,
+  "contingency_fraction": 0.2,
+  "approved_cap_twd": 300
+}
