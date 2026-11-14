@@ -243,10 +243,10 @@ fn kubernetes_auth_renders_the_runtime_auth_delegator_binding() {
 
     let targets = sift.cluster_scoped_children();
     assert_eq!(targets.len(), 1);
-    assert!(targets[0].desired);
-    assert_eq!(targets[0].kind, "ClusterRoleBinding");
+    assert!(targets[0].desired());
+    assert_eq!(targets[0].kind(), "ClusterRoleBinding");
     assert_eq!(
-        targets[0].expected_labels["service-k8s.axiom.dev/owner-uid"],
+        targets[0].expected_labels()["service-k8s.axiom.dev/owner-uid"],
         "sift-owner-uid"
     );
 
@@ -258,7 +258,7 @@ fn kubernetes_auth_renders_the_runtime_auth_delegator_binding() {
         .all(|object| object["kind"] != "ClusterRoleBinding"));
     let targets = disabled.cluster_scoped_children();
     assert_eq!(targets.len(), 1);
-    assert!(!targets[0].desired);
+    assert!(!targets[0].desired());
 }
 
 #[test]
@@ -313,9 +313,9 @@ fn role_egress_has_no_world_wide_dns_or_https_rule() {
     no_gcs.spec.backup = None;
     let prunes = no_gcs.prunes();
     assert!(prunes.iter().any(|target| {
-        target.api_version == "networking.gke.io/v1alpha1"
-            && target.kind == "FQDNNetworkPolicy"
-            && target.name == "events-backup-google-apis"
+        target.api_version() == "networking.gke.io/v1alpha1"
+            && target.kind() == "FQDNNetworkPolicy"
+            && target.name() == "events-backup-google-apis"
     }));
 }
 
@@ -371,7 +371,7 @@ async fn reconcile_limits_egress_to_the_discovered_api_endpoint() {
                     .push(api_rule.clone());
             }
             assert_eq!(
-                object(&plan.children, "NetworkPolicy", &name),
+                object(&plan.children(), "NetworkPolicy", &name),
                 &expected,
                 "{auth:?} auth, {role} egress"
             );
@@ -772,15 +772,13 @@ fn role_topology_owns_children_and_wires_protected_live_backup() {
         .expect("backup env")
         .is_empty());
 
-    let status = sift.status_patch(&ReadyFacts {
-        ready: HashMap::from([
-            ("events-store".to_string(), 3),
-            ("events-control".to_string(), 3),
-            ("events-gateway".to_string(), 1),
-            ("events-query".to_string(), 1),
-            ("events-agent".to_string(), 1),
-        ]),
-    });
+    let status = sift.status_patch(&ReadyFacts::new(HashMap::from([
+        ("events-store".to_string(), 3),
+        ("events-control".to_string(), 3),
+        ("events-gateway".to_string(), 1),
+        ("events-query".to_string(), 1),
+        ("events-agent".to_string(), 1),
+    ])));
     assert_eq!(status["status"]["phase"], "Ready");
     assert_eq!(status["status"]["observedGeneration"], 7);
     assert_eq!(status["status"]["desiredShardCount"], 1);
@@ -799,15 +797,13 @@ fn role_topology_owns_children_and_wires_protected_live_backup() {
 
     let mut no_backup = sift_resource(1, 1);
     no_backup.spec.backup = None;
-    let status = no_backup.status_patch(&ReadyFacts {
-        ready: HashMap::from([
-            ("events-store".to_string(), 3),
-            ("events-control".to_string(), 3),
-            ("events-gateway".to_string(), 1),
-            ("events-query".to_string(), 1),
-            ("events-agent".to_string(), 1),
-        ]),
-    });
+    let status = no_backup.status_patch(&ReadyFacts::new(HashMap::from([
+        ("events-store".to_string(), 3),
+        ("events-control".to_string(), 3),
+        ("events-gateway".to_string(), 1),
+        ("events-query".to_string(), 1),
+        ("events-agent".to_string(), 1),
+    ])));
     assert_eq!(status["status"]["backupPhase"], "NotConfigured");
 }
 
@@ -833,16 +829,15 @@ fn unsupported_membership_is_refused_in_status_without_weakening_the_rendered_qu
         .get("suspend")
         .is_none());
 
-    let status = sift.status_patch(&ReadyFacts {
-        ready: HashMap::from([("events-store".to_string(), 3)]),
-    });
+    let status = sift.status_patch(&ReadyFacts::new(HashMap::from([(
+        "events-store".to_string(),
+        3,
+    )])));
     assert_eq!(status["status"]["phase"], "UnsupportedTopology");
     assert_eq!(status["status"]["desiredReplicasPerShard"], 1);
 
     let legacy_zero_defaults = sift_resource(0, 0);
-    let status = legacy_zero_defaults.status_patch(&ReadyFacts {
-        ready: HashMap::new(),
-    });
+    let status = legacy_zero_defaults.status_patch(&ReadyFacts::new(HashMap::new()));
     assert_eq!(status["status"]["phase"], "UnsupportedTopology");
     assert_eq!(status["status"]["desiredReplicasPerShard"], 0);
 }
@@ -987,15 +982,13 @@ fn mvp_crd_and_operator_render_archive_restore_limits_and_role_storage() {
             .any(|entry| entry["name"] == name && entry["value"] == value));
     }
 
-    let status = sift.status_patch(&ReadyFacts {
-        ready: HashMap::from([
-            ("mvp-store".to_string(), 3),
-            ("mvp-control".to_string(), 3),
-            ("mvp-gateway".to_string(), 1),
-            ("mvp-query".to_string(), 1),
-            ("mvp-agent".to_string(), 3),
-        ]),
-    });
+    let status = sift.status_patch(&ReadyFacts::new(HashMap::from([
+        ("mvp-store".to_string(), 3),
+        ("mvp-control".to_string(), 3),
+        ("mvp-gateway".to_string(), 1),
+        ("mvp-query".to_string(), 1),
+        ("mvp-agent".to_string(), 3),
+    ])));
     assert_eq!(status["status"]["archivePhase"], "Configured");
     assert_eq!(status["status"]["archiveWatermark"], 0);
     assert_eq!(status["status"]["lastArchiveManifest"], "");
@@ -1007,15 +1000,13 @@ fn mvp_crd_and_operator_render_archive_restore_limits_and_role_storage() {
     assert_eq!(status["status"]["backpressure"], "Healthy");
     assert_eq!(status["status"]["lastDataError"], "");
 
-    let restoring = sift.status_patch(&ReadyFacts {
-        ready: HashMap::from([
-            ("mvp-store".to_string(), 1),
-            ("mvp-control".to_string(), 3),
-            ("mvp-gateway".to_string(), 1),
-            ("mvp-query".to_string(), 1),
-            ("mvp-agent".to_string(), 3),
-        ]),
-    });
+    let restoring = sift.status_patch(&ReadyFacts::new(HashMap::from([
+        ("mvp-store".to_string(), 1),
+        ("mvp-control".to_string(), 3),
+        ("mvp-gateway".to_string(), 1),
+        ("mvp-query".to_string(), 1),
+        ("mvp-agent".to_string(), 3),
+    ])));
     assert_eq!(restoring["status"]["restorePhase"], "Restoring");
 }
 

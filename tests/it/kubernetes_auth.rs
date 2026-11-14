@@ -26,17 +26,17 @@ impl ReviewBackend for ReviewRecorder {
         _token: &str,
         audiences: &[String],
     ) -> Result<TokenReviewOutcome, ReviewError> {
-        Ok(TokenReviewOutcome {
-            authenticated: true,
-            identity: ReviewedIdentity {
+        Ok(TokenReviewOutcome::new(
+            true,
+            ReviewedIdentity {
                 username: "system:serviceaccount:caller:agent".into(),
                 uid: "caller-agent".into(),
                 groups: vec!["system:serviceaccounts".into()],
                 extra: Default::default(),
             },
-            audiences: audiences.to_vec(),
-            error: None,
-        })
+            audiences.to_vec(),
+            None,
+        ))
     }
 
     async fn review_access(

@@ -16,10 +16,10 @@ use sift::{
 use tower::ServiceExt;
 
 fn claims(subject: &str, project: &str, role: Role) -> TokenClaims {
-    TokenClaims {
-        subject: subject.to_string(),
-        roles: HashMap::from([(project.to_string(), role)]),
-    }
+    TokenClaims::new(
+        subject.to_string(),
+        HashMap::from([(project.to_string(), role)]),
+    )
 }
 
 fn app() -> (tempfile::TempDir, Router) {

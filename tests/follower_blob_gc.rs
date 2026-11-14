@@ -103,7 +103,9 @@ async fn follower_persists_and_resumes_local_blob_gc_from_an_archive_checkpoint(
         source.apply_local(3, &barrier).unwrap();
         follower.apply_local(3, &barrier).unwrap();
         let mut checkpoint = Vec::new();
-        source.snapshot_at(3, &mut checkpoint).unwrap();
+        source
+            .snapshot_at(raft_runtime::Index::new(3), &mut checkpoint)
+            .unwrap();
 
         follower.restore(&mut checkpoint.as_slice()).unwrap();
         assert_eq!(follower_journal.total_event_count(), 1);

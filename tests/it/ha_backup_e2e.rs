@@ -21,14 +21,15 @@ async fn raft_state_machine_recovers_and_backup_restores_a_durable_snapshot() {
     let journal = Arc::new(DurableJournal::open(data_dir.path()).expect("open framed journal"));
     let state_machine = Arc::new(SiftStateMachine::new(journal.clone()));
     let host = RaftHost::spawn(
-        0,
-        Membership {
-            voters: vec![0],
-            learners: vec![],
-        },
+        raft_runtime::NodeId::new(0),
+        Membership::new(vec![raft_runtime::NodeId::new(0)], vec![]),
         HashMap::new(),
-        RaftStore::open(data_dir.path().to_str().unwrap(), 0, FsyncPolicy::Always)
-            .expect("open raft store"),
+        RaftStore::open(
+            data_dir.path().to_str().unwrap(),
+            raft_runtime::NodeId::new(0),
+            FsyncPolicy::Always,
+        )
+        .expect("open raft store"),
         state_machine.clone() as Arc<dyn RaftStateMachine>,
         HostConfig::default(),
     );
@@ -44,8 +45,8 @@ async fn raft_state_machine_recovers_and_backup_restores_a_durable_snapshot() {
         )
         .await
         .expect("single-node raft proposal");
-    assert_eq!(index, 1);
-    assert_eq!(state_machine.applied_index(), 1);
+    assert_eq!(index, raft_runtime::Index::new(1));
+    assert_eq!(state_machine.applied_index(), raft_runtime::Index::new(1));
     assert_eq!(journal.query(EventQuery::default()).unwrap().len(), 1);
 
     let backup_dir = tempfile::tempdir().expect("backup destination");
@@ -84,7 +85,7 @@ async fn raft_state_machine_recovers_and_backup_restores_a_durable_snapshot() {
     raft_restore
         .restore(&mut raft_snapshot.as_slice())
         .expect("restore streamed Raft snapshot");
-    assert_eq!(raft_restore.applied_index(), 1);
+    assert_eq!(raft_restore.applied_index(), raft_runtime::Index::new(1));
     assert_eq!(raft_restore_journal.total_event_count(), 1);
 }
 

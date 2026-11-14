@@ -583,7 +583,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
             .unwrap();
         let mut partial_checkpoint = Vec::new();
         bounded_machine
-            .snapshot_at(1, &mut partial_checkpoint)
+            .snapshot_at(raft_runtime::Index::new(1), &mut partial_checkpoint)
             .unwrap();
         let bounded_follower_data = tempfile::tempdir().unwrap();
         let bounded_follower_journal =
@@ -646,7 +646,7 @@ async fn hot_eviction_and_180_day_expiration_preserve_restore_and_cursor_identit
             .unwrap();
         let mut final_checkpoint = Vec::new();
         bounded_machine
-            .snapshot_at(1, &mut final_checkpoint)
+            .snapshot_at(raft_runtime::Index::new(1), &mut final_checkpoint)
             .unwrap();
         bounded_follower
             .restore(&mut final_checkpoint.as_slice())

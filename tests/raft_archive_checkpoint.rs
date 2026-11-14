@@ -104,12 +104,16 @@ fn committed_local_segments_make_a_small_voter_checkpoint() {
             "events":[log(index)]
         }))
         .unwrap();
-        source.apply(index, &command).unwrap();
+        source
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         source.take_append_outcomes(index);
     }
     archive::archive_journal_local(&source_journal).unwrap();
     let mut checkpoint = Vec::new();
-    source.snapshot_at(200, &mut checkpoint).unwrap();
+    source
+        .snapshot_at(raft_runtime::Index::new(200), &mut checkpoint)
+        .unwrap();
     assert!(checkpoint.starts_with(b"SIFTLCP1"));
     assert!(checkpoint.len() < 4_096);
 
@@ -122,7 +126,9 @@ fn committed_local_segments_make_a_small_voter_checkpoint() {
             "events":[log(index)]
         }))
         .unwrap();
-        follower.apply(index, &command).unwrap();
+        follower
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         follower.take_append_outcomes(index);
     }
     follower.restore(&mut checkpoint.as_slice()).unwrap();
@@ -145,12 +151,16 @@ fn resident_checkpoint_is_small_and_refuses_a_behind_voter() {
             "events":[log(index)]
         }))
         .unwrap();
-        source.apply(index, &command).unwrap();
+        source
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         source.take_append_outcomes(index);
     }
     source.prepare_resident_checkpoint(100, 100).unwrap();
     let mut checkpoint = Vec::new();
-    source.snapshot_at(100, &mut checkpoint).unwrap();
+    source
+        .snapshot_at(raft_runtime::Index::new(100), &mut checkpoint)
+        .unwrap();
     assert!(checkpoint.starts_with(b"SIFTRSD1"));
     assert!(checkpoint.len() < 4_096);
 
@@ -163,7 +173,9 @@ fn resident_checkpoint_is_small_and_refuses_a_behind_voter() {
             "events":[log(index)]
         }))
         .unwrap();
-        caught_up.apply(index, &command).unwrap();
+        caught_up
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         caught_up.take_append_outcomes(index);
     }
     caught_up.restore(&mut checkpoint.as_slice()).unwrap();
@@ -177,7 +189,9 @@ fn resident_checkpoint_is_small_and_refuses_a_behind_voter() {
             "events":[log(index)]
         }))
         .unwrap();
-        behind.apply(index, &command).unwrap();
+        behind
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         behind.take_append_outcomes(index);
     }
     assert!(behind.restore(&mut checkpoint.as_slice()).is_err());
@@ -193,7 +207,7 @@ async fn resident_checkpoint_carries_the_retention_fence_to_a_voter() {
         "events":[log(1)]
     }))
     .unwrap();
-    source.apply(1, &append).unwrap();
+    source.apply(raft_runtime::Index::new(1), &append).unwrap();
     source.take_append_outcomes(1);
     let fence = serde_json::to_vec(&serde_json::json!({
         "kind": "retention_fence",
@@ -205,15 +219,19 @@ async fn resident_checkpoint_carries_the_retention_fence_to_a_voter() {
         }
     }))
     .unwrap();
-    source.apply(2, &fence).unwrap();
+    source.apply(raft_runtime::Index::new(2), &fence).unwrap();
     source.prepare_resident_checkpoint(2, 1).unwrap();
     let mut checkpoint = Vec::new();
-    source.snapshot_at(2, &mut checkpoint).unwrap();
+    source
+        .snapshot_at(raft_runtime::Index::new(2), &mut checkpoint)
+        .unwrap();
 
     let follower_dir = tempfile::tempdir().unwrap();
     let follower_journal = Arc::new(DurableJournal::open(follower_dir.path()).unwrap());
     let follower = sift::journal::SiftStateMachine::new(follower_journal.clone());
-    follower.apply(1, &append).unwrap();
+    follower
+        .apply(raft_runtime::Index::new(1), &append)
+        .unwrap();
     follower.take_append_outcomes(1);
     follower.restore(&mut checkpoint.as_slice()).unwrap();
     drop(follower);
@@ -253,7 +271,9 @@ fn sealed_raft_prefix_can_compact_while_newer_ingest_continues() {
             "events":[log(index)]
         }))
         .unwrap();
-        source.apply(index, &command).unwrap();
+        source
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         source.take_append_outcomes(index);
     }
 
@@ -266,7 +286,9 @@ fn sealed_raft_prefix_can_compact_while_newer_ingest_continues() {
             "events":[log(index)]
         }))
         .unwrap();
-        source.apply(index, &command).unwrap();
+        source
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         source.take_append_outcomes(index);
     }
     archive::archive_journal_local_captured(&source_journal, raw_cursor, segments).unwrap();
@@ -275,9 +297,11 @@ fn sealed_raft_prefix_can_compact_while_newer_ingest_continues() {
         .unwrap();
 
     let mut checkpoint = Vec::new();
-    source.snapshot_at(applied_index, &mut checkpoint).unwrap();
+    source
+        .snapshot_at(raft_runtime::Index::new(applied_index), &mut checkpoint)
+        .unwrap();
     assert!(checkpoint.starts_with(b"SIFTLCP1"));
-    assert_eq!(source.applied_index(), 120);
+    assert_eq!(source.applied_index(), raft_runtime::Index::new(120));
     assert_eq!(source_journal.total_event_count(), 120);
 
     let follower_dir = tempfile::tempdir().unwrap();
@@ -289,11 +313,13 @@ fn sealed_raft_prefix_can_compact_while_newer_ingest_continues() {
             "events":[log(index)]
         }))
         .unwrap();
-        follower.apply(index, &command).unwrap();
+        follower
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
         follower.take_append_outcomes(index);
     }
     follower.restore(&mut checkpoint.as_slice()).unwrap();
-    assert_eq!(follower.applied_index(), 120);
+    assert_eq!(follower.applied_index(), raft_runtime::Index::new(120));
     assert_eq!(follower_journal.total_event_count(), 120);
     let tail = follower_journal
         .query(EventQuery {
@@ -334,7 +360,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
                 "events":[log(index)]
             }))
             .unwrap();
-            source.apply(index, &command).unwrap();
+            source.apply(raft_runtime::Index::new(index), &command).unwrap();
             source.take_append_outcomes(index);
         }
         let receipt =
@@ -345,7 +371,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         assert_eq!(expected_manifest_hash, receipt.manifest_sha256);
 
         let mut checkpoint = Vec::new();
-        source.snapshot_at(200, &mut checkpoint).unwrap();
+        source.snapshot_at(raft_runtime::Index::new(200), &mut checkpoint).unwrap();
         assert!(checkpoint.starts_with(b"SIFTRCP1"));
         assert!(checkpoint.len() < 4_096);
 
@@ -358,7 +384,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
                 "events":[log(index)]
             }))
             .unwrap();
-            follower.apply(index, &command).unwrap();
+            follower.apply(raft_runtime::Index::new(index), &command).unwrap();
             follower.take_append_outcomes(index);
         }
         let follower_wal = follower_dir.path().join("wal/logs/events.framed");
@@ -375,7 +401,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             20,
             "archive adoption must keep the valid suffix after the checkpoint"
         );
-        assert_eq!(follower.applied_index(), 220);
+        assert_eq!(follower.applied_index(), raft_runtime::Index::new(220));
         assert_eq!(follower_journal.total_event_count(), 220);
         assert_eq!(
             follower_journal
@@ -394,7 +420,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         let restore_journal = Arc::new(DurableJournal::open(restore_dir.path()).unwrap());
         let restored = sift::journal::SiftStateMachine::new(restore_journal.clone());
         restored.restore(&mut checkpoint.as_slice()).unwrap();
-        assert_eq!(restored.applied_index(), 200);
+        assert_eq!(restored.applied_index(), raft_runtime::Index::new(200));
         assert_eq!(restore_journal.total_event_count(), 200);
         let local_tail = restore_journal
             .query(EventQuery {
@@ -435,10 +461,10 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             "events":[log(1)]
         }))
         .unwrap();
-        partial.apply(1, &first).unwrap();
+        partial.apply(raft_runtime::Index::new(1), &first).unwrap();
         partial.take_append_outcomes(1);
         partial.restore(&mut checkpoint.as_slice()).unwrap();
-        assert_eq!(partial.applied_index(), 200);
+        assert_eq!(partial.applied_index(), raft_runtime::Index::new(200));
         assert_eq!(partial_journal.total_event_count(), 200);
 
         let delta_source_dir = tempfile::tempdir().unwrap();
@@ -454,7 +480,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
                 "events":[event]
             }))
             .unwrap();
-            delta_source.apply(index, &command).unwrap();
+            delta_source.apply(raft_runtime::Index::new(index), &command).unwrap();
             delta_source.take_append_outcomes(index);
         }
         archive::archive_journal_gcs(
@@ -463,7 +489,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         )
         .unwrap();
         let mut source_checkpoint = Vec::new();
-        delta_source.snapshot_at(2, &mut source_checkpoint).unwrap();
+        delta_source.snapshot_at(raft_runtime::Index::new(2), &mut source_checkpoint).unwrap();
         let delta_follower_dir = tempfile::tempdir().unwrap();
         let delta_follower_journal =
             Arc::new(DurableJournal::open(delta_follower_dir.path()).unwrap());
@@ -505,7 +531,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             object_store.delete(key).unwrap();
         }
         let mut delta_checkpoint = Vec::new();
-        delta_source.snapshot_at(3, &mut delta_checkpoint).unwrap();
+        delta_source.snapshot_at(raft_runtime::Index::new(3), &mut delta_checkpoint).unwrap();
         delta_follower
             .restore(&mut delta_checkpoint.as_slice())
             .expect("a caught-up voter must apply the small retention delta without Parquet restore");
@@ -540,7 +566,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
                 "events":[event.clone()]
             }))
             .unwrap();
-            retained_source.apply(index, &source_command).unwrap();
+            retained_source.apply(raft_runtime::Index::new(index), &source_command).unwrap();
             retained_source.take_append_outcomes(index);
             let mut follower_event = event;
             if index == 2 {
@@ -552,7 +578,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
                 "events":[follower_event]
             }))
             .unwrap();
-            retained_follower.apply(index, &follower_command).unwrap();
+            retained_follower.apply(raft_runtime::Index::new(index), &follower_command).unwrap();
             retained_follower.take_append_outcomes(index);
         }
         let follower_projections = ProjectionRuntime::open(
@@ -601,14 +627,14 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             retention_status.manifest_sha256.clone(),
         )
         .unwrap();
-        retained_source.apply(3, &barrier).unwrap();
-        retained_follower.apply(3, &barrier).unwrap();
+        retained_source.apply(raft_runtime::Index::new(3), &barrier).unwrap();
+        retained_follower.apply(raft_runtime::Index::new(3), &barrier).unwrap();
         let suffix = serde_json::to_vec(&serde_json::json!({
             "kind":"append_events",
             "events":[log_at(3, now)]
         }))
         .unwrap();
-        retained_follower.apply(4, &suffix).unwrap();
+        retained_follower.apply(raft_runtime::Index::new(4), &suffix).unwrap();
         retained_follower.take_append_outcomes(4);
 
         let crash_dir = tempfile::tempdir().unwrap();
@@ -623,7 +649,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
                 "events":[event]
             }))
             .unwrap();
-            crash_state.apply(index, &command).unwrap();
+            crash_state.apply(raft_runtime::Index::new(index), &command).unwrap();
             crash_state.take_append_outcomes(index);
         }
         let crash_projections =
@@ -658,7 +684,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
 
         let mut retention_checkpoint = Vec::new();
         retained_source
-            .snapshot_at(3, &mut retention_checkpoint)
+            .snapshot_at(raft_runtime::Index::new(3), &mut retention_checkpoint)
             .unwrap();
 
         let ahead_dir = tempfile::tempdir().unwrap();
@@ -673,7 +699,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
                 "events":[event]
             }))
             .unwrap();
-            ahead.apply(index, &command).unwrap();
+            ahead.apply(raft_runtime::Index::new(index), &command).unwrap();
             ahead.take_append_outcomes(index);
         }
         let ahead_fence = serde_json::to_vec(&serde_json::json!({
@@ -686,8 +712,8 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             }
         }))
         .unwrap();
-        ahead.apply(3, &ahead_fence).unwrap();
-        ahead.apply(4, &suffix).unwrap();
+        ahead.apply(raft_runtime::Index::new(3), &ahead_fence).unwrap();
+        ahead.apply(raft_runtime::Index::new(4), &suffix).unwrap();
         ahead.take_append_outcomes(4);
         assert!(ahead.retention_fence_pending_for_diagnostics());
         ahead
@@ -811,7 +837,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             "events":[log_at(3, now)]
         }))
         .unwrap();
-        retained_source.apply(4, &next).unwrap();
+        retained_source.apply(raft_runtime::Index::new(4), &next).unwrap();
         retained_source.take_append_outcomes(4);
         let next_archive = archive::archive_journal_gcs(
             &retained_source_journal,
@@ -830,7 +856,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
             .unwrap();
         let mut no_gc_checkpoint = Vec::new();
         retained_source
-            .snapshot_at(4, &mut no_gc_checkpoint)
+            .snapshot_at(raft_runtime::Index::new(4), &mut no_gc_checkpoint)
             .unwrap();
         let no_gc_dir = tempfile::tempdir().unwrap();
         let no_gc_journal = Arc::new(DurableJournal::open(no_gc_dir.path()).unwrap());
@@ -848,7 +874,7 @@ async fn committed_gcs_manifest_makes_a_small_restorable_raft_checkpoint() {
         retained_source.prepare_archive_checkpoint(4, 3).unwrap();
         let mut next_checkpoint = Vec::new();
         retained_source
-            .snapshot_at(4, &mut next_checkpoint)
+            .snapshot_at(raft_runtime::Index::new(4), &mut next_checkpoint)
             .unwrap();
         restarted.restore(&mut next_checkpoint.as_slice()).unwrap();
         let follower_pending_bytes = std::fs::read(

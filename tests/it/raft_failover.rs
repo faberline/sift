@@ -72,12 +72,7 @@ fn peer_material(authority: &Authority, id: u64) -> PeerMaterial {
     std::fs::write(&ca_path, authority.cert.pem()).unwrap();
     PeerMaterial {
         dir,
-        config: peer_tls::PeerTlsConfig {
-            cert: cert_path,
-            key: key_path,
-            ca: ca_path,
-            required: true,
-        },
+        config: peer_tls::PeerTlsConfig::new(cert_path, key_path, ca_path, true),
     }
 }
 
@@ -107,16 +102,25 @@ impl Node {
             .iter()
             .enumerate()
             .filter(|(peer, _)| *peer != id)
-            .map(|(peer, url)| (peer as u64, url.clone()))
+            .map(|(peer, url)| (raft_runtime::NodeId::new(peer as u64), url.clone()))
             .collect::<HashMap<_, _>>();
         let host = RaftHost::spawn_with_peer_transport(
-            id as u64,
-            Membership {
-                voters: vec![0, 1, 2],
-                learners: Vec::new(),
-            },
+            raft_runtime::NodeId::new(id as u64),
+            Membership::new(
+                vec![
+                    raft_runtime::NodeId::new(0),
+                    raft_runtime::NodeId::new(1),
+                    raft_runtime::NodeId::new(2),
+                ],
+                Vec::new(),
+            ),
             peers,
-            RaftStore::open(data.to_str().unwrap(), id as u64, FsyncPolicy::Always).unwrap(),
+            RaftStore::open(
+                data.to_str().unwrap(),
+                raft_runtime::NodeId::new(id as u64),
+                FsyncPolicy::Always,
+            )
+            .unwrap(),
             state_machine as Arc<dyn RaftStateMachine>,
             HostConfig::default(),
             transport.clone(),
