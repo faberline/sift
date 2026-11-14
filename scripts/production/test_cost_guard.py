@@ -47,5 +47,9 @@ class CostGuard(unittest.TestCase):
             block.append(line)
         self.assertIn('default: true', '\n'.join(block))
 
+    def test_workflow_has_no_runner_context_in_job_env(self):
+        text = WORKFLOW.read_text(encoding='utf-8')
+        self.assertNotRegex(text, r'(?m)^ {6}\w+:\s*\$\{\{\s*runner\.')
+
 if __name__ == '__main__':
     unittest.main()

@@ -61,7 +61,6 @@ jobs:
     permissions:
       contents: read
     env:
-      WORK: ${{ runner.temp }}/sift-production
       CAP: ${{ inputs.cost_cap_usd }}
       RUN_ID: ${{ inputs.candidate_run_id }}
       CLUSTER: ${{ inputs.cluster }}
@@ -70,6 +69,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: work directory
+        run: echo "WORK=$RUNNER_TEMP/sift-production" >> "$GITHUB_ENV"
       - name: sign-in and private inputs (not set up)
         run: |
           echo "GCP sign-in is not set up for the production acceptance: a person must add it and the private inputs, see docs/operations/production-acceptance-runbook.md, section Open items."
