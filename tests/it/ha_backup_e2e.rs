@@ -45,8 +45,10 @@ async fn raft_state_machine_recovers_and_backup_restores_a_durable_snapshot() {
         )
         .await
         .expect("single-node raft proposal");
-    assert_eq!(index, raft_runtime::Index::new(1));
-    assert_eq!(state_machine.applied_index(), raft_runtime::Index::new(1));
+    // core v0.5.0: a new leader appends a no-op entry at index 1 (raft.md), so the
+    // first proposal is index 2. Approved in faberline/aw#415 (desk, 2026-11-14).
+    assert_eq!(index, raft_runtime::Index::new(2));
+    assert_eq!(state_machine.applied_index(), raft_runtime::Index::new(2));
     assert_eq!(journal.query(EventQuery::default()).unwrap().len(), 1);
 
     let backup_dir = tempfile::tempdir().expect("backup destination");
@@ -85,7 +87,8 @@ async fn raft_state_machine_recovers_and_backup_restores_a_durable_snapshot() {
     raft_restore
         .restore(&mut raft_snapshot.as_slice())
         .expect("restore streamed Raft snapshot");
-    assert_eq!(raft_restore.applied_index(), raft_runtime::Index::new(1));
+    // Same no-op entry as above (core v0.5.0), approved in faberline/aw#415.
+    assert_eq!(raft_restore.applied_index(), raft_runtime::Index::new(2));
     assert_eq!(raft_restore_journal.total_event_count(), 1);
 }
 
