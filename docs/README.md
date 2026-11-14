@@ -17,6 +17,7 @@ and [`llms.txt`](../llms.txt).
 | [operations/public-tls.md](operations/public-tls.md) | Public API over TLS: host, certificate, Ingress and the verify check. |
 | [operations/upgrade.md](operations/upgrade.md) | Version compatibility policy, rolling upgrade order and rollback rule. |
 | [operations/runbook.md](operations/runbook.md) | Data-plane runbook: health, metrics, voter loss, restore, collector replay, rejected data. |
+| [operations/configuration.md](operations/configuration.md) | Every CLI flag, environment variable and CRD field with default and meaning. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
 | [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
 
