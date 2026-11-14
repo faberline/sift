@@ -50,6 +50,7 @@ mod raft_dedupe_determinism;
 mod raft_failover;
 mod refactor_compatibility;
 mod remote_write_library_boundary;
+mod reproducible_image_script;
 mod role_routing;
 mod role_surface;
 mod runtime_security_e2e;
