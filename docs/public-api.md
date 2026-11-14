@@ -109,6 +109,6 @@ Each codec validates before writing and after decoding.
 Readers reject bad magic, invalid length, checksum mismatch, truncated data
 and trailing bytes with the original errors.
 Full snapshot and Raft command formats retain their existing separate framing.
-No format version or migration step is added.
+Every persisted format has a version number; see [upgrade](operations/upgrade.md).
 
 [The completion report](refactor-completion.md) records validation and limits.
