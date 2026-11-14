@@ -11,3 +11,7 @@ name = "sift"
 paths = ["**"]
 target = "rust"
 test_cmd = "cargo test -p sift"
+
+[standards.coverage]
+line = 0.00   # no local measure: cargo llvm-cov failed on large_archive_lifecycle (reserve local WAL capacity, sandbox disk 96% full); COV4 in CI names the value
+target = 100
