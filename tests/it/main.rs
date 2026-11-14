@@ -13,6 +13,7 @@ mod control_admin_rights;
 mod deployment_cli;
 mod durable_signal_wal;
 mod event_v2_governance;
+mod faberline_core_test_script;
 mod gke_operation_scope;
 mod ha_backup_e2e;
 mod integrity_api;

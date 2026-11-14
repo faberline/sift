@@ -4,6 +4,7 @@
 # package outside the workspace that has dev-dependencies, so each package is
 # tested inside core's own workspace (against core's own Cargo.lock) from the
 # checkout cargo already made of that commit.
+# The checkout is the one of the crate raft-runtime; another core tag that only a git dependency such as vat pulls in is ignored.
 #
 # usage: scripts/faberline-core-test.sh <package>... [<cargo test args>...]
 #   The leading non-option arguments are packages; everything from the first
@@ -29,13 +30,17 @@ core="$(
     python3 -c '
 import json, sys
 from pathlib import Path
+# The core crates that Sift names all come from one tag. `vat` can pull another core tag
+# for `cli-std` only, so take the checkout of `raft-runtime`, a crate that only
+# Sift names, and ignore the other core checkouts.
 roots = {
     Path(p["manifest_path"]).parents[2]
     for p in json.load(sys.stdin)["packages"]
-    if (p.get("source") or "").startswith("git+https://github.com/faberline/core?")
+    if p["name"] == "raft-runtime"
+    and (p.get("source") or "").startswith("git+https://github.com/faberline/core?")
 }
 if len(roots) != 1:
-    sys.exit(f"Cargo.lock must resolve exactly one faberline/core checkout, found {len(roots)}")
+    sys.exit(f"Cargo.lock must resolve exactly one faberline/core checkout for raft-runtime, found {len(roots)}")
 print(roots.pop())
 '
 )"
