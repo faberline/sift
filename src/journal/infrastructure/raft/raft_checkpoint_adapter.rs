@@ -16,7 +16,7 @@ impl RaftCheckpointPort for NativeRaftCheckpoint {
         command.encoded()
     }
     fn propose(&self, command: Vec<u8>) -> PortFuture<'_, u64, Self::Error> {
-        Box::pin(self.host.propose(command))
+        Box::pin(async move { self.host.propose(command).await.map(|index| index.get()) })
     }
     fn is_leader(&self) -> PortValueFuture<'_, bool> {
         Box::pin(self.host.is_leader())
@@ -28,7 +28,10 @@ impl RaftCheckpointPort for NativeRaftCheckpoint {
         &self,
         applied_index: u64,
     ) -> PortFuture<'_, (), Self::Error> {
-        Box::pin(self.host.require_applied_index_on_all_voters(applied_index))
+        Box::pin(
+            self.host
+                .require_applied_index_on_all_voters(raft_runtime::Index::new(applied_index)),
+        )
     }
     fn snapshot_and_compact_through_outcome(
         &self,
@@ -37,10 +40,10 @@ impl RaftCheckpointPort for NativeRaftCheckpoint {
         Box::pin(async move {
             let outcome = self
                 .host
-                .snapshot_and_compact_through_outcome(up_to)
+                .snapshot_and_compact_through_outcome(raft_runtime::Index::new(up_to))
                 .await?;
             Ok(SnapshotCompactionOutcome {
-                snapshot_index: outcome.snapshot_index,
+                snapshot_index: outcome.snapshot_index.get(),
                 installed: outcome.installed,
             })
         })
@@ -52,10 +55,10 @@ impl RaftCheckpointPort for NativeRaftCheckpoint {
         Box::pin(async move {
             let outcome = self
                 .host
-                .snapshot_and_compact_through_quorum_outcome(up_to)
+                .snapshot_and_compact_through_quorum_outcome(raft_runtime::Index::new(up_to))
                 .await?;
             Ok(SnapshotCompactionOutcome {
-                snapshot_index: outcome.snapshot_index,
+                snapshot_index: outcome.snapshot_index.get(),
                 installed: outcome.installed,
             })
         })

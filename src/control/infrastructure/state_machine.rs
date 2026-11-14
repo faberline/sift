@@ -5,7 +5,7 @@ use crate::control::domain::{
 };
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use anyhow::{bail, Context, Result};
-use raft_runtime::RaftStateMachine;
+use raft_runtime::{Index, RaftStateMachine, StateMachineError};
 use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -100,10 +100,27 @@ impl RaftStateMachine for ControlStateMachine {
     fn snapshot_capability(&self) -> Option<&'static str> {
         Some("sift-control-v1")
     }
-    fn applied_index(&self) -> u64 {
-        self.state.lock().expect("control state lock").applied_index
+    fn applied_index(&self) -> Index {
+        Index::new(self.state.lock().expect("control state lock").applied_index)
     }
-    fn apply(&self, index: u64, bytes: &[u8]) -> Result<()> {
+    fn apply(&self, index: Index, bytes: &[u8]) -> Result<(), StateMachineError> {
+        Ok(self.apply_impl(index.get(), bytes)?)
+    }
+    fn snapshot(&self, writer: &mut dyn Write) -> Result<(), StateMachineError> {
+        Ok(self.snapshot_impl(writer)?)
+    }
+    fn validate_snapshot(&self, reader: &mut dyn Read) -> Result<(), StateMachineError> {
+        Ok(self.validate_snapshot_impl(reader)?)
+    }
+    fn snapshot_at(&self, index: Index, writer: &mut dyn Write) -> Result<(), StateMachineError> {
+        Ok(self.snapshot_at_impl(index.get(), writer)?)
+    }
+    fn restore(&self, reader: &mut dyn Read) -> Result<(), StateMachineError> {
+        Ok(self.restore_impl(reader)?)
+    }
+}
+impl ControlStateMachine {
+    fn apply_impl(&self, index: u64, bytes: &[u8]) -> Result<()> {
         if bytes.len() > 4 * 1024 * 1024 {
             bail!("control command exceeds 4 MiB");
         }
@@ -123,16 +140,19 @@ impl RaftStateMachine for ControlStateMachine {
         *state = next;
         Ok(())
     }
-    fn snapshot(&self, writer: &mut dyn Write) -> Result<()> {
+
+    fn snapshot_impl(&self, writer: &mut dyn Write) -> Result<()> {
         let state = self.state.lock().expect("control state lock");
         writer.write_all(MAGIC)?;
         serde_json::to_writer(writer, &*state)?;
         Ok(())
     }
-    fn validate_snapshot(&self, reader: &mut dyn Read) -> Result<()> {
+
+    fn validate_snapshot_impl(&self, reader: &mut dyn Read) -> Result<()> {
         Self::decode_snapshot(reader).map(|_| ())
     }
-    fn snapshot_at(&self, index: u64, writer: &mut dyn Write) -> Result<()> {
+
+    fn snapshot_at_impl(&self, index: u64, writer: &mut dyn Write) -> Result<()> {
         let state = self.state.lock().expect("control state lock");
         if state.applied_index != index {
             bail!("control snapshot index does not match the applied state");
@@ -141,7 +161,8 @@ impl RaftStateMachine for ControlStateMachine {
         serde_json::to_writer(writer, &*state)?;
         Ok(())
     }
-    fn restore(&self, reader: &mut dyn Read) -> Result<()> {
+
+    fn restore_impl(&self, reader: &mut dyn Read) -> Result<()> {
         let restored = Self::decode_snapshot(reader)?;
         let mut state = self.state.lock().expect("control state lock");
         if restored.applied_index < state.applied_index {
