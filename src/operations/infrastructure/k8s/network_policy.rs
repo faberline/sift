@@ -60,14 +60,14 @@ fn instance_peer(cx: &RenderCtx<'_>) -> render::NetworkPeerPlan {
         ("app.kubernetes.io/name".to_string(), APP.to_string()),
         (
             "app.kubernetes.io/instance".to_string(),
-            cx.name.to_string(),
+            cx.name().to_string(),
         ),
     ]))
 }
 
 fn role_network_policy(cx: &RenderCtx<'_>, role: &str) -> render::NetworkPolicyPlan {
     render::NetworkPolicyPlan::new(
-        format!("{}-{role}-network", cx.name),
+        format!("{}-{role}-network", cx.name()),
         role,
         role_selector_labels(role),
     )
@@ -80,9 +80,12 @@ pub(super) fn network_policy_plans(
     kubernetes_api_cidrs: &[String],
     kubernetes_api_ports: &[u16],
 ) -> Vec<render::NetworkPolicyPlan> {
-    let default_deny =
-        render::NetworkPolicyPlan::new(format!("{}-network", cx.name), "network", BTreeMap::new())
-            .instance_wide();
+    let default_deny = render::NetworkPolicyPlan::new(
+        format!("{}-network", cx.name()),
+        "network",
+        BTreeMap::new(),
+    )
+    .instance_wide();
 
     let mut gateway = role_network_policy(cx, GATEWAY_COMPONENT)
         .with_ingress(render::NetworkRulePlan::new(
@@ -180,7 +183,7 @@ pub(super) fn network_policy_plans(
         vec![render::NetworkPeerPlan::same_namespace_pods(
             BTreeMap::from([
                 ("app.kubernetes.io/name".into(), APP.into()),
-                ("app.kubernetes.io/instance".into(), cx.name.into()),
+                ("app.kubernetes.io/instance".into(), cx.name().into()),
                 ("sift.axiom.dev/role".into(), AGENT_COMPONENT.into()),
             ]),
         )],
@@ -247,7 +250,7 @@ pub(super) fn fqdn_network_policy_plans(
     let mut policies = Vec::new();
     if !spec.alerting.allowed_hosts.is_empty() {
         let mut policy = render::FqdnNetworkPolicyPlan::new(
-            format!("{}-control-webhooks", cx.name),
+            format!("{}-control-webhooks", cx.name()),
             CONTROL_COMPONENT,
             full_role_selector(cx, CONTROL_COMPONENT),
         )
@@ -282,7 +285,7 @@ pub(super) fn fqdn_network_policy_plans(
 
 fn google_apis_policy(cx: &RenderCtx<'_>, role: &str) -> render::FqdnNetworkPolicyPlan {
     render::FqdnNetworkPolicyPlan::new(
-        format!("{}-{role}-google-apis", cx.name),
+        format!("{}-{role}-google-apis", cx.name()),
         role,
         full_role_selector(cx, role),
     )

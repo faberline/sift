@@ -138,15 +138,16 @@ impl MetricChunkStore {
         let mut cursor = storage_durable::FramedLogCursor::open(&ledger_path)?;
         let mut safe_through = None;
         while let Some(frame) = cursor.next_frame()? {
-            if frame.seq > committed_cursor {
+            let seq = frame.seq();
+            if seq > committed_cursor {
                 break;
             }
-            let key =
-                String::from_utf8(frame.payload).context("decode obsolete metric chunk key")?;
+            let key = String::from_utf8(frame.into_payload())
+                .context("decode obsolete metric chunk key")?;
             if !referenced.contains(&key) {
                 self.remove_key(&key)?;
             }
-            safe_through = Some(frame.seq);
+            safe_through = Some(seq);
         }
         drop(cursor);
         if let Some(through) = safe_through {

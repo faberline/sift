@@ -42,9 +42,9 @@ pub(crate) fn spawn_peer_tls_reload(
 
 fn read_material(config: &peer_tls::PeerTlsConfig) -> std::io::Result<[Vec<u8>; 3]> {
     Ok([
-        std::fs::read(&config.cert)?,
-        std::fs::read(&config.key)?,
-        std::fs::read(&config.ca)?,
+        std::fs::read(config.cert())?,
+        std::fs::read(config.key())?,
+        std::fs::read(config.ca())?,
     ])
 }
 

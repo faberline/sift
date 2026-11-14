@@ -49,15 +49,15 @@ fn write_material(dir: &Path, authority: &Authority, name: &str) -> peer_tls::Pe
     let cert = params
         .signed_by(&key, &authority.cert, &authority.key)
         .unwrap();
-    let config = peer_tls::PeerTlsConfig {
-        cert: dir.join("tls.crt"),
-        key: dir.join("tls.key"),
-        ca: dir.join("ca.crt"),
-        required: true,
-    };
-    atomic_write(&config.cert, cert.pem().as_bytes());
-    atomic_write(&config.key, key.serialize_pem().as_bytes());
-    atomic_write(&config.ca, authority.cert.pem().as_bytes());
+    let config = peer_tls::PeerTlsConfig::new(
+        dir.join("tls.crt"),
+        dir.join("tls.key"),
+        dir.join("ca.crt"),
+        true,
+    );
+    atomic_write(config.cert(), cert.pem().as_bytes());
+    atomic_write(config.key(), key.serialize_pem().as_bytes());
+    atomic_write(config.ca(), authority.cert.pem().as_bytes());
     config
 }
 
@@ -99,7 +99,7 @@ async fn peer_tls_reload_runs_only_when_the_files_change() {
     assert_eq!(transport.generation(), 2);
 
     // A broken certificate: the reload fails and the last good generation stays.
-    atomic_write(&config.cert, b"not a certificate");
+    atomic_write(config.cert(), b"not a certificate");
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert_eq!(transport.generation(), 2);
 

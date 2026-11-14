@@ -131,10 +131,10 @@ impl SiftVerifier {
                     .authorize(&caller, &attributes)
                     .await
                     .map_err(AuthError::from)?;
-                Ok(RoleMapPrincipal::Token(TokenClaims {
-                    subject: caller.username(),
-                    roles: HashMap::from([(project.to_string(), role)]),
-                }))
+                Ok(RoleMapPrincipal::Token(TokenClaims::new(
+                    caller.username(),
+                    HashMap::from([(project.to_string(), role)]),
+                )))
             }
         }
     }

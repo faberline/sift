@@ -29,7 +29,7 @@ impl CommandSubmission for RaftCommandCommitter {
         Box::pin(async move {
             let bytes = command.encoded()?;
             if let Some(raft) = &self.raft {
-                return raft.propose(bytes).await;
+                return raft.propose(bytes).await.map(|index| index.get());
             }
             let _guard = self.local_command.lock().await;
             let index = self.state_machine.applied_commit_index() + 1;

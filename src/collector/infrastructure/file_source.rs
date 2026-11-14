@@ -375,12 +375,12 @@ impl service_collector::CollectorSource for FileSource {
         self.discover()
     }
     fn progress(&self) -> service_collector::SourceProgress {
-        service_collector::SourceProgress {
-            start_offset: self.start,
-            final_offset: self.state.legacy.offset,
-            lost_bytes: self.state.lost_bytes,
-            lost_sources: self.state.lost_sources,
-        }
+        service_collector::SourceProgress::new(
+            service_collector::SourceOffset::new(self.start),
+            service_collector::SourceOffset::new(self.state.legacy.offset),
+            self.state.lost_bytes,
+            self.state.lost_sources,
+        )
     }
 }
 

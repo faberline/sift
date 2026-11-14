@@ -41,14 +41,14 @@ impl EphemeralFileObjectStore {
 
     fn meta(&self, key: &str, bytes: &[u8], content_type: &str) -> storage_object::ObjectMeta {
         let version = storage_object::ObjectVersion::new(sha256_hex(bytes));
-        storage_object::ObjectMeta {
-            key: key.to_string(),
-            size: bytes.len() as u64,
-            content_type: content_type.to_string(),
-            version: version.clone(),
-            etag: Some(version.as_str().to_string()),
-            updated: None,
-        }
+        storage_object::ObjectMeta::new(
+            key.to_string(),
+            bytes.len() as u64,
+            content_type.to_string(),
+            version.clone(),
+        )
+        .with_etag(Some(version.as_str().to_string()))
+        .with_updated(None)
     }
 }
 
@@ -105,14 +105,14 @@ impl storage_object::ObjectStore for EphemeralFileObjectStore {
                 }
             }
         })?;
-        Ok(storage_object::Object {
-            meta: self.meta(key, &bytes, "application/json"),
+        Ok(storage_object::Object::new(
+            self.meta(key, &bytes, "application/json"),
             bytes,
-        })
+        ))
     }
 
     fn head(&self, key: &str) -> storage_object::Result<storage_object::ObjectMeta> {
-        self.get(key).map(|object| object.meta)
+        self.get(key).map(|object| object.into_parts().0)
     }
 
     fn list(&self, prefix: &str) -> storage_object::Result<Vec<storage_object::ObjectMeta>> {
@@ -159,7 +159,7 @@ impl storage_object::ObjectStore for EphemeralFileObjectStore {
                 }
             }
         }
-        objects.sort_by(|left, right| left.key.cmp(&right.key));
+        objects.sort_by(|left, right| left.key().cmp(right.key()));
         Ok(objects)
     }
 

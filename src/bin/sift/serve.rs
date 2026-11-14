@@ -75,8 +75,8 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
         tokio::task::spawn_blocking(move || ServiceState::open_with_role(state_root, storage_role))
             .await??,
     );
-    let grace = Duration::from_secs(config.grace_secs.max(1));
-    let reserve = Duration::from_secs((config.grace_secs / 10).min(5));
+    let grace = Duration::from_secs(config.grace_secs().max(1));
+    let reserve = Duration::from_secs((config.grace_secs() / 10).min(5));
     let supervisor = server_lifecycle::TaskSupervisor::new(grace, reserve)?;
     let drain_state = state.clone();
     supervisor.register_hook(
@@ -198,7 +198,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
             std::env::var("SIFT_STORE_GRPC_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:4317".to_string())
         });
-        let maximum_message_bytes = config.body_limit_bytes;
+        let maximum_message_bytes = config.body_limit_bytes();
         tracing::info!(%address, "sift serving OTLP/gRPC");
         let task = tokio::spawn(async move {
             if let Some(store) = grpc_store {
@@ -269,10 +269,10 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
                     &store,
                     &query,
                     &control,
-                    config.body_limit_bytes,
+                    config.body_limit_bytes(),
                 )?,
                 Err(_) => {
-                    sift::operations::gateway_router(&store, &query, config.body_limit_bytes)?
+                    sift::operations::gateway_router(&store, &query, config.body_limit_bytes())?
                 }
             };
             gateway
@@ -285,7 +285,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
         RunRole::Query => {
             let store = std::env::var("SIFT_STORE_ENDPOINT")
                 .unwrap_or_else(|_| "http://127.0.0.1:7380".to_string());
-            sift::query_role_router(state.clone(), &store, config.body_limit_bytes)?.layer(
+            sift::query_role_router(state.clone(), &store, config.body_limit_bytes())?.layer(
                 axum::middleware::from_fn_with_state(
                     Arc::new(sift::access::AuthorizationService::from_verifier(verifier)),
                     sift::access::auth_middleware,
@@ -294,7 +294,7 @@ pub(super) async fn serve(args: ServeArgs) -> Result<()> {
         }
         _ => sift::protected_router_with_mcp(state.clone(), verifier, &internal_endpoint)?,
     }
-    .layer(DefaultBodyLimit::max(config.body_limit_bytes));
+    .layer(DefaultBodyLimit::max(config.body_limit_bytes()));
     let app =
         service_http::standard_probe_routes(state.clone(), Some(state.clone()), sift::openapi)
             .merge(data_plane)

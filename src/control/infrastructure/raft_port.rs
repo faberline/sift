@@ -46,16 +46,17 @@ impl RaftControlPort {
                 .await
                 .map_err(|_| "control read-your-write deadline exceeded".to_string())??;
             }
-            return Ok(index);
+            return Ok(index.get());
         }
         let _guard = self.local.lock().await;
         let index = self
             .machine
             .applied_index()
+            .get()
             .checked_add(1)
             .ok_or("control index overflow")?;
         self.machine
-            .apply(index, &bytes)
+            .apply(raft_runtime::Index::new(index), &bytes)
             .map_err(|e| e.to_string())?;
         Ok(index)
     }

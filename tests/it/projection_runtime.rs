@@ -138,7 +138,12 @@ async fn lag_port_keeps_wire_bytes_and_error_text_for_each_projection() {
             .wait_for_min_cursor(name, 123, Duration::from_millis(1))
             .await
             .unwrap_err();
-        let previous = service_projection::ProjectionLag::new(name, 123, 0, 1);
+        let previous = service_projection::ProjectionLag::new(
+            service_projection::ProjectionName::new(name),
+            service_projection::ProjectionCursor::new(123),
+            service_projection::ProjectionCursor::new(0),
+            1,
+        );
         assert_eq!(
             serde_json::to_vec(&lag).unwrap(),
             serde_json::to_vec(&previous).unwrap()

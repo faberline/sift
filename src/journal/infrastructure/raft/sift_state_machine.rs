@@ -152,7 +152,11 @@ impl SiftStateMachine {
     }
 
     pub fn apply_local(&self, index: u64, command: &[u8]) -> Result<()> {
-        <Self as RaftStateMachine>::apply(self, index, command)
+        Ok(<Self as RaftStateMachine>::apply(
+            self,
+            raft_runtime::Index::new(index),
+            command,
+        )?)
     }
 
     pub fn take_append_outcomes(&self, index: u64) -> Option<Vec<AppendResult>> {

@@ -9,7 +9,9 @@ pub(super) fn append_metrics_agent(
 ) {
     let Some(mut daemon) = children
         .iter()
-        .find(|v| v["kind"] == "DaemonSet" && v["metadata"]["name"] == format!("{}-agent", cx.name))
+        .find(|v| {
+            v["kind"] == "DaemonSet" && v["metadata"]["name"] == format!("{}-agent", cx.name())
+        })
         .cloned()
     else {
         return;
@@ -26,11 +28,11 @@ pub(super) fn append_metrics_agent(
     pod["containers"][0]["args"] = json!([
         "scrape",
         "--project",
-        cx.name,
+        cx.name(),
         "--environment",
-        cx.ns,
+        cx.ns(),
         "--namespace",
-        cx.ns,
+        cx.ns(),
         "--node",
         "$(NODE_NAME)",
         "--interval-seconds",
@@ -48,11 +50,10 @@ pub(super) fn append_metrics_agent(
         .retain(|v| v["name"] != "pod-logs");
     pod["containers"][0]["securityContext"] = super::role_workloads::container_security_context();
     pod["containers"][0]["image"] = json!(spec.image);
-    daemon["metadata"]["name"] = json!(format!("{}-agent-metrics", cx.name));
-    if let Some(logs) = children
-        .iter_mut()
-        .find(|v| v["kind"] == "DaemonSet" && v["metadata"]["name"] == format!("{}-agent", cx.name))
-    {
+    daemon["metadata"]["name"] = json!(format!("{}-agent-metrics", cx.name()));
+    if let Some(logs) = children.iter_mut().find(|v| {
+        v["kind"] == "DaemonSet" && v["metadata"]["name"] == format!("{}-agent", cx.name())
+    }) {
         logs["spec"]["template"]["metadata"]["labels"]["sift.axiom.dev/scrape"] = json!("true");
         logs["spec"]["template"]["metadata"]["annotations"] = json!({
             "prometheus.io/scrape":"true", "prometheus.io/port":"9318", "prometheus.io/path":"/metrics"

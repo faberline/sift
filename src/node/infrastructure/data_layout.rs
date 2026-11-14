@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
-use storage_durable::{DataRoot, DataRootPolicy};
+use storage_durable::{DataRoot, DataRootError, DataRootPolicy};
 
 use crate::node::domain::storage_role::StorageRole;
 use crate::shared_kernel::sha256_hex::sha256_hex;
@@ -60,7 +60,23 @@ impl DataRootPolicy for SiftDataRootPolicy {
         LEGACY_MARKERS
     }
 
-    fn create_manifest(&self, root: &Path) -> Result<Self::Manifest> {
+    fn create_manifest(&self, root: &Path) -> Result<Self::Manifest, DataRootError> {
+        self.create_manifest_checked(root)
+            .map_err(DataRootError::other)
+    }
+
+    fn validate_manifest(&self, manifest: &Self::Manifest) -> Result<(), DataRootError> {
+        self.validate_manifest_checked(manifest)
+            .map_err(DataRootError::other)
+    }
+
+    fn legacy_error(&self, marker: &Path) -> DataRootError {
+        DataRootError::other(self.legacy_error_checked(marker))
+    }
+}
+
+impl SiftDataRootPolicy {
+    fn create_manifest_checked(&self, root: &Path) -> Result<LayoutManifest> {
         let canonical = root
             .canonicalize()
             .with_context(|| format!("canonicalize Sift data root {}", root.display()))?;
@@ -79,7 +95,7 @@ impl DataRootPolicy for SiftDataRootPolicy {
         })
     }
 
-    fn validate_manifest(&self, manifest: &Self::Manifest) -> Result<()> {
+    fn validate_manifest_checked(&self, manifest: &LayoutManifest) -> Result<()> {
         if manifest.format_version != FORMAT_VERSION {
             bail!(
                 "unsupported Sift data format {}; expected {}",
@@ -100,7 +116,7 @@ impl DataRootPolicy for SiftDataRootPolicy {
         Ok(())
     }
 
-    fn legacy_error(&self, marker: &Path) -> anyhow::Error {
+    fn legacy_error_checked(&self, marker: &Path) -> anyhow::Error {
         anyhow::anyhow!(
             "legacy Sift 0.1.1 data at {} is not compatible; preserve it and choose an empty data directory",
             marker.display()
@@ -134,7 +150,7 @@ impl DataLayout {
         }
         let mut manifest = self.inner.manifest().clone();
         manifest.restored_from = Some(manifest_uri.to_string());
-        self.inner.replace_manifest(manifest)
+        Ok(self.inner.replace_manifest(manifest)?)
     }
 
     pub fn into_root_path(self) -> PathBuf {

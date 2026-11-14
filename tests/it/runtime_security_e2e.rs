@@ -17,10 +17,10 @@ fn required_app(data_dir: &std::path::Path) -> axum::Router {
         required: true,
         tokens: HashMap::from([(
             "writer-token".to_string(),
-            TokenClaims {
-                subject: "sift-test".to_string(),
-                roles: HashMap::from([("*".to_string(), Role::Write)]),
-            },
+            TokenClaims::new(
+                "sift-test".to_string(),
+                HashMap::from([("*".to_string(), Role::Write)]),
+            ),
         )]),
     }));
     let state = Arc::new(ServiceState::open(data_dir).expect("open journal"));
@@ -132,17 +132,17 @@ fn required_app_with_roles_and_state(
         tokens: HashMap::from([
             (
                 "writer-token".to_string(),
-                TokenClaims {
-                    subject: "sift-writer".into(),
-                    roles: HashMap::from([("project-a".to_string(), Role::Write)]),
-                },
+                TokenClaims::new(
+                    "sift-writer",
+                    HashMap::from([("project-a".to_string(), Role::Write)]),
+                ),
             ),
             (
                 "reader-token".to_string(),
-                TokenClaims {
-                    subject: "sift-reader".into(),
-                    roles: HashMap::from([("project-a".to_string(), Role::Read)]),
-                },
+                TokenClaims::new(
+                    "sift-reader",
+                    HashMap::from([("project-a".to_string(), Role::Read)]),
+                ),
             ),
         ]),
     }));

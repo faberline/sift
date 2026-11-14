@@ -39,11 +39,9 @@ pub async fn fetch_live_snapshot_authenticated(
         bail!("live backup token and token file are mutually exclusive");
     }
     let transport = service_backup::AdminSnapshotTransport::with_config(
-        service_backup::AdminSnapshotTransportConfig {
-            operation_timeout: LIVE_BACKUP_TIMEOUT,
-            max_diagnostic_bytes: MAX_ERROR_BODY_BYTES,
-            ..Default::default()
-        },
+        service_backup::AdminSnapshotTransportConfig::default()
+            .with_operation_timeout(LIVE_BACKUP_TIMEOUT)
+            .with_max_diagnostic_bytes(MAX_ERROR_BODY_BYTES),
     )
     .context("build live snapshot HTTP transport")?;
     let mut request = service_backup::AdminSnapshotRequest::new()

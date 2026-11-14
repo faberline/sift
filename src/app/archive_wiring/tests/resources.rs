@@ -99,7 +99,7 @@ fn archive_catalog_and_transaction_share_the_native_store_and_commit_manifest_la
             .next()
             .unwrap()
             .unwrap()
-            .value,
+            .value(),
         b"fixed bytes"
     );
     transaction

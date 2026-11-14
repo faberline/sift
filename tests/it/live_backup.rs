@@ -37,17 +37,17 @@ fn protected_state() -> (tempfile::TempDir, Arc<ServiceState>, axum::Router) {
         tokens: HashMap::from([
             (
                 "writer-token".to_string(),
-                TokenClaims {
-                    subject: "writer".to_string(),
-                    roles: HashMap::from([("*".to_string(), Role::Write)]),
-                },
+                TokenClaims::new(
+                    "writer".to_string(),
+                    HashMap::from([("*".to_string(), Role::Write)]),
+                ),
             ),
             (
                 "admin-token".to_string(),
-                TokenClaims {
-                    subject: "backup-runner".to_string(),
-                    roles: HashMap::from([("*".to_string(), Role::Admin)]),
-                },
+                TokenClaims::new(
+                    "backup-runner".to_string(),
+                    HashMap::from([("*".to_string(), Role::Admin)]),
+                ),
             ),
         ]),
     }));
@@ -116,10 +116,10 @@ async fn live_helper_sends_bearer_and_uploads_exact_response_bytes() {
         required: true,
         tokens: HashMap::from([(
             "admin-token".to_string(),
-            TokenClaims {
-                subject: "backup-runner".to_string(),
-                roles: HashMap::from([("*".to_string(), Role::Admin)]),
-            },
+            TokenClaims::new(
+                "backup-runner".to_string(),
+                HashMap::from([("*".to_string(), Role::Admin)]),
+            ),
         )]),
     }));
     let app = protected_router(state, verifier);

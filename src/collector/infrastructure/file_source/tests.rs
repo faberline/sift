@@ -47,7 +47,7 @@ fn restart_drains_renamed_file_and_reads_its_replacement_once() {
         restarted.next_record(1024).unwrap(),
         ReadOutcome::Exhausted
     ));
-    assert_eq!(restarted.progress().lost_bytes, 0);
+    assert_eq!(restarted.progress().lost_bytes(), 0);
 }
 #[test]
 fn copytruncate_records_loss_and_assigns_a_new_source_generation() {
@@ -79,8 +79,8 @@ fn copytruncate_records_loss_and_assigns_a_new_source_generation() {
     acknowledge(&mut source, &replacement);
     drop(source);
     let restarted = FileSource::open(path, "fixture".into(), checkpoint).unwrap();
-    assert_eq!(restarted.progress().lost_bytes, 7);
-    assert_eq!(restarted.progress().lost_sources, 1);
+    assert_eq!(restarted.progress().lost_bytes(), 7);
+    assert_eq!(restarted.progress().lost_sources(), 1);
 }
 
 #[test]
@@ -124,8 +124,8 @@ fn fast_regrowth_cannot_reuse_an_old_position_or_buffer_after_restart() {
         source
             .commit(std::slice::from_ref(&first.cursor), stats)
             .unwrap();
-        assert_eq!(source.progress().lost_bytes, 7);
-        assert_eq!(source.progress().lost_sources, 1);
+        assert_eq!(source.progress().lost_bytes(), 7);
+        assert_eq!(source.progress().lost_sources(), 1);
         drop(source);
         let mut restarted = FileSource::open(path, "fixture".into(), checkpoint).unwrap();
         assert!(matches!(
@@ -162,5 +162,5 @@ fn replaying_an_older_committed_cursor_cannot_move_the_checkpoint_backwards() {
         restarted.next_record(1024).unwrap(),
         ReadOutcome::Exhausted
     ));
-    assert_eq!(restarted.progress().final_offset, 13);
+    assert_eq!(restarted.progress().final_offset().get(), 13);
 }

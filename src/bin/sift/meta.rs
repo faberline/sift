@@ -124,26 +124,18 @@ struct IssueCommentArgs {
     yes: bool,
 }
 
-pub(super) const TOOL: cli_std::ToolInfo = cli_std::ToolInfo {
-    project: "sift",
-    repo: "faberline/sift",
-    target: env!("SIFT_TARGET"),
-    version: env!("CARGO_PKG_VERSION"),
-    git_sha: env!("SIFT_GIT_SHA"),
-    built_at: env!("SIFT_BUILT_AT"),
-};
+pub(super) const TOOL: cli_std::ToolInfo = cli_std::ToolInfo::new(
+    "sift",
+    "faberline/sift",
+    env!("SIFT_TARGET"),
+    env!("CARGO_PKG_VERSION"),
+    env!("SIFT_GIT_SHA"),
+    env!("SIFT_BUILT_AT"),
+);
 
 pub(super) const LLM_TOPICS: &[cli_std::llm::Topic] = &[
-    cli_std::llm::Topic {
-        id: "ingest",
-        summary: "OTLP logs, metrics, traces, and durable acknowledgement",
-        body: "# Sift ingest\n\nUse OTLP/HTTP `/v1/logs`, `/v1/metrics`, and `/v1/traces`, or OTLP/gRPC on port 4317. Metrics clients can also use Prometheus Remote Write 1.0 at `/prometheus/api/v1/write`. Use `sift collect --source <service.stdout.jsonl>` for file capture, `--source -` for stdin, or `--cri-root /var/log/pods --gcp-project <id>` for Kubernetes CRI logs. Collector checkpoints live under `/var/lib/sift/agent` by default. Accepted items have completed the durable Sift append path.",
-    },
-    cli_std::llm::Topic {
-        id: "operations",
-        summary: "persistent roles, unified query, MCP, and backup",
-        body: "# Sift operations\n\nRun `sift serve` with a writable `/var/lib/sift`, or set `--data-dir`. The process serves HTTP/1.1 and h2c plus OTLP/gRPC. Use `sift query <request.json> --endpoint <url>` for the versioned logs, metrics, or traces query API. Use `sift mcp serve --stdio --endpoint <url>` for the same read-only capabilities through MCP. Scheduled backups use `sift backup --url <service> --dest <uri>` and may supply `--token` or `SIFT_BACKUP_TOKEN`.",
-    },
+    cli_std::llm::Topic::new("ingest", "OTLP logs, metrics, traces, and durable acknowledgement", "# Sift ingest\n\nUse OTLP/HTTP `/v1/logs`, `/v1/metrics`, and `/v1/traces`, or OTLP/gRPC on port 4317. Metrics clients can also use Prometheus Remote Write 1.0 at `/prometheus/api/v1/write`. Use `sift collect --source <service.stdout.jsonl>` for file capture, `--source -` for stdin, or `--cri-root /var/log/pods --gcp-project <id>` for Kubernetes CRI logs. Collector checkpoints live under `/var/lib/sift/agent` by default. Accepted items have completed the durable Sift append path."),
+    cli_std::llm::Topic::new("operations", "persistent roles, unified query, MCP, and backup", "# Sift operations\n\nRun `sift serve` with a writable `/var/lib/sift`, or set `--data-dir`. The process serves HTTP/1.1 and h2c plus OTLP/gRPC. Use `sift query <request.json> --endpoint <url>` for the versioned logs, metrics, or traces query API. Use `sift mcp serve --stdio --endpoint <url>` for the same read-only capabilities through MCP. Scheduled backups use `sift backup --url <service> --dest <uri>` and may supply `--token` or `SIFT_BACKUP_TOKEN`."),
 ];
 
 pub(super) fn spec(args: SpecArgs) -> Result<()> {
@@ -217,17 +209,11 @@ fn spec_gen(args: GenArgs) -> Result<()> {
     };
     let output = generate(
         &sift::openapi_json()?,
-        &GenOptions {
-            lang,
-            target: None,
-            spec_path: PathBuf::new(),
-            out_dir: args.out.clone(),
-            client_name: "createClient".to_string(),
-            http_client: HttpClient::Fetch,
-            emit_types: true,
-            emit_client: true,
-            emit_hooks: matches!(lang, Lang::Ts),
-        },
+        &GenOptions::new(lang, PathBuf::new(), args.out.clone(), "createClient")
+            .with_http_client(HttpClient::Fetch)
+            .with_emit_types(true)
+            .with_emit_client(true)
+            .with_emit_hooks(matches!(lang, Lang::Ts)),
     )?;
     std::fs::create_dir_all(&args.out)
         .with_context(|| format!("create generated client directory {}", args.out.display()))?;
@@ -251,11 +237,10 @@ pub(super) async fn issue(args: IssueArgs) -> Result<()> {
         IssueCommand::Search(args) => {
             cli_std::issue::search(
                 &TOOL,
-                cli_std::issue::SearchOptions {
-                    query: (!args.query.is_empty()).then(|| args.query.join(" ")),
-                    state: args.state,
-                    limit: args.limit,
-                },
+                cli_std::issue::SearchOptions::default()
+                    .with_query((!args.query.is_empty()).then(|| args.query.join(" ")))
+                    .with_state(args.state)
+                    .with_limit(args.limit),
             )
             .await
         }
@@ -267,27 +252,21 @@ pub(super) async fn issue(args: IssueArgs) -> Result<()> {
                 .unwrap_or_else(|| "sift: issue report".to_string());
             cli_std::issue::create(
                 &TOOL,
-                cli_std::issue::CreateOptions {
-                    title,
-                    message,
-                    label: vec!["app:sift".to_string()],
-                    dry_run: args.dry_run,
-                    yes: args.yes,
-                    ..Default::default()
-                },
+                cli_std::issue::CreateOptions::new(title)
+                    .with_message(message)
+                    .with_label(vec!["app:sift".to_string()])
+                    .with_dry_run(args.dry_run)
+                    .with_yes(args.yes),
             )
             .await
         }
         IssueCommand::Comment(args) => {
             cli_std::issue::comment(
                 &TOOL,
-                cli_std::issue::CommentOptions {
-                    number: args.number,
-                    message: (!args.message.is_empty()).then(|| args.message.join(" ")),
-                    dry_run: args.dry_run,
-                    yes: args.yes,
-                    ..Default::default()
-                },
+                cli_std::issue::CommentOptions::try_new(args.number)?
+                    .with_message((!args.message.is_empty()).then(|| args.message.join(" ")))
+                    .with_dry_run(args.dry_run)
+                    .with_yes(args.yes),
             )
             .await
         }

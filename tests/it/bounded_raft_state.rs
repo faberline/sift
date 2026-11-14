@@ -32,7 +32,9 @@ fn follower_apply_outcomes_age_out_of_a_small_fixed_window() {
             "events":[log(format!("outcome-{index}"))]
         }))
         .unwrap();
-        state_machine.apply(index, &command).unwrap();
+        state_machine
+            .apply(raft_runtime::Index::new(index), &command)
+            .unwrap();
     }
 
     assert!(

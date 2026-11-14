@@ -411,10 +411,10 @@ async fn project_auth_limits_quota_and_draining_return_explicit_errors() {
         required: true,
         tokens: HashMap::from([(
             "project-a-token".into(),
-            TokenClaims {
-                subject: "collector".into(),
-                roles: HashMap::from([("project-a".into(), Role::Write)]),
-            },
+            TokenClaims::new(
+                "collector",
+                HashMap::from([("project-a".into(), Role::Write)]),
+            ),
         )]),
     }));
     let app = protected_router(state.clone(), verifier);
