@@ -40,6 +40,7 @@ pub(crate) mod recovery_wiring;
 pub(crate) mod checkpoint_wiring;
 
 mod peer_server_wiring;
+mod peer_tls_reload;
 
 /// Shared service instances. Only assembly can access the concrete backends.
 #[derive(Clone)]
