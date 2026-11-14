@@ -21,6 +21,8 @@ pub(crate) mod snapshot_writer;
 
 #[cfg(test)]
 mod checkpoint_compatibility_tests;
+#[cfg(test)]
+mod checkpoint_property_tests;
 
 pub(crate) mod checkpoint_port_adapter;
 

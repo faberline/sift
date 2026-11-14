@@ -10,3 +10,5 @@ pub(crate) mod api_port_adapter;
 #[cfg(test)]
 mod oracle_tests;
 pub(crate) mod promql_parser;
+#[cfg(test)]
+mod promql_property_tests;
