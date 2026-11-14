@@ -95,7 +95,9 @@ impl ArchiveSignalStream {
                 self.finished = true;
                 break;
             }
-            let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(entry.into())?
+            let ArchiveCatalogItem::Segment(segment) = decode_archive_catalog_entry(
+                storage_segment::CatalogEntry::try_new(entry.key, entry.value)?,
+            )?
             else {
                 bail!("archive segment prefix resolved to another catalog item");
             };

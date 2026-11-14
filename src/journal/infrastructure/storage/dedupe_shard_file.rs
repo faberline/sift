@@ -63,13 +63,13 @@ pub(super) fn load_generation_receipts(directory: &Path, sealed: bool) -> Result
     }
     let mut state = GenerationState::empty(sealed);
     storage_durable::FramedLogReader::visit_frames(&receipt_path, 0, |frame| {
-        let records = decode_receipt_records(&frame.payload)?;
+        let records = decode_receipt_records(frame.payload())?;
         let frame_cursor = records
             .iter()
             .map(|(_, cursor, _)| *cursor)
             .max()
             .context("dedupe receipt frame has no records")?;
-        if frame.seq != frame_cursor {
+        if frame.seq() != frame_cursor {
             bail!("dedupe receipt frame sequence does not match its cursor");
         }
         for record @ (digest, cursor, acknowledged_at) in records {
@@ -130,7 +130,7 @@ pub(super) fn rebuild_generation_shards(directory: &Path, sealed: bool) -> Resul
     let receipt_path = directory.join(RECEIPT_LOG_FILE);
     storage_durable::FramedLogReader::visit_frames(&receipt_path, 0, |frame| {
         let mut shards = BTreeMap::<usize, Vec<([u8; 32], u64, i64)>>::new();
-        for record @ (digest, _, _) in decode_receipt_records(&frame.payload)? {
+        for record @ (digest, _, _) in decode_receipt_records(frame.payload())? {
             shards.entry(shard_for(&digest)).or_default().push(record);
         }
         for (shard, records) in shards {

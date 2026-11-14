@@ -181,14 +181,14 @@ impl SegmentEventReader {
                 self.current = None;
                 continue;
             };
-            if frame.seq <= self.after {
+            if frame.seq() <= self.after {
                 continue;
             }
-            let event: StoredEvent = serde_json::from_slice(&frame.payload)?;
-            if event.cursor != frame.seq {
+            let event: StoredEvent = serde_json::from_slice(frame.payload())?;
+            if event.cursor != frame.seq() {
                 bail!(
                     "segment frame {} contains cursor {}",
-                    frame.seq,
+                    frame.seq(),
                     event.cursor
                 );
             }

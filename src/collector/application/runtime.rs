@@ -45,23 +45,23 @@ where
         &SiftRecordDecoder(decoder),
         sink,
         &mut quarantine,
-        service_collector::RuntimeConfig {
+        service_collector::RuntimeConfig::try_new(
             // One-shot runs must commit a source rejection before reading past it.
             // Continuous runs can poll after that commit with the chosen batch limit.
-            batch_size: if config.follow {
+            if config.follow {
                 config.batch_size
             } else {
                 config.batch_size.min(1)
             },
-            max_record_bytes: config.max_line_bytes,
-            retry: service_collector::RetryPolicy::new(
+            config.max_line_bytes,
+            service_collector::RetryPolicy::new(
                 config.max_retries,
                 config.initial_backoff,
                 Duration::from_secs(5),
             )?,
-            follow: config.follow,
-            follow_poll_interval: config.follow_poll_interval,
-        },
+            config.follow,
+            config.follow_poll_interval,
+        )?,
         if config.follow {
             service_collector::DeliveryRetryMode::UntilCancelled
         } else {
@@ -72,13 +72,13 @@ where
 
     Ok(CollectorSummary {
         source_id: config.source_id.clone(),
-        start_offset: report.progress.start_offset,
-        final_offset: report.progress.final_offset,
+        start_offset: report.progress.start_offset().get(),
+        final_offset: report.progress.final_offset().get(),
         lines: report.lines,
         accepted: report.accepted,
         duplicates: report.duplicates,
         rejected: report.rejected,
-        lost_bytes: report.progress.lost_bytes,
-        lost_sources: report.progress.lost_sources,
+        lost_bytes: report.progress.lost_bytes(),
+        lost_sources: report.progress.lost_sources(),
     })
 }

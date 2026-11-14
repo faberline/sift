@@ -129,10 +129,10 @@ impl CollectorClient {
                 truncate_utf8(message, 512)
             )));
         }
-        Ok(service_collector::DeliveryReceipt {
-            accepted: events.len() as u64,
-            duplicates: 0,
-        })
+        Ok(service_collector::DeliveryReceipt::new(
+            events.len() as u64,
+            0,
+        ))
     }
 }
 

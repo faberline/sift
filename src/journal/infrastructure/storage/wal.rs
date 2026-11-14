@@ -215,9 +215,9 @@ impl WalEventStream {
             let Some(frame) = self.frames.next_frame()? else {
                 return Ok(None);
             };
-            let batch: WalBatch = serde_json::from_slice(&frame.payload)
-                .with_context(|| format!("decode signal WAL batch frame {}", frame.seq))?;
-            validate_batch(self.signal, &self.path, frame.seq, &batch)?;
+            let batch: WalBatch = serde_json::from_slice(frame.payload())
+                .with_context(|| format!("decode signal WAL batch frame {}", frame.seq()))?;
+            validate_batch(self.signal, &self.path, frame.seq(), &batch)?;
             self.events = batch.events.into();
         }
     }
@@ -275,8 +275,8 @@ impl WalFile {
     fn recovered_events(&self) -> Result<Vec<StoredEvent>> {
         let mut events = Vec::new();
         for frame in storage_durable::FramedLogReader::read_frames(&self.path, 0)? {
-            let batch: WalBatch = serde_json::from_slice(&frame.payload)
-                .with_context(|| format!("decode signal WAL batch frame {}", frame.seq))?;
+            let batch: WalBatch = serde_json::from_slice(frame.payload())
+                .with_context(|| format!("decode signal WAL batch frame {}", frame.seq()))?;
             if batch.format_version != WAL_BATCH_FORMAT_VERSION {
                 bail!(
                     "unsupported signal WAL batch format {}",
@@ -284,16 +284,16 @@ impl WalFile {
                 );
             }
             let first = batch.events.first().with_context(|| {
-                format!("signal WAL frame {} contains an empty batch", frame.seq)
+                format!("signal WAL frame {} contains an empty batch", frame.seq())
             })?;
             let last = batch.events.last().expect("validated non-empty WAL batch");
             if batch.first_cursor != first.cursor
                 || batch.last_cursor != last.cursor
-                || batch.last_cursor != frame.seq
+                || batch.last_cursor != frame.seq()
             {
                 bail!(
                     "signal WAL frame sequence {} does not match batch cursors {}..{}",
-                    frame.seq,
+                    frame.seq(),
                     batch.first_cursor,
                     batch.last_cursor
                 );

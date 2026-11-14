@@ -76,7 +76,7 @@ impl ArchiveObjectPort for NativeObjectStore {
     type Error = storage_object::ObjectStoreError;
     type CatalogError = storage_segment::SegmentError;
     fn get(&self, key: &str) -> Result<Vec<u8>, Self::Error> {
-        self.0.get(key).map(|object| object.bytes)
+        self.0.get(key).map(|object| object.into_parts().1)
     }
     fn delete(&self, key: &str) -> Result<(), Self::Error> {
         self.0.delete(key)

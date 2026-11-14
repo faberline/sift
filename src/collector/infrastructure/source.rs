@@ -185,12 +185,12 @@ impl service_collector::CollectorSource for LinearSource {
     }
 
     fn progress(&self) -> service_collector::SourceProgress {
-        service_collector::SourceProgress {
-            start_offset: self.start_offset,
-            final_offset: self.checkpoint.offset,
-            lost_bytes: 0,
-            lost_sources: 0,
-        }
+        service_collector::SourceProgress::new(
+            service_collector::SourceOffset::new(self.start_offset),
+            service_collector::SourceOffset::new(self.checkpoint.offset),
+            0,
+            0,
+        )
     }
 }
 

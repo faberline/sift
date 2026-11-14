@@ -369,11 +369,13 @@ impl service_collector::CollectorSource for CriSource {
     }
 
     fn progress(&self) -> service_collector::SourceProgress {
-        service_collector::SourceProgress {
-            start_offset: self.start_offset,
-            final_offset: self.checkpoint.files.values().map(|file| file.offset).sum(),
-            lost_bytes: self.checkpoint.lost_bytes,
-            lost_sources: self.checkpoint.lost_sources,
-        }
+        service_collector::SourceProgress::new(
+            service_collector::SourceOffset::new(self.start_offset),
+            service_collector::SourceOffset::new(
+                self.checkpoint.files.values().map(|file| file.offset).sum(),
+            ),
+            self.checkpoint.lost_bytes,
+            self.checkpoint.lost_sources,
+        )
     }
 }
