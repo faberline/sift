@@ -243,3 +243,65 @@ Source: `docs/production-v1.md` (quarantine file; loss counters survive
 restart); `docs/operations/structured-stdout.md` ("Collector guarantees");
 `src/bin/sift/collect.rs` (default quarantine path);
 `src/operations/infrastructure/k8s/agent_workloads.rs` (GKE quarantine path).
+
+## Alerts
+
+Sift ships no fixed alert rules. An operator creates rules through the API, for example with `sift control alert-rules put`. The alerts that Sift ships are the four kinds below. An alert state has the phase `inactive`, `pending`, `firing` or `unknown`. A firing alert sends a webhook notification. In the commands below, `<project>` is the project of the rule.
+
+### metrics
+
+**Meaning**: A metric expression is compared with a threshold (`expression`, `comparison`, `threshold`).
+
+**First command**
+
+```sh
+sift control alerts list --project <project>
+```
+
+**Next step**: If the phase is `firing`, run `sift control alert-rules list --project <project>` to read the rule that fired (`expression`, `comparison`, `threshold`), and fix the cause that the rule names. If the phase is `unknown`, the query failed or has no data: read the `reason` field, and check `no_data` of the rule (`unknown`, `firing` or `inactive`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+### logs_count
+
+**Meaning**: The count of log records in `window_seconds`, optionally filtered, is compared with a threshold (`comparison`, `threshold`).
+
+**First command**
+
+```sh
+sift control alerts list --project <project>
+```
+
+**Next step**: If the phase is `firing`, run `sift control alert-rules list --project <project>` to read the rule that fired (`window_seconds`, `filter`, `comparison`, `threshold`), and check the logs that the filter selects. If the phase is `unknown`, the query failed or has no data: read the `reason` field, and check `no_data` of the rule (`unknown`, `firing` or `inactive`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+### new_error
+
+**Meaning**: An error group that did not exist before appears.
+
+**First command**
+
+```sh
+sift control error-groups list --project <project>
+```
+
+**Next step**: Find the new group, and fix the cause of the errors. Then set its status with `sift control error-groups status <id> --project <project> --request-id <id> --expected-revision <n> resolved`, or `ignored` (see `Action::Status` in `src/bin/sift/control.rs`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+### error_recurrence
+
+**Meaning**: A resolved error group occurs again.
+
+**First command**
+
+```sh
+sift control error-groups list --project <project>
+```
+
+**Next step**: Find the group that came back, and fix the cause of the errors. Then set its status with `sift control error-groups status <id> --project <project> --request-id <id> --expected-revision <n> resolved`, or `ignored` (see `Action::Status` in `src/bin/sift/control.rs`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+Source: `src/alerting/domain/rule.rs` (`RuleSource`), `src/alerting/domain/state.rs` (`Phase`) and `src/bin/sift/control.rs`.

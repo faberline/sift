@@ -159,6 +159,10 @@ jobs:
       - name: production acceptance guard unit tests
         working-directory: scripts/production
         run: python3 -B -m unittest test_cost_guard test_check_cleanup -v
+      - name: alert runbook unit tests
+        run: python3 -B -m unittest discover -s scripts -p 'test_verify_alert_runbook.py' -v
+      - name: alert runbook check
+        run: python3 -B scripts/verify-alert-runbook.py
 
   test-coverage:
     name: "test: workspace, coverage"
