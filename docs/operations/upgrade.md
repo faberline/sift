@@ -15,7 +15,7 @@ the tests prove today. A claim with no proof is written as `not yet proven`.
 | Full snapshot and Raft command formats | Each carries a format version: snapshot `SNAPSHOT_FORMAT_VERSION` 2 and command `COMMAND_FORMAT_VERSION` 2 in `src/journal/infrastructure/raft/`. A reader refuses an unknown version. | Checkpoint tests in `src/journal/infrastructure/raft/checkpoint_compatibility_tests.rs` and `tests/it/refactor_compatibility.rs`. |
 | WAL segments written by an older release | Proven for the format in `tests/fixtures/wal-v1` (`WalBatch` `format_version` 1). | Tests `current_binary_opens_the_previous_format_wal` and `current_binary_keeps_writing_the_previous_wal_format` in `tests/it/previous_format_compat.rs`. No tagged release exists yet, so this fixture is the baseline of the first release. |
 | Newer data format on an older binary | Refused with `unsupported Sift data format <n>; expected <m>` and no change on disk. | Test `newer_data_root_format_is_refused_and_left_unchanged` in `tests/it/previous_format_compat.rs`. |
-| Mixed-version voters in one group | not yet proven | It needs two released versions and a live three-voter group. The check is a paid GKE rolling-upgrade drill that the user must approve; it is not part of this policy. |
+| Mixed-version voters in one group | not yet proven | It needs two released versions and a live three-voter group. The check is a paid GKE rolling-upgrade drill that the user must approve; it is not part of issue #116. Tracked in #80 and #83. |
 
 The fixtures were captured from commit `5ae45b9` and must not be regenerated.
 Formats carry versions. No migration step exists. A release that bumps a
@@ -29,16 +29,16 @@ Draft: it applies only after the user confirms the 1.0.0 standard (faberline/aw 
 |---------|---------|------------|
 | Public HTTP and gRPC API | OpenAPI document `tests/fixtures/refactor_compatibility/openapi.json` | Test `openapi_bytes_do_not_change` |
 | CLI help and flags | `cli-help.json` | Test `cli_help_bytes_do_not_change` |
-| Wire formats (OTLP, Prometheus Remote Write 1.0) | Protocol versions of the wire | not yet proven: no golden test pins these bytes |
+| Wire formats (OTLP, Prometheus Remote Write 1.0) | Protocol versions of the wire | No test yet; tracked in #136. |
 | On-disk formats | Versions listed in the compatibility policy | Tests `newer_data_root_format_is_refused_and_left_unchanged` and `current_binary_keeps_writing_the_previous_wal_format` |
-| `Sift` CRD | `k8s/crd/sift.yaml` | not yet proven: no test pins the CRD schema |
+| `Sift` CRD | `k8s/crd/sift.yaml` | No test yet; tracked in #137. |
 
 Rules:
 
 - Versions follow semantic versioning. No breaking change to these surfaces
   before 2.0.0.
 - A change that adds a field is allowed when old readers ignore it.
-- Each surface has a test that fails when it changes (named in the table).
+- Each surface has a test that fails when it changes (named in the table), or an open issue that tracks the missing test.
 - Public Rust paths are not part of the promise (`docs/public-api.md`).
 
 ## Rolling upgrade
@@ -101,5 +101,5 @@ A restore loses every write made after that backup.
 ## What is not covered
 
 - The automated rolling-upgrade test (issue #80).
-- A live GKE upgrade drill.
+- A live GKE upgrade drill of three voters. It is a paid step and starts only after the user approves it. Estimate: 3 nodes x 0.78 USD/h x 2 h = 4.68 USD, 1 driver x 0.15 USD/h x 2 h = 0.30 USD, and 0.2 contingency = 5.98 USD in total (about TWD 193 at the rate of `docs/operations/production-acceptance-cost.md`). The rates are the operator's rough assumptions of 2026-11-13 from that page and `scripts/production/cost-inputs.020.json`; the 2 h run time is an assumption; the PVC and storage cost of 2 h is below 0.01 USD and is left out. No quote and no paid run exists. The tracking issue is #83.
 - Mixed-version voters in one group.
