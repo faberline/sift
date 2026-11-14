@@ -18,6 +18,7 @@ and [`llms.txt`](../llms.txt).
 | [operations/upgrade.md](operations/upgrade.md) | Version compatibility policy, rolling upgrade order and rollback rule. |
 | [operations/runbook.md](operations/runbook.md) | Data-plane runbook: health, metrics, voter loss, restore, collector replay, rejected data. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
+| [operations/performance.md](operations/performance.md) | Metric workload numbers, machine class, regression threshold and the CI gate. |
 | [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
 
 The architecture contract itself is [`ddd.toml`](../ddd.toml) at the repository
