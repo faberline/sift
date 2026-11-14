@@ -102,6 +102,17 @@ impl ServiceState {
                 )
             }
             .context("replicated Sift requires peer mTLS")?;
+            let peer_tls = peer_tls::PeerTlsConfig::from_env("SIFT_PEER")
+                .context("load peer mTLS paths for reload")?
+                .context("peer mTLS paths are required")?;
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let _guard = handle.enter();
+                super::peer_tls_reload::spawn_peer_tls_reload(
+                    runtime.peer_transport.clone(),
+                    peer_tls,
+                    super::peer_tls_reload::PEER_TLS_RELOAD_INTERVAL,
+                );
+            }
             (
                 Some(runtime.host),
                 Some(runtime.peer_transport),
