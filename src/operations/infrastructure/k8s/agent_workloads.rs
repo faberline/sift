@@ -14,7 +14,7 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
     let name = role_name(cx, AGENT_COMPONENT);
     let mut env = vec![
         json!({"name":"SIFT_DATA_DIR", "value":"/var/lib/sift"}),
-        json!({"name":"SIFT_URL", "value":format!("http://{}:{HTTP_PORT}", cx.name)}),
+        json!({"name":"SIFT_URL", "value":format!("http://{}:{HTTP_PORT}", cx.name())}),
         json!({"name":"NODE_NAME", "valueFrom":{"fieldRef":{"fieldPath":"spec.nodeName"}}}),
     ];
     if matches!(spec.auth, AuthMode::Required) {
@@ -37,7 +37,7 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
     ];
     let mut agent_volumes = vec![
         json!({"name":"pod-logs","hostPath":{"path":"/var/log/pods","type":"Directory"}}),
-        json!({"name":"data","hostPath":{"path":format!("/var/lib/sift/agents/{}/{}",cx.ns,cx.name),"type":"DirectoryOrCreate"}}),
+        json!({"name":"data","hostPath":{"path":format!("/var/lib/sift/agents/{}/{}",cx.ns(),cx.name()),"type":"DirectoryOrCreate"}}),
     ];
     if matches!(spec.auth, AuthMode::Kubernetes) {
         agent_mounts.push(json!({
@@ -58,7 +58,7 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
         }));
     }
     let runtime = render::PodRuntimePolicy::restricted(
-        cx.name,
+        cx.name(),
         serde_json::to_value(&spec.placement.node_selector).expect("node selector is JSON"),
     )
     .with_init_containers(vec![json!({
@@ -82,7 +82,7 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
             "--cri-root".into(),
             "/var/log/pods".into(),
             "--namespace".into(),
-            cx.ns.into(),
+            cx.ns().into(),
             "--data-dir".into(),
             "/var/lib/sift".into(),
             "--checkpoint".into(),
@@ -90,9 +90,9 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
             "--quarantine".into(),
             "/var/lib/sift/agent/rejected.jsonl".into(),
             "--project".into(),
-            cx.name.into(),
+            cx.name().into(),
             "--environment".into(),
-            cx.ns.into(),
+            cx.ns().into(),
             "--gcp-project".into(),
             spec.gcp_project_id.clone(),
             "--cluster".into(),
@@ -123,25 +123,21 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
 }
 
 pub(super) fn agent_project_role_plan(cx: &RenderCtx<'_>) -> render::RolePlan {
-    let name = format!("{}-agent-project", cx.name);
-    render::RolePlan {
-        name,
-        component: "auth".into(),
-        rules: vec![
-            render::RbacRulePlan {
-                api_groups: vec!["sift.axiom.dev".into()],
-                resources: vec!["projects".into()],
-                resource_names: vec![cx.name.into()],
-                verbs: vec!["get".into(), "create".into()],
-            },
-            render::RbacRulePlan {
-                api_groups: vec!["".into()],
-                resources: vec!["pods".into()],
-                resource_names: vec![],
-                verbs: vec!["get".into(), "list".into()],
-            },
-        ],
-    }
+    let name = format!("{}-agent-project", cx.name());
+    render::RolePlan::new(name, "auth")
+        .with_rule(
+            render::RbacRulePlan::new(
+                vec!["sift.axiom.dev".into()],
+                vec!["projects".into()],
+                vec!["get".into(), "create".into()],
+            )
+            .with_resource_names(vec![cx.name().into()]),
+        )
+        .with_rule(render::RbacRulePlan::new(
+            vec!["".into()],
+            vec!["pods".into()],
+            vec!["get".into(), "list".into()],
+        ))
 }
 
 pub(super) fn projected_client_token_volume() -> Value {
@@ -167,14 +163,7 @@ pub(super) fn projected_client_token_mount() -> Value {
 }
 
 pub(super) fn agent_project_role_binding_plan(cx: &RenderCtx<'_>) -> render::RoleBindingPlan {
-    let name = format!("{}-agent-project", cx.name);
-    render::RoleBindingPlan {
-        name: name.clone(),
-        component: "auth".into(),
-        role_name: name,
-        subjects: vec![render::ServiceAccountSubjectPlan {
-            name: cx.name.into(),
-            namespace: cx.ns.into(),
-        }],
-    }
+    let name = format!("{}-agent-project", cx.name());
+    render::RoleBindingPlan::new(name.clone(), "auth", name)
+        .with_service_account(render::ServiceAccountSubjectPlan::new(cx.ns(), cx.name()))
 }

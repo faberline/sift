@@ -34,15 +34,8 @@ fn render_children(
         .uid
         .as_deref()
         .map(|uid| render::owner_ref(API_VERSION, KIND, &name, uid));
-    let cx = RenderCtx {
-        app: APP,
-        manager: "sift-operator",
-        api_version: API_VERSION,
-        kind: KIND,
-        name: &name,
-        ns: &namespace,
-        owner,
-    };
+    let cx = RenderCtx::new(APP, "sift-operator", API_VERSION, KIND, &name, &namespace)
+        .with_owner(owner);
     let mut plan = render::WorkloadPlan::new(&cx);
     plan.add_service_account(render::ServiceAccountPlan::new(&name, "runtime"));
     plan.add_service_account(render::ServiceAccountPlan::new(
@@ -61,44 +54,47 @@ fn render_children(
     plan.add_role(agent_project_role_plan(&cx));
     plan.add_role_binding(agent_project_role_binding_plan(&cx));
     if matches!(instance.settings.auth, AuthMode::Kubernetes) {
-        plan.add_role(render::RolePlan {
-            name: format!("{name}-backup-project"),
-            component: "auth".into(),
-            rules: vec![render::RbacRulePlan {
-                api_groups: vec!["sift.axiom.dev".into()],
-                resources: vec!["projects".into()],
-                resource_names: vec![],
-                verbs: vec!["update".into()],
-            }],
-        });
-        plan.add_role_binding(render::RoleBindingPlan {
-            name: format!("{name}-backup-project"),
-            component: "auth".into(),
-            role_name: format!("{name}-backup-project"),
-            subjects: vec![render::ServiceAccountSubjectPlan::new(
+        plan.add_role(
+            render::RolePlan::new(format!("{name}-backup-project"), "auth").with_rule(
+                render::RbacRulePlan::new(
+                    vec!["sift.axiom.dev".into()],
+                    vec!["projects".into()],
+                    vec!["update".into()],
+                ),
+            ),
+        );
+        plan.add_role_binding(
+            render::RoleBindingPlan::new(
+                format!("{name}-backup-project"),
+                "auth",
+                format!("{name}-backup-project"),
+            )
+            .with_service_account(render::ServiceAccountSubjectPlan::new(
                 &namespace,
                 format!("{name}-backup"),
-            )],
-        });
-        plan.add_role(render::RolePlan {
-            name: format!("{name}-control-project"),
-            component: "auth".into(),
-            rules: vec![render::RbacRulePlan {
-                api_groups: vec!["sift.axiom.dev".into()],
-                resources: vec!["projects".into()],
-                resource_names: vec![name.clone()],
-                verbs: vec!["get".into(), "update".into()],
-            }],
-        });
-        plan.add_role_binding(render::RoleBindingPlan {
-            name: format!("{name}-control-project"),
-            component: "auth".into(),
-            role_name: format!("{name}-control-project"),
-            subjects: vec![render::ServiceAccountSubjectPlan::new(
+            )),
+        );
+        plan.add_role(
+            render::RolePlan::new(format!("{name}-control-project"), "auth").with_rule(
+                render::RbacRulePlan::new(
+                    vec!["sift.axiom.dev".into()],
+                    vec!["projects".into()],
+                    vec!["get".into(), "update".into()],
+                )
+                .with_resource_names(vec![name.clone()]),
+            ),
+        );
+        plan.add_role_binding(
+            render::RoleBindingPlan::new(
+                format!("{name}-control-project"),
+                "auth",
+                format!("{name}-control-project"),
+            )
+            .with_service_account(render::ServiceAccountSubjectPlan::new(
                 &namespace,
                 format!("{name}-control"),
-            )],
-        });
+            )),
+        );
         let mut binding = render::ClusterRoleBindingPlan::new(
             auth_delegator_binding_name(&cx),
             AUTH_DELEGATION_COMPONENT,

@@ -30,10 +30,10 @@ impl RecoveryStore {
     }
     pub fn latest(&self) -> Result<RecoveryRecord> {
         let object = self.store.get(&format!("{}/latest.json", self.prefix))?;
-        if object.bytes.len() > 64 * 1024 {
+        if object.bytes().len() > 64 * 1024 {
             bail!("recovery record exceeds 64 KiB");
         }
-        let record: RecoveryRecord = serde_json::from_slice(&object.bytes)?;
+        let record: RecoveryRecord = serde_json::from_slice(&object.bytes())?;
         record.validate().map_err(anyhow::Error::msg)?;
         Ok(record)
     }
@@ -54,7 +54,7 @@ impl RecoveryStore {
         ) {
             Ok(_) => {}
             Err(ObjectStoreError::PreconditionFailed { .. }) => {
-                if sha256_hex(&self.store.get(&key)?.bytes) != record.control_sha256 {
+                if sha256_hex(&self.store.get(&key)?.bytes()) != record.control_sha256 {
                     bail!("existing control snapshot digest mismatch");
                 }
             }
@@ -75,7 +75,7 @@ impl RecoveryStore {
         ) {
             Ok(_) => {}
             Err(ObjectStoreError::PreconditionFailed { .. }) => {
-                if self.store.get(&immutable)?.bytes != bytes {
+                if self.store.get(&immutable)?.bytes() != bytes {
                     bail!("existing immutable recovery record differs");
                 }
             }
@@ -84,12 +84,12 @@ impl RecoveryStore {
         let latest = format!("{}/latest.json", self.prefix);
         let condition = match self.store.get(&latest) {
             Ok(previous) => {
-                let prior: RecoveryRecord = serde_json::from_slice(&previous.bytes)?;
+                let prior: RecoveryRecord = serde_json::from_slice(&previous.bytes())?;
                 prior.validate().map_err(anyhow::Error::msg)?;
                 if prior.protected_at > record.protected_at {
                     bail!("recovery pointer cannot move backwards");
                 }
-                PutCondition::IfVersion(previous.meta.version)
+                PutCondition::IfVersion(previous.meta().version().clone())
             }
             Err(ObjectStoreError::NotFound { .. }) => PutCondition::IfAbsent,
             Err(error) => return Err(error.into()),
@@ -108,7 +108,7 @@ impl RecoveryStore {
             bail!("control snapshot is outside the configured recovery prefix");
         }
         let key = format!("{}/control-{}.bin", self.prefix, record.control_sha256);
-        let bytes = self.store.get(&key)?.bytes;
+        let bytes = self.store.get(&key)?.into_parts().1;
         if bytes.len() > 64 * 1024 * 1024 || sha256_hex(&bytes) != record.control_sha256 {
             bail!("control snapshot digest or size mismatch");
         }
@@ -139,11 +139,11 @@ impl RecoveryStore {
             bail!("data manifest is outside the configured recovery bucket");
         }
         let object = self.store.get(url.path().trim_start_matches('/'))?;
-        if sha256_hex(&object.bytes) != record.data.manifest_sha256 {
+        if sha256_hex(&object.bytes()) != record.data.manifest_sha256 {
             bail!("data recovery manifest digest mismatch");
         }
         let manifest: crate::shared_kernel::archive_manifest::ArchiveManifest =
-            serde_json::from_slice(&object.bytes)?;
+            serde_json::from_slice(&object.bytes())?;
         if manifest.watermarks.max_cursor() != record.data.through_cursor {
             bail!("data recovery watermark differs from recovery record");
         }

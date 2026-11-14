@@ -20,11 +20,15 @@ pub(super) fn backup_cron_job_plan(
     spec: &SiftSpec,
     backup: &BackupSpec,
 ) -> render::CronJobPlan {
-    let backup_name = format!("{}-backup", cx.name);
+    let backup_name = format!("{}-backup", cx.name());
     let mut args = vec![
         "backup".to_string(),
         "--url".to_string(),
-        format!("http://{}.{}.svc.cluster.local:{HTTP_PORT}", cx.name, cx.ns),
+        format!(
+            "http://{}.{}.svc.cluster.local:{HTTP_PORT}",
+            cx.name(),
+            cx.ns()
+        ),
         "--dest".to_string(),
         backup.destination.clone(),
     ];
@@ -42,7 +46,7 @@ pub(super) fn backup_cron_job_plan(
             "--token-audience".to_string(),
             "sift.axiom.dev".to_string(),
             "--project".to_string(),
-            cx.name.to_string(),
+            cx.name().to_string(),
         ]);
         volumes.push(projected_client_token_volume());
         mounts.push(projected_client_token_mount());
@@ -66,12 +70,12 @@ pub(super) fn backup_cron_job_plan(
         "requests":{"cpu":"100m","memory":"128Mi"},
         "limits":{"cpu":"500m","memory":"512Mi"}
     }));
-    render::CronJobPlan {
-        name: backup_name,
-        schedule: backup.schedule.clone(),
-        successful_jobs_history_limit: 3,
-        failed_jobs_history_limit: 3,
-        pod: render::PodPlan::new(BACKUP_COMPONENT, container, runtime)
+    render::CronJobPlan::new(
+        backup_name,
+        backup.schedule.clone(),
+        render::PodPlan::new(BACKUP_COMPONENT, container, runtime)
             .with_selector_labels(role_selector_labels(BACKUP_COMPONENT)),
-    }
+    )
+    .with_successful_jobs_history_limit(3)
+    .with_failed_jobs_history_limit(3)
 }

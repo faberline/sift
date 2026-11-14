@@ -58,10 +58,7 @@ mod tests {
                 required: true,
                 tokens: HashMap::from([(
                     "writer-token".into(),
-                    TokenClaims {
-                        subject: "writer".into(),
-                        roles: HashMap::from([("project-a".into(), Role::Write)]),
-                    },
+                    TokenClaims::new("writer", HashMap::from([("project-a".into(), Role::Write)])),
                 )]),
             })));
         for (project, token, code, message) in [

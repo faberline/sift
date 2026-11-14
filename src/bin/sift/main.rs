@@ -81,22 +81,21 @@ async fn main() -> Result<()> {
         Command::Upgrade(args) => {
             cli_std::upgrade::run(
                 &TOOL,
-                cli_std::upgrade::Options {
-                    check: args.check,
-                    tag: args.tag,
-                    force: args.force,
-                    yes: args.yes,
-                },
+                cli_std::upgrade::Options::default()
+                    .with_check(args.check)
+                    .with_tag(args.tag)
+                    .with_force(args.force)
+                    .with_yes(args.yes),
             )
             .await
         }
         Command::Issue(args) => issue(args).await,
         Command::AcceptancePayload(args) => acceptance_payload(args),
         Command::AcceptanceBuildInfo => print_json_terminal(serde_json::json!({
-            "version": TOOL.version,
-            "git_sha": TOOL.git_sha,
-            "target": TOOL.target,
-            "built_at": TOOL.built_at,
+            "version": TOOL.version(),
+            "git_sha": TOOL.git_sha(),
+            "target": TOOL.target(),
+            "built_at": TOOL.built_at(),
         })),
         Command::AcceptanceGrpc(args) => acceptance_grpc(args).await,
     }

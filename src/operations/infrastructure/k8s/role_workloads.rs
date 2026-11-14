@@ -14,13 +14,13 @@ use crate::operations::domain::instance_names::{
 use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
 pub(super) fn role_name(cx: &RenderCtx<'_>, role: &str) -> String {
-    format!("{}-{role}", cx.name)
+    format!("{}-{role}", cx.name())
 }
 
 pub(super) fn auth_delegator_binding_name(cx: &RenderCtx<'_>) -> String {
     // Namespace names cannot contain dots, so this mapping cannot collide
     // between (namespace, instance) pairs that contain dashes.
-    format!("sift.{}.{}.auth-delegator", cx.ns, cx.name)
+    format!("sift.{}.{}.auth-delegator", cx.ns(), cx.name())
 }
 
 fn storage_size<'a>(spec: &'a SiftSpec, role: &str) -> &'a str {
@@ -53,7 +53,7 @@ pub(super) fn full_role_selector(cx: &RenderCtx<'_>, role: &str) -> BTreeMap<Str
         ("app.kubernetes.io/name".to_string(), APP.to_string()),
         (
             "app.kubernetes.io/instance".to_string(),
-            cx.name.to_string(),
+            cx.name().to_string(),
         ),
         ("app.kubernetes.io/component".to_string(), role.to_string()),
     ]);
@@ -106,12 +106,12 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
     let mut env = vec![
         json!({"name":"SIFT_DATA_DIR", "value":"/var/lib/sift"}),
         json!({"name":"SIFT_AUTH", "value":auth}),
-        json!({"name":"SIFT_STORE_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{HTTP_PORT}", cx.name, cx.ns)}),
-        json!({"name":"SIFT_STORE_GRPC_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{OTLP_GRPC_PORT}", cx.name, cx.ns)}),
-        json!({"name":"SIFT_QUERY_ENDPOINT", "value":format!("http://{}-query.{}.svc.cluster.local:{HTTP_PORT}", cx.name, cx.ns)}),
-        json!({"name":"SIFT_CONTROL_ENDPOINT", "value":format!("http://{}-control.{}.svc.cluster.local:{HTTP_PORT}", cx.name, cx.ns)}),
-        json!({"name":"SIFT_MCP_ALLOWED_HOSTS", "value":format!("localhost,127.0.0.1,{},{}.{}.svc,{}.{}.svc.cluster.local", cx.name, cx.name, cx.ns, cx.name, cx.ns)}),
-        json!({"name":"SIFT_MCP_ALLOWED_ORIGINS", "value":format!("http://{}.{}.svc.cluster.local:{HTTP_PORT}", cx.name, cx.ns)}),
+        json!({"name":"SIFT_STORE_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
+        json!({"name":"SIFT_STORE_GRPC_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{OTLP_GRPC_PORT}", cx.name(), cx.ns())}),
+        json!({"name":"SIFT_QUERY_ENDPOINT", "value":format!("http://{}-query.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
+        json!({"name":"SIFT_CONTROL_ENDPOINT", "value":format!("http://{}-control.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
+        json!({"name":"SIFT_MCP_ALLOWED_HOSTS", "value":format!("localhost,127.0.0.1,{},{}.{}.svc,{}.{}.svc.cluster.local", cx.name(), cx.name(), cx.ns(), cx.name(), cx.ns())}),
+        json!({"name":"SIFT_MCP_ALLOWED_ORIGINS", "value":format!("http://{}.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
         json!({"name":"SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW", "value":spec.ingest.max_items_per_minute.to_string()}),
         json!({"name":"SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT", "value":spec.ingest.max_concurrent_requests.to_string()}),
         json!({"name":"SIFT_MAX_EVENTS_PER_BATCH", "value":"1000"}),
@@ -139,7 +139,7 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
         if let Some(archive) = &spec.archive {
             if archive.destination.starts_with("gs://") {
                 env.push(json!({"name":"SIFT_RECOVERY_DESTINATION","value":archive.destination}));
-                env.push(json!({"name":"SIFT_RECOVERY_PROJECT","value":cx.name}));
+                env.push(json!({"name":"SIFT_RECOVERY_PROJECT","value":cx.name()}));
             }
         }
         env.extend([
@@ -149,7 +149,7 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
             json!({"name":"VOTER_COUNT", "value":"3"}),
             json!({
                 "name":"SIFT_RAFT_HEADLESS",
-                "value":format!("{}-{role}-headless.{}.svc.cluster.local", cx.name, cx.ns)
+                "value":format!("{}-{role}-headless.{}.svc.cluster.local", cx.name(), cx.ns())
             }),
             json!({"name":"SIFT_PEER_PORT", "value":PEER_MTLS_PORT.to_string()}),
             json!({"name":"SIFT_PEER_MTLS", "value":"on"}),
@@ -159,7 +159,7 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
         ]);
     }
     if role == CONTROL_COMPONENT {
-        env.push(json!({"name":"SIFT_CONTROL_PROJECTS","value":cx.name}));
+        env.push(json!({"name":"SIFT_CONTROL_PROJECTS","value":cx.name()}));
         env.push(json!({"name":"SIFT_WEBHOOK_SECRET_DIRECTORY","value":"/var/run/secrets/sift/webhooks"}));
         env.push(json!({"name":"SIFT_WEBHOOK_ALLOWED_HOSTS","value":spec.alerting.allowed_hosts.join(",")}));
         if matches!(spec.auth, AuthMode::Kubernetes) {
@@ -265,9 +265,9 @@ fn role_container_plan(
 fn role_pod_plan(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> render::PodPlan {
     let (volumes, mounts) = role_support_volumes(spec, role);
     let service_account = if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
-        format!("{}-{role}", cx.name)
+        format!("{}-{role}", cx.name())
     } else {
-        cx.name.to_string()
+        cx.name().to_string()
     };
     let mut runtime = render::PodRuntimePolicy::restricted(
         service_account,
@@ -288,7 +288,7 @@ fn role_pod_plan(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> render::Pod
 
 pub(super) fn client_service_plan(cx: &RenderCtx<'_>) -> render::ServicePlan {
     render::ServicePlan::cluster_ip(
-        cx.name,
+        cx.name(),
         "frontend",
         role_selector_labels(GATEWAY_COMPONENT),
         vec![
