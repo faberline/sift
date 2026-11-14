@@ -86,11 +86,7 @@ async fn peer_tls_reload_runs_only_when_the_files_change() {
     let transport = PeerTransport::from_config(&config).unwrap();
     assert_eq!(transport.generation(), 1);
 
-    let task = spawn_peer_tls_reload(
-        transport.clone(),
-        config.clone(),
-        Duration::from_millis(50),
-    );
+    let task = spawn_peer_tls_reload(transport.clone(), config.clone(), Duration::from_millis(50));
 
     // Unchanged files: no reload.
     tokio::time::sleep(Duration::from_millis(400)).await;
@@ -142,12 +138,7 @@ async fn peer_tls_rotation_keeps_requests_ok_and_uses_the_new_certificate() {
         if i == 100 {
             write_material(server_dir.path(), &ca, "localhost");
         }
-        let ok = match http
-            .get(&url)
-            .timeout(Duration::from_secs(3))
-            .send()
-            .await
-        {
+        let ok = match http.get(&url).timeout(Duration::from_secs(3)).send().await {
             Ok(response) => {
                 let status = response.status();
                 let body = response.text().await.unwrap_or_default();
