@@ -100,3 +100,50 @@ fn a_destination_outside_the_https_allowlist_is_rejected() {
         "Webhook destination URL is invalid"
     );
 }
+
+#[test]
+fn webhook_secret_rotation_is_used_by_the_next_read_and_never_fails_a_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = webhook(dir.path());
+    let old = r#"{"url":"https://hooks.example.com/old","bearer_token":"old"}"#;
+    let new = r#"{"url":"https://hooks.example.com/new","bearer_token":"new"}"#;
+
+    // Negative check: a bad body is rejected, so a failed read is visible.
+    secret(dir.path(), "hook", "not json");
+    assert_eq!(error(&config, "hook"), "Webhook Secret is invalid");
+    secret(dir.path(), "hook", old);
+
+    // Rotate by write-then-rename, as the kubelet swaps a mounted file.
+    let writer_dir = dir.path().to_path_buf();
+    let writer = std::thread::spawn(move || {
+        for i in 0..200 {
+            let body = if i % 2 == 0 { old } else { new };
+            std::fs::write(writer_dir.join("hook.json.tmp"), body).unwrap();
+            std::fs::rename(
+                writer_dir.join("hook.json.tmp"),
+                writer_dir.join("hook.json"),
+            )
+            .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    });
+
+    let mut failed = 0;
+    for _ in 0..200 {
+        match config.destination("hook") {
+            Ok(destination) => assert!(
+                destination.url == "https://hooks.example.com/old"
+                    || destination.url == "https://hooks.example.com/new",
+                "unexpected destination {}",
+                destination.url
+            ),
+            Err(_) => failed += 1,
+        }
+    }
+    writer.join().unwrap();
+
+    assert_eq!(failed, 0, "no read may fail during rotation");
+    let last = config.destination("hook").unwrap();
+    assert_eq!(last.url, "https://hooks.example.com/new");
+    assert_eq!(last.bearer_token, Some("new".to_string()));
+}
