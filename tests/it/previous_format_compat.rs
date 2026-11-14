@@ -155,3 +155,74 @@ fn dropping_one_event_from_the_expected_list_is_detected() {
     want.remove(1);
     assert_same_events(&got, &want);
 }
+
+fn count_occurrences(haystack: &[u8], needle: &[u8]) -> usize {
+    haystack
+        .windows(needle.len())
+        .filter(|window| *window == needle)
+        .count()
+}
+
+#[test]
+fn newer_data_root_format_is_refused_and_left_unchanged() {
+    let temp = tempfile::tempdir().unwrap();
+    copy_dir(&fixture_root(), temp.path());
+    let layout = temp.path().join("layout.json");
+    let original = fs::read_to_string(&layout).unwrap();
+    let newer = original.replace("\"format_version\": 1", "\"format_version\": 2");
+    assert_ne!(original, newer);
+    fs::write(&layout, &newer).unwrap();
+    let before = fs::read(&layout).unwrap();
+    let message = match DurableJournal::open(temp.path()) {
+        Ok(_) => panic!("newer data root was opened"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(
+        message.contains("unsupported Sift data format 2"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&layout).unwrap(), before);
+    assert_eq!(
+        fs::read(temp.path().join("wal/logs/events.framed")).unwrap(),
+        fs::read(fixture_root().join("wal/logs/events.framed")).unwrap()
+    );
+}
+
+#[test]
+fn current_binary_keeps_writing_the_previous_wal_format() {
+    let (temp, journal) = open_copy();
+    journal.append(event("wal-log-2", SignalKind::Log)).unwrap();
+    drop(journal);
+    let journal = DurableJournal::open(temp.path()).unwrap();
+    let got = journal
+        .query(EventQuery {
+            signal: None,
+            after: 0,
+            limit: 10,
+        })
+        .unwrap();
+    assert_eq!(got.len(), 4);
+    let cursors: Vec<u64> = got.iter().map(|stored| stored.cursor).collect();
+    assert_eq!(cursors, vec![1, 2, 3, 4]);
+    let mut want = expected_events();
+    want.push(StoredEvent {
+        cursor: 4,
+        acknowledged_at: FIXED_TIME.into(),
+        event: event("wal-log-2", SignalKind::Log),
+    });
+    assert_same_events(&got, &want);
+    let wal = fs::read(temp.path().join("wal/logs/events.framed")).unwrap();
+    assert!(count_occurrences(&wal, b"\"format_version\":1") >= 2);
+    assert_eq!(count_occurrences(&wal, b"\"format_version\":2"), 0);
+    let layout = fs::read_to_string(temp.path().join("layout.json")).unwrap();
+    assert!(layout.contains("\"format_version\": 1"));
+}
+
+/// Fails if someone regenerates the fixture at another format version to hide a break.
+#[test]
+fn rollback_guard_fails_when_the_wal_format_changes() {
+    let wal = fs::read(fixture_root().join("wal/logs/events.framed")).unwrap();
+    assert!(count_occurrences(&wal, b"\"format_version\":1") >= 1);
+    let layout = fs::read_to_string(fixture_root().join("layout.json")).unwrap();
+    assert!(layout.contains("\"format_version\": 1"));
+}

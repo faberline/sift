@@ -71,6 +71,7 @@ utoipa = { version = "4", features = ["axum_extras"] }
 [dev-dependencies]
 rustls = "0.23"
 rcgen = "0.13"
+proptest = "1"
 vat = { git = "https://github.com/faberline/vat", rev = "1ba31b2f2ddc49bad1d85a03f889a164227667c9", default-features = false, features = ["emulator"] }
 
 [build-dependencies]

@@ -11,3 +11,7 @@ name = "sift"
 paths = ["**"]
 target = "rust"
 test_cmd = "cargo test -p sift"
+
+[standards.coverage]
+line = 82.18   # measured by CI on the test-coverage job (COV4 named this value)
+target = 100
