@@ -371,7 +371,7 @@ async fn reconcile_limits_egress_to_the_discovered_api_endpoint() {
                     .push(api_rule.clone());
             }
             assert_eq!(
-                object(&plan.children(), "NetworkPolicy", &name),
+                object(plan.children(), "NetworkPolicy", &name),
                 &expected,
                 "{auth:?} auth, {role} egress"
             );
