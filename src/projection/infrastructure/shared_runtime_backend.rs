@@ -37,7 +37,9 @@ impl ProjectionRuntimePort for SharedRuntimeBackend {
     }
 
     fn current_cursor(&self, name: &str) -> Result<u64> {
-        self.registry.current_cursor(name)
+        self.registry
+            .current_cursor(name)
+            .map(|cursor| cursor.get())
     }
 
     fn semantic_digest(&self, name: &str) -> Result<String> {
@@ -65,7 +67,7 @@ impl ProjectionRuntimePort for SharedRuntimeBackend {
     }
 
     fn catch_up(&self, name: &str) -> Result<u64> {
-        self.registry.catch_up(name)
+        self.registry.catch_up(name).map(|cursor| cursor.get())
     }
 
     fn wait_for_min_cursor<'a>(
@@ -78,17 +80,26 @@ impl ProjectionRuntimePort for SharedRuntimeBackend {
             let result = match name {
                 PROJECTION_LOGGING_STORE => {
                     self.logging
-                        .wait_for_min_cursor(required_cursor, timeout)
+                        .wait_for_min_cursor(
+                            service_projection::ProjectionCursor::new(required_cursor),
+                            timeout,
+                        )
                         .await
                 }
                 PROJECTION_METRIC_STORE => {
                     self.metrics
-                        .wait_for_min_cursor(required_cursor, timeout)
+                        .wait_for_min_cursor(
+                            service_projection::ProjectionCursor::new(required_cursor),
+                            timeout,
+                        )
                         .await
                 }
                 PROJECTION_TRACE_STORE => {
                     self.traces
-                        .wait_for_min_cursor(required_cursor, timeout)
+                        .wait_for_min_cursor(
+                            service_projection::ProjectionCursor::new(required_cursor),
+                            timeout,
+                        )
                         .await
                 }
                 _ => {
@@ -100,22 +111,24 @@ impl ProjectionRuntimePort for SharedRuntimeBackend {
                     ))
                 }
             };
-            result.map_err(|lag| ProjectionLag {
-                error: lag.error,
-                projection: lag.projection,
-                required_cursor: lag.required_cursor,
-                current_cursor: lag.current_cursor,
-                retryable: lag.retryable,
-                retry_after_seconds: lag.retry_after_seconds,
-            })
+            result
+                .map(|cursor| cursor.get())
+                .map_err(|lag| ProjectionLag {
+                    error: lag.error,
+                    projection: lag.projection.as_str().to_string(),
+                    required_cursor: lag.required_cursor.get(),
+                    current_cursor: lag.current_cursor.get(),
+                    retryable: lag.retryable,
+                    retry_after_seconds: lag.retry_after_seconds,
+                })
         })
     }
 
     fn rebuild_and_compare(&self, name: &str) -> Result<RebuildComparison> {
         let result = self.registry.rebuild_and_compare(name)?;
         Ok(RebuildComparison {
-            source_cursor: result.source_cursor,
-            rebuilt_cursor: result.rebuilt_cursor,
+            source_cursor: result.source_cursor.get(),
+            rebuilt_cursor: result.rebuilt_cursor.get(),
             live_digest: result.live_digest,
             rebuilt_digest: result.rebuilt_digest,
             equal: result.equal,

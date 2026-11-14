@@ -7,8 +7,8 @@ use std::sync::RwLock;
 use crate::projection::domain::runtime_metadata::ProjectionDescriptor;
 use anyhow::{bail, Context, Result};
 use index_text::{
-    Analyzer, FieldSpec, MatchOperator, MemoryTextIndex, TextDocument, TextIndex,
-    TextIndexSnapshot, TextQuery, TextSchema,
+    Analyzer, DocumentId, DocumentVersion, FieldSpec, MatchOperator, MemoryTextIndex, TextDocument,
+    TextIndex, TextIndexSnapshot, TextQuery, TextSchema,
 };
 use serde::{Deserialize, Serialize};
 
@@ -77,7 +77,7 @@ impl LoggingProjection {
                         self.max_records,
                     )?
                     .into_iter()
-                    .map(|hit| hit.external_id)
+                    .map(|hit| hit.external_id.as_str().to_string())
                     .collect::<HashSet<_>>(),
             ),
             _ => None,
@@ -152,7 +152,8 @@ impl Projection for LoggingProjection {
             let Some(oldest) = state.records.keys().next().copied() else {
                 break;
             };
-            self.text_index.delete(&projection_row_key(oldest), None)?;
+            self.text_index
+                .delete(&DocumentId::new(projection_row_key(oldest)), None)?;
             let removed = state.records.remove(&oldest).expect("retained log exists");
             let time = chrono::DateTime::parse_from_rfc3339(&removed.occurred_at)
                 .ok()
@@ -261,12 +262,15 @@ fn fixed_schema() -> Result<TextSchema> {
 }
 
 fn index_document(record: &LogRecordV1) -> TextDocument {
-    let mut document = TextDocument::new(projection_row_key(record.cursor), record.cursor)
-        .with_field("body", &record.body_text)
-        .with_field("project", &record.project)
-        .with_field("environment", &record.environment)
-        .with_field("occurred_at", &record.occurred_at)
-        .with_field("coexistence_key", &record.coexistence_key);
+    let mut document = TextDocument::new(
+        DocumentId::new(projection_row_key(record.cursor)),
+        DocumentVersion::new(record.cursor),
+    )
+    .with_field("body", &record.body_text)
+    .with_field("project", &record.project)
+    .with_field("environment", &record.environment)
+    .with_field("occurred_at", &record.occurred_at)
+    .with_field("coexistence_key", &record.coexistence_key);
     for (field, value) in [
         ("severity", record.severity.as_deref()),
         (
