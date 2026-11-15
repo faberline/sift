@@ -18,6 +18,7 @@ and [`llms.txt`](../llms.txt).
 | [operations/upgrade.md](operations/upgrade.md) | Version compatibility policy, rolling upgrade order and rollback rule. |
 | [operations/runbook.md](operations/runbook.md) | Data-plane runbook: health, metrics, voter loss, restore, collector replay, rejected data. |
 | [operations/configuration.md](operations/configuration.md) | Every CLI flag, environment variable and CRD field with default and meaning. |
+| [operations/install.md](operations/install.md) | The four install paths (install.sh, container image, Compose, Kubernetes) and how each command is tested. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
 | [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
 
