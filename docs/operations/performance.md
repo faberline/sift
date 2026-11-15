@@ -93,14 +93,14 @@ These are the values in `tests/perf/baseline/trace.json`.
 
 | Metric | Value |
 |---|---|
-| Throughput (samples per second) | 14033.713 |
-| Query p50 (ms) | 198.413 |
-| Query p95 (ms) | 237.72 |
-| Query p99 (ms) | 239.226 |
-| Peak RSS (KiB) | 446388 |
-| CPU (seconds) | 9.48 |
+| Throughput (samples per second) | 4029.727 |
+| Query p50 (ms) | 676.363 |
+| Query p95 (ms) | 680.546 |
+| Query p99 (ms) | 683.482 |
+| Peak RSS (KiB) | 466192 |
+| CPU (seconds) | 32.65 |
 
-These numbers are provisional. They come from a local run, not from the CI machine class `ubuntu-24.04`. A person replaces them with the values of the `perf-trace` artifact of the CI job `test-perf`.
+These numbers come from the `perf-trace` artifact of the CI job `test-perf` on the `ubuntu-24.04` runner (run 43696743112).
 
 The trace gate uses the same threshold as the metric gate; see the "Threshold" section above.
 
