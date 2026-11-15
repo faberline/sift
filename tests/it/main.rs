@@ -66,3 +66,4 @@ mod trace_store;
 mod unified_query_api;
 mod vat_lumen_observability_e2e;
 mod vat_service_observability_e2e;
+mod wire_formats;

@@ -145,6 +145,13 @@ jobs:
       - name: deployment artifacts
         run: |
           "$RUNNER_TEMP/venv/bin/python" scripts/verify-deployment-artifacts.py
+      - name: configuration page unit tests
+        working-directory: scripts
+        run: '"$RUNNER_TEMP/venv/bin/python" -B -m unittest test_verify_configuration_doc -v'
+      - name: build sift binary
+        run: cargo build --locked -p sift --bin sift
+      - name: configuration page check
+        run: '"$RUNNER_TEMP/venv/bin/python" -B scripts/verify-configuration-doc.py --sift-bin target/debug/sift'
       - name: restore drill unit tests
         working-directory: k8s/gke-test-job/restore-drill
         run: python3 -m unittest test_drill -v
@@ -159,6 +166,10 @@ jobs:
       - name: production acceptance guard unit tests
         working-directory: scripts/production
         run: python3 -B -m unittest test_cost_guard test_check_cleanup -v
+      - name: alert runbook unit tests
+        run: python3 -B -m unittest discover -s scripts -p 'test_verify_alert_runbook.py' -v
+      - name: alert runbook check
+        run: python3 -B scripts/verify-alert-runbook.py
 
   test-coverage:
     name: "test: workspace, coverage"
