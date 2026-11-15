@@ -66,16 +66,16 @@ queries runs 7 times).
 
 | Metric | Value |
 |---|---|
-| Throughput (samples per second) | 15539.516 |
-| Query p50 (ms) | 4.1 |
-| Query p95 (ms) | 7.715 |
-| Query p99 (ms) | 71.058 |
-| Peak RSS (KiB) | 485608 |
-| CPU (seconds) | 3.99 |
+| Throughput (samples per second) | 4874.039 |
+| Query p50 (ms) | 6.751 |
+| Query p95 (ms) | 12.382 |
+| Query p99 (ms) | 86.856 |
+| Peak RSS (KiB) | 501616 |
+| CPU (seconds) | 15.54 |
 
-These numbers are provisional. They come from a local run, not from the CI
-machine class `ubuntu-24.04`. A person replaces them with the values of the
-`perf-log` artifact of the CI job `test-perf`.
+These numbers come from the `perf-log` artifact of the CI job `test-perf` on
+the `ubuntu-24.04` runner (run 43687463792). A person replaces them when a
+later CI run shows the numbers are off.
 
 The threshold is 60 percent, the same as in the metric section above
 ("Threshold"). The baseline is `tests/perf/baseline/log.json`.
