@@ -25,6 +25,7 @@ mod kubernetes_auth;
 mod live_backup;
 mod local_backpressure;
 mod local_runtime_journey;
+mod log_workload_script;
 mod logging_store;
 mod mcp_library_boundary;
 mod mcp_surface;
