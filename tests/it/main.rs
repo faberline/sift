@@ -64,6 +64,7 @@ mod storage_mvp_defaults;
 mod structured_stdout_collector_e2e;
 mod text_index_migration;
 mod trace_store;
+mod trace_workload_script;
 mod unified_query_api;
 mod vat_lumen_observability_e2e;
 mod vat_service_observability_e2e;

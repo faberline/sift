@@ -82,6 +82,32 @@ class CheckRegression(unittest.TestCase):
                 2,
             )
 
+    def test_trace_baseline_has_every_compared_key(self):
+        trace = json.loads(
+            (Path(__file__).parent / "baseline" / "trace.json").read_text()
+        )
+        for key in [
+            "samples_per_second",
+            "query_p50_ms",
+            "query_p95_ms",
+            "query_p99_ms",
+            "peak_rss_kib",
+            "cpu_seconds",
+        ]:
+            self.assertIn(key, trace)
+            self.assertIsInstance(trace[key], (int, float))
+            self.assertGreater(trace[key], 0, key)
+
+    def test_trace_baseline_fails_when_exceeded_and_passes_unchanged(self):
+        trace = json.loads(
+            (Path(__file__).parent / "baseline" / "trace.json").read_text()
+        )
+        self.assertEqual(check_regression.check(trace, trace, 60), [])
+        exceeded = dict(trace, query_p99_ms=trace["query_p99_ms"] * 1.7)
+        messages = check_regression.check(exceeded, trace, 60)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("query_p99_ms", messages[0])
+
 
 if __name__ == "__main__":
     unittest.main()

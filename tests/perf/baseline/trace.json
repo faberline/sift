@@ -1,0 +1,8 @@
+{
+  "samples_per_second": 14033.713,
+  "query_p50_ms": 198.413,
+  "query_p95_ms": 237.72,
+  "query_p99_ms": 239.226,
+  "peak_rss_kib": 446388,
+  "cpu_seconds": 9.48
+}

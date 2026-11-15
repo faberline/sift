@@ -25,6 +25,7 @@ pub(super) struct AcceptancePayloadArgs {
 #[derive(Clone, Copy, ValueEnum)]
 enum AcceptancePayloadKind {
     OtlpLogsProtobuf,
+    OtlpTracesProtobuf,
     PrometheusRemoteWriteV1,
 }
 
@@ -96,6 +97,78 @@ pub(super) fn acceptance_payload(args: AcceptancePayloadArgs) -> Result<()> {
                     scope_logs: vec![ScopeLogs {
                         scope: None,
                         log_records,
+                        schema_url: String::new(),
+                    }],
+                    schema_url: String::new(),
+                }],
+            }
+            .encode_to_vec()
+        }
+        AcceptancePayloadKind::OtlpTracesProtobuf => {
+            use transport_otlp::proto::{
+                any_value, AnyValue, ExportTraceServiceRequest, KeyValue, Resource, ResourceSpans,
+                ScopeSpans, Span,
+            };
+
+            if args.timestamp_unix_nano == 0 {
+                anyhow::bail!("--timestamp-unix-nano must be above zero for traces");
+            }
+            // One trace: its id is the timestamp, 16 bytes; each span is a child of the one before.
+            let trace_id = u128::from(args.timestamp_unix_nano).to_be_bytes().to_vec();
+            let mut spans: Vec<Span> = Vec::with_capacity(args.items);
+            for index in 0..args.items {
+                let start = args
+                    .timestamp_unix_nano
+                    .checked_add(index as u64 * 1_000)
+                    .context("OTLP fixture timestamp overflow")?;
+                let end = start
+                    .checked_add(500)
+                    .context("OTLP fixture timestamp overflow")?;
+                let span_id = ((index as u64) + 1).to_be_bytes().to_vec();
+                // The span id of span `index - 1` is `index`, so the chain links to it.
+                let parent_span_id = if index == 0 {
+                    Vec::new()
+                } else {
+                    (index as u64).to_be_bytes().to_vec()
+                };
+                spans.push(Span {
+                    trace_id: trace_id.clone(),
+                    span_id,
+                    parent_span_id,
+                    name: format!("Sift acceptance span {index}"),
+                    start_time_unix_nano: start,
+                    end_time_unix_nano: end,
+                    attributes: vec![KeyValue {
+                        key: "sift.event_id".into(),
+                        value: Some(AnyValue {
+                            value: Some(any_value::Value::StringValue(format!(
+                                "{}-{index}",
+                                args.event_prefix
+                            ))),
+                        }),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                });
+            }
+            ExportTraceServiceRequest {
+                resource_spans: vec![ResourceSpans {
+                    resource: Some(Resource {
+                        attributes: vec![KeyValue {
+                            key: "service.name".into(),
+                            value: Some(AnyValue {
+                                value: Some(any_value::Value::StringValue(
+                                    "sift-acceptance".into(),
+                                )),
+                            }),
+                            ..Default::default()
+                        }],
+                        dropped_attributes_count: 0,
+                        entity_refs: Vec::new(),
+                    }),
+                    scope_spans: vec![ScopeSpans {
+                        scope: None,
+                        spans,
                         schema_url: String::new(),
                     }],
                     schema_url: String::new(),

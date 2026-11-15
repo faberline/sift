@@ -61,3 +61,29 @@ Exit codes: 0 pass (prints `perf ok`), 1 regression (one line per key on
 stderr), 2 bad input (missing key, unreadable file, bad threshold).
 
 Unit tests: `cd tests/perf && python3 -B -m unittest test_check_regression -v`.
+
+## Trace workload
+
+`trace_workload.sh` starts a local `sift`, writes a fixed trace workload as
+OTLP protobuf to `/v1/traces` (one trace per request), reads the written
+traces back with `GET /api/v1/traces/{trace_id}`, and prints one JSON line
+of measured evidence.
+
+Settings, all from the environment:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SIFT_BIN` | `<target>/debug/sift` | sift binary; built with cargo when missing |
+| `WORKLOAD_REQUESTS` | 50 | trace write requests; one trace per request |
+| `WORKLOAD_ITEMS` | 1000 | spans per trace, 1 to 1000 |
+| `WORKLOAD_QUERIES` | 21 | trace reads, cycling over the written traces |
+| `WORKLOAD_PROJECT` | perf | project written and read |
+| `WORKLOAD_OUT` | unset | optional file that also receives the JSON line |
+
+`samples_written` counts the spans written (requests times spans per trace).
+`queried_samples` counts the spans read back in the trace responses. The
+JSON keys and the exit codes are the same as in the metric workload.
+
+`check_regression.py` checks the result against `baseline/trace.json`. That
+baseline is provisional: it comes from a local run, not from the CI machine
+class. Run the checker the same way as for the metric workload.

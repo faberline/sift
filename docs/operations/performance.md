@@ -55,8 +55,32 @@ does not measure small changes.
 3. Read the numbers before you change the threshold. Only a person changes
    the threshold in `ci.yml`.
 
+## Trace workload
+
+The workload is `tests/perf/trace_workload.sh`. It starts sift, writes OTLP
+traces in protobuf to `/v1/traces`, then reads traces back with
+`GET /api/v1/traces/{trace_id}` and reports one JSON line.
+
+CI settings: 50 traces of 1000 spans each (one trace per request), and 21
+trace reads.
+
+These are the values in `tests/perf/baseline/trace.json`.
+
+| Metric | Value |
+|---|---|
+| Throughput (samples per second) | 14033.713 |
+| Query p50 (ms) | 198.413 |
+| Query p95 (ms) | 237.72 |
+| Query p99 (ms) | 239.226 |
+| Peak RSS (KiB) | 446388 |
+| CPU (seconds) | 9.48 |
+
+These numbers are provisional. They come from a local run, not from the CI machine class `ubuntu-24.04`. A person replaces them with the values of the `perf-trace` artifact of the CI job `test-perf`.
+
+The trace gate uses the same threshold as the metric gate; see the "Threshold" section above.
+
 ## Not covered
 
 - The paid load run of 10,000 items per second on GKE is not part of this
   gate. It is tracked by issue #83.
-- Log and trace workloads are not part of this gate.
+- Log workloads are not part of this gate.
