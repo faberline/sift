@@ -9,11 +9,6 @@
 .rig/
 .arena/
 .local/
-.benchmarks/
-.baselines/
-.jet/
-.vite/
-.tdc/state.toml
 mutants.out
 mutants.out.old
 
