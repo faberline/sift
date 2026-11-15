@@ -46,16 +46,21 @@ All progress output goes to stderr.
 
 `check_regression.py` compares one result with a stored baseline:
 
-    python3 check_regression.py <result file> <baseline file> <threshold percent>
+    python3 check_regression.py <result file> <baseline file> <threshold percent> [<upper threshold percent>]
 
 The baseline is `baseline/metric.json`. It holds the six measured keys:
 `samples_per_second`, `query_p50_ms`, `query_p95_ms`, `query_p99_ms`,
 `peak_rss_kib` and `cpu_seconds`.
 
 - Throughput (`samples_per_second`) regresses when it is below
-  `baseline * (1 - threshold / 100)`.
+  `baseline * (1 - threshold / 100)`. `<threshold percent>` applies to it.
 - Latency, memory and CPU keys regress when they are above
-  `baseline * (1 + threshold / 100)`. A value at the limit passes.
+  `baseline * (1 + upper / 100)`. `<upper threshold percent>` applies to them.
+  Without the optional fourth argument, `<threshold percent>` applies to them too.
+  A value at the limit passes.
+
+The metric baseline is the median of 18 CI runs on a fast or slow
+`ubuntu-24.04` runner. CI uses `60` and `130`.
 
 Exit codes: 0 pass (prints `perf ok`), 1 regression (one line per key on
 stderr), 2 bad input (missing key, unreadable file, bad threshold).

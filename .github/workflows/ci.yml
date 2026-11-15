@@ -258,7 +258,7 @@ jobs:
           path: ${{ runner.temp }}/perf-metric.json
           if-no-files-found: error
       - name: regression check
-        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-metric.json" tests/perf/baseline/metric.json 60
+        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-metric.json" tests/perf/baseline/metric.json 60 130
       - name: log workload
         env:
           WORKLOAD_REQUESTS: '50'

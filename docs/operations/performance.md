@@ -19,17 +19,18 @@ These are the values in `tests/perf/baseline/metric.json`.
 
 | Metric | Value |
 |---|---|
-| Throughput (samples per second) | 4914.81 |
-| Query p50 (ms) | 242.545 |
-| Query p95 (ms) | 275.177 |
-| Query p99 (ms) | 500.515 |
-| Peak RSS (KiB) | 298772 |
-| CPU (seconds) | 21.46 |
+| Throughput (samples per second) | 4534.798 |
+| Query p50 (ms) | 258.684 |
+| Query p95 (ms) | 270.601 |
+| Query p99 (ms) | 490.315 |
+| Peak RSS (KiB) | 290336 |
+| CPU (seconds) | 22.825 |
 
-The numbers come from the `perf-metric` artifact of the CI job `test-perf`
-on the `ubuntu-24.04` runner, with the CI settings above. The baseline was
-measured on the CI machine class, not on a developer machine. A person reads
-later CI artifacts and updates the baseline when needed.
+The numbers are medians of 18 CI runs of the CI job `test-perf` on the
+`ubuntu-24.04` runner, made on 2026-11-14 and 2026-11-15, with the CI settings
+above. The runner is either a fast or a slow machine. A slow machine is about
+1.8 times slower, and one job keeps one machine. A person reads later CI
+artifacts and updates the baseline when needed.
 
 ## Machine class
 
@@ -37,11 +38,13 @@ GitHub-hosted runner `ubuntu-24.04`, job `test-perf`.
 
 ## Threshold
 
-The threshold is 60 percent.
+CI passes two thresholds: `60` for throughput and `130` for the other keys.
 
 - Throughput must not fall below 40 percent of the baseline.
-- Query latency, peak RSS and CPU must not rise above 160 percent of the
-  baseline.
+- Query latency, peak RSS and CPU must not rise above 230 percent of the
+  baseline. The limit is set so that the slowest measured run (p99 954.58 ms,
+  CPU 44.78 s) passes with about 15 percent margin. A regression that is
+  smaller than the runner spread is not caught.
 
 `check_regression.py` compares each key with the baseline. A value exactly at
 the limit passes. Exit code 0 means pass, 1 means a regression, and 2 means

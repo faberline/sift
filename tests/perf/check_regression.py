@@ -1,6 +1,9 @@
 """Compare a metric workload result with a stored baseline.
 
-Usage: check_regression.py <result file> <baseline file> <threshold percent>
+Usage: check_regression.py <result file> <baseline file> <threshold percent> [<upper threshold percent>]
+
+The optional upper threshold applies to the latency, memory and CPU keys.
+Without it, the threshold applies to them too.
 
 Exit codes: 0 pass, 1 regression, 2 bad input.
 """
@@ -32,9 +35,16 @@ def _number(value, where):
     return float(value)
 
 
-def check(result, baseline, threshold):
-    """Return one message per regression. An empty list means pass."""
+def check(result, baseline, threshold, upper_threshold=None):
+    """Return one message per regression. An empty list means pass.
+
+    `threshold` applies to throughput. `upper_threshold` applies to the
+    latency, memory and CPU keys; when it is None it equals `threshold`.
+    """
+    if upper_threshold is None:
+        upper_threshold = threshold
     t = threshold / 100.0
+    u = upper_threshold / 100.0
     messages = []
     for key in KEYS:
         if key not in result:
@@ -52,7 +62,7 @@ def check(result, baseline, threshold):
                     f"regression: {key} result={r} baseline={b} limit={limit}"
                 )
         else:
-            limit = b * (1 + t)
+            limit = b * (1 + u)
             if r > limit:
                 messages.append(
                     f"regression: {key} result={r} baseline={b} limit={limit}"
@@ -84,17 +94,18 @@ def _threshold(text):
 
 
 def main(argv):
-    if len(argv) != 3:
+    if len(argv) not in (3, 4):
         print(
-            "usage: check_regression.py <result file> <baseline file> <threshold percent>",
+            "usage: check_regression.py <result file> <baseline file> <threshold percent> [<upper threshold percent>]",
             file=sys.stderr,
         )
         return 2
     try:
         threshold = _threshold(argv[2])
+        upper_threshold = _threshold(argv[3]) if len(argv) == 4 else None
         result = _read_result(argv[0])
         baseline = _read_baseline(argv[1])
-        messages = check(result, baseline, threshold)
+        messages = check(result, baseline, threshold, upper_threshold)
     except (OSError, json.JSONDecodeError, InputError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
