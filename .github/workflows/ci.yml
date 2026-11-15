@@ -170,6 +170,10 @@ jobs:
         run: python3 -B -m unittest discover -s scripts -p 'test_verify_alert_runbook.py' -v
       - name: alert runbook check
         run: python3 -B scripts/verify-alert-runbook.py
+      - name: limits doc unit tests
+        run: python3 -B -m unittest discover -s scripts -p 'test_verify_limits_doc.py' -v
+      - name: limits doc check
+        run: python3 -B scripts/verify-limits-doc.py
 
   test-coverage:
     name: "test: workspace, coverage"
