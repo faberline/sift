@@ -61,3 +61,22 @@ Exit codes: 0 pass (prints `perf ok`), 1 regression (one line per key on
 stderr), 2 bad input (missing key, unreadable file, bad threshold).
 
 Unit tests: `cd tests/perf && python3 -B -m unittest test_check_regression -v`.
+
+# Log workload
+
+`log_workload.sh` starts a local `sift`, writes a fixed log workload as OTLP
+logs (protobuf) to `/v1/logs`, runs three fixed log queries, and prints one
+JSON line of measured evidence.
+
+It takes the same settings as the metric workload (`SIFT_BIN`,
+`WORKLOAD_REQUESTS`, `WORKLOAD_ITEMS`, `WORKLOAD_QUERIES`, `WORKLOAD_PROJECT`,
+`WORKLOAD_OUT`, `WORKLOAD_BASE_MS`). `samples_written` counts log records
+written, and `queried_samples` counts records returned by the queries. The
+three fixed queries are log queries with no time range: all logs, logs with
+`severity_number` 9, and the one record `wl-0-0`.
+
+`check_regression.py` checks a log result against `baseline/log.json` with
+the same six keys and the same rules as the metric baseline.
+
+    bash tests/perf/log_workload.sh
+    python3 -B tests/perf/check_regression.py <result file> tests/perf/baseline/log.json 60
