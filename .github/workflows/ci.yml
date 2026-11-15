@@ -145,6 +145,13 @@ jobs:
       - name: deployment artifacts
         run: |
           "$RUNNER_TEMP/venv/bin/python" scripts/verify-deployment-artifacts.py
+      - name: configuration page unit tests
+        working-directory: scripts
+        run: '"$RUNNER_TEMP/venv/bin/python" -B -m unittest test_verify_configuration_doc -v'
+      - name: build sift binary
+        run: cargo build --locked -p sift --bin sift
+      - name: configuration page check
+        run: '"$RUNNER_TEMP/venv/bin/python" -B scripts/verify-configuration-doc.py --sift-bin target/debug/sift'
       - name: restore drill unit tests
         working-directory: k8s/gke-test-job/restore-drill
         run: python3 -m unittest test_drill -v
