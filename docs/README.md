@@ -17,6 +17,7 @@ and [`llms.txt`](../llms.txt).
 | [operations/public-tls.md](operations/public-tls.md) | Public API over TLS: host, certificate, Ingress and the verify check. |
 | [operations/upgrade.md](operations/upgrade.md) | Version compatibility policy, rolling upgrade order and rollback rule. |
 | [operations/runbook.md](operations/runbook.md) | Data-plane runbook: health, metrics, voter loss, restore, collector replay, rejected data. |
+| [operations/install.md](operations/install.md) | The four install paths (install.sh, container image, Compose, Kubernetes) and how each command is tested. |
 | [operations/configuration.md](operations/configuration.md) | Every CLI flag, environment variable and CRD field with default and meaning. |
 | [operations/limits.md](operations/limits.md) | Every limit with its value and where the code enforces it, and the known limits of this release. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
