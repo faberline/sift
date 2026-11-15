@@ -216,6 +216,7 @@ result = {
     "samples_per_second": round(samples / elapsed, 3),
     "query_p50_ms": round(nearest_rank(0.50), 3),
     "query_p95_ms": round(nearest_rank(0.95), 3),
+    "query_p99_ms": round(nearest_rank(0.99), 3),
     "peak_rss_kib": peak_rss_kib,
     "cpu_seconds": round(cpu_seconds, 3),
     "requests": requests,
