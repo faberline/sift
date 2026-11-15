@@ -47,6 +47,7 @@ mod projection_runtime;
 mod prometheus_api;
 mod prometheus_comparison_script;
 mod prometheus_semantics;
+mod property;
 mod query_pagination;
 mod raft_batch;
 mod raft_dedupe_determinism;
