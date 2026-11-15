@@ -4,14 +4,7 @@
 # use **/ forms — a bare `target/` only matches the context root.
 target/
 **/target/
-target-linux/
-**/target-linux/
-target-linux-*/
-**/target-linux-*/
 .git/
 .vat/
 **/.vat/
-**/node_modules/
 **/*.log
-pkg/
-**/*.png
