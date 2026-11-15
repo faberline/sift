@@ -55,8 +55,33 @@ does not measure small changes.
 3. Read the numbers before you change the threshold. Only a person changes
    the threshold in `ci.yml`.
 
+## Log workload
+
+The workload is `tests/perf/log_workload.sh`. It starts sift, writes OTLP logs
+(protobuf) to `/v1/logs`, then runs three fixed log queries and reports one
+JSON line.
+
+Settings: 50 requests of 1000 records each, and 21 queries (each of the three
+queries runs 7 times).
+
+| Metric | Value |
+|---|---|
+| Throughput (samples per second) | 15539.516 |
+| Query p50 (ms) | 4.1 |
+| Query p95 (ms) | 7.715 |
+| Query p99 (ms) | 71.058 |
+| Peak RSS (KiB) | 485608 |
+| CPU (seconds) | 3.99 |
+
+These numbers are provisional. They come from a local run, not from the CI
+machine class `ubuntu-24.04`. A person replaces them with the values of the
+`perf-log` artifact of the CI job `test-perf`.
+
+The threshold is 60 percent, the same as in the metric section above
+("Threshold"). The baseline is `tests/perf/baseline/log.json`.
+
 ## Not covered
 
 - The paid load run of 10,000 items per second on GKE is not part of this
   gate. It is tracked by issue #83.
-- Log and trace workloads are not part of this gate.
+- The trace workload is tracked by issue #131.
