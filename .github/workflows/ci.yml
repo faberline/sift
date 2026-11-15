@@ -255,6 +255,21 @@ jobs:
           if-no-files-found: error
       - name: regression check
         run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-metric.json" tests/perf/baseline/metric.json 60
+      - name: log workload
+        env:
+          WORKLOAD_REQUESTS: '50'
+          WORKLOAD_ITEMS: '1000'
+          WORKLOAD_QUERIES: '21'
+          WORKLOAD_OUT: ${{ runner.temp }}/perf-log.json
+        run: bash tests/perf/log_workload.sh
+      - name: upload log result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-log
+          path: ${{ runner.temp }}/perf-log.json
+          if-no-files-found: error
+      - name: log regression check
+        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-log.json" tests/perf/baseline/log.json 60
       - name: trace workload
         env:
           WORKLOAD_REQUESTS: '50'

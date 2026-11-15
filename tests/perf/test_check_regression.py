@@ -49,6 +49,32 @@ class CheckRegression(unittest.TestCase):
         result = with_values(query_p50_ms=15)
         self.assertEqual(check_regression.check(result, baseline, 50), [])
 
+    def test_log_baseline_has_every_compared_key(self):
+        path = Path(__file__).parent / "baseline" / "log.json"
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+        for key in (
+            "samples_per_second",
+            "query_p50_ms",
+            "query_p95_ms",
+            "query_p99_ms",
+            "peak_rss_kib",
+            "cpu_seconds",
+        ):
+            self.assertIn(key, baseline)
+            self.assertIsInstance(baseline[key], (int, float))
+            self.assertGreater(baseline[key], 0, key)
+
+    def test_log_baseline_fails_when_exceeded_and_passes_unchanged(self):
+        path = Path(__file__).parent / "baseline" / "log.json"
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(check_regression.check(baseline, baseline, 60), [])
+
+        bad = dict(baseline)
+        bad["query_p95_ms"] = baseline["query_p95_ms"] * 1.7
+        messages = check_regression.check(bad, baseline, 60)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("query_p95_ms", messages[0])
+
     def test_main_exit_codes(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
