@@ -61,6 +61,7 @@ The baseline is `baseline/metric.json`. It holds the six measured keys:
 
 The metric baseline is the median of 18 CI runs on a fast or slow
 `ubuntu-24.04` runner. CI uses `60` and `130`.
+The log baseline is the median of 7 CI runs; CI uses `60` and `175` for the log check.
 
 Exit codes: 0 pass (prints `perf ok`), 1 regression (one line per key on
 stderr), 2 bad input (missing key, unreadable file, bad threshold).

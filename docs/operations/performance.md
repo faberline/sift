@@ -69,19 +69,24 @@ queries runs 7 times).
 
 | Metric | Value |
 |---|---|
-| Throughput (samples per second) | 4874.039 |
-| Query p50 (ms) | 6.751 |
-| Query p95 (ms) | 12.382 |
-| Query p99 (ms) | 86.856 |
-| Peak RSS (KiB) | 501616 |
-| CPU (seconds) | 15.54 |
+| Throughput (samples per second) | 4450.856 |
+| Query p50 (ms) | 6.716 |
+| Query p95 (ms) | 12.864 |
+| Query p99 (ms) | 87.914 |
+| Peak RSS (KiB) | 503216 |
+| CPU (seconds) | 17.31 |
 
-These numbers come from the `perf-log` artifact of the CI job `test-perf` on
-the `ubuntu-24.04` runner (run 43687463792). A person replaces them when a
-later CI run shows the numbers are off.
+These numbers are the medians of 7 CI runs of 2026-11-14/15 on the
+`ubuntu-24.04` runner (5 fast and 2 slow machines; the slow machine is about
+1.3 to 1.8 times slower). A person replaces them when a later CI run shows
+the numbers are off.
 
-The threshold is 60 percent, the same as in the metric section above
-("Threshold"). The baseline is `tests/perf/baseline/log.json`.
+CI passes the thresholds 60 for throughput and 175 for the other keys: latency,
+peak RSS and CPU must not rise above 275 percent of the baseline. The limit is
+set so that the slowest measured run (p99 206.124 ms, CPU 22.85 s) passes with
+about 17 percent margin. The p99 value of this workload varies from 78 to
+206 ms between runs, so a smaller regression is not caught. The baseline is
+`tests/perf/baseline/log.json`.
 
 ## Not covered
 

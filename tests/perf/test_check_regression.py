@@ -23,6 +23,15 @@ SLOW_RUN = {
     "cpu_seconds": 44.78,
 }
 
+SLOW_LOG_RUN = {
+    "samples_per_second": 2851.052,
+    "query_p50_ms": 8.889,
+    "query_p95_ms": 23.01,
+    "query_p99_ms": 206.124,
+    "peak_rss_kib": 505784,
+    "cpu_seconds": 22.85,
+}
+
 
 def with_values(**changes):
     result = dict(BASELINE)
@@ -181,6 +190,34 @@ class CheckRegression(unittest.TestCase):
                 ),
                 2,
             )
+
+    def test_log_baseline_accepts_slow_runner(self):
+        path = Path(__file__).parent / "baseline" / "log.json"
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(check_regression.check(SLOW_LOG_RUN, baseline, 60, 175), [])
+        self.assertNotEqual(check_regression.check(SLOW_LOG_RUN, baseline, 60), [])
+        self.assertEqual(check_regression.check(baseline, baseline, 60, 175), [])
+
+    def test_log_baseline_still_catches_large_regression(self):
+        path = Path(__file__).parent / "baseline" / "log.json"
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+        for key in ("query_p50_ms", "query_p95_ms", "query_p99_ms", "cpu_seconds"):
+            bad = dict(baseline, **{key: baseline[key] * 3})
+            messages = check_regression.check(bad, baseline, 60, 175)
+            self.assertEqual(len(messages), 1, key)
+            self.assertIn(key, messages[0])
+
+        bad = dict(baseline, samples_per_second=baseline["samples_per_second"] / 3)
+        messages = check_regression.check(bad, baseline, 60, 175)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("samples_per_second", messages[0])
+
+    def test_ci_log_check_uses_upper_threshold(self):
+        ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+        text = ci.read_text(encoding="utf-8")
+        self.assertIn("tests/perf/baseline/log.json 60 175", text)
+        self.assertIn("tests/perf/baseline/metric.json 60 130", text)
+        self.assertNotIn("log.json 60\n", text)
 
     def test_ci_metric_check_uses_upper_threshold(self):
         ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
