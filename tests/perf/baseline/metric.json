@@ -1,8 +1,8 @@
 {
-  "samples_per_second": 16232.955,
-  "query_p50_ms": 71.919,
-  "query_p95_ms": 113.95,
-  "query_p99_ms": 252.746,
-  "peak_rss_kib": 276212,
-  "cpu_seconds": 5.68
+  "samples_per_second": 4914.81,
+  "query_p50_ms": 242.545,
+  "query_p95_ms": 275.177,
+  "query_p99_ms": 500.515,
+  "peak_rss_kib": 298772,
+  "cpu_seconds": 21.46
 }

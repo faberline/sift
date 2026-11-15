@@ -19,16 +19,17 @@ These are the values in `tests/perf/baseline/metric.json`.
 
 | Metric | Value |
 |---|---|
-| Throughput (samples per second) | 16232.955 |
-| Query p50 (ms) | 71.919 |
-| Query p95 (ms) | 113.95 |
-| Query p99 (ms) | 252.746 |
-| Peak RSS (KiB) | 276212 |
-| CPU (seconds) | 5.68 |
+| Throughput (samples per second) | 4914.81 |
+| Query p50 (ms) | 242.545 |
+| Query p95 (ms) | 275.177 |
+| Query p99 (ms) | 500.515 |
+| Peak RSS (KiB) | 298772 |
+| CPU (seconds) | 21.46 |
 
-The baseline came from one run in the cloud session, with the CI settings
-above. The first CI artifact `perf-metric` is the first result from
-the CI machine class. A person reads it and then updates the baseline.
+The numbers come from the `perf-metric` artifact of the CI job `test-perf`
+on the `ubuntu-24.04` runner, with the CI settings above. The baseline was
+measured on the CI machine class, not on a developer machine. A person reads
+later CI artifacts and updates the baseline when needed.
 
 ## Machine class
 
