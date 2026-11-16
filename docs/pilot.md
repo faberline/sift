@@ -22,11 +22,12 @@ tracks each expected ID. Each returned record must match its saved input.
 Build Sift from the source you want to test:
 
 ```sh
+W="${SIFT_WORK_DIR:-$PWD/work}"
 SIFT_SOURCE_REVISION="$(git rev-parse HEAD)" \
   cargo build --locked -p sift --bin sift
 python3 -B scripts/production/run_pilot.py \
   --binary target/debug/sift \
-  --output-dir /private/tmp/sift-pilot-run \
+  --output-dir "$W/sift-pilot-run" \
   --seconds 1800 --rate 100
 ```
 
@@ -45,9 +46,10 @@ a read-only root filesystem, no Linux capabilities, and limited CPU and RAM.
 It removes only the receiver container that it created.
 
 ```sh
+W="${SIFT_WORK_DIR:-$PWD/work}"
 python3 -B scripts/production/run_pilot.py \
   --binary target/debug/sift \
-  --output-dir /private/tmp/sift-pilot-run \
+  --output-dir "$W/sift-pilot-run" \
   --seconds 1800 --rate 100 \
   --receiver-image sha256:REPLACE_WITH_LOCAL_PYTHON_IMAGE_ID
 ```

@@ -164,12 +164,13 @@ Preparation refuses sources outside that namespace or the cluster project.
 Sample entries must also match the exact cluster name and location.
 
 ```sh
+W="${SIFT_WORK_DIR:-$PWD/work}"
 python3 -B scripts/production/prepare.py \
-  --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-  --config /private/tmp/sift-production/config.json \
-  --cluster /private/tmp/sift-production/cluster.json \
-  --samples /private/tmp/sift-production/samples.json \
-  --output-dir /private/tmp/sift-production/prepared
+  --candidate-manifest "$W/final-candidate-manifest.json" \
+  --config "$W/config.json" \
+  --cluster "$W/cluster.json" \
+  --samples "$W/samples.json" \
+  --output-dir "$W/prepared"
 ```
 
 The command writes `instance.json` and `preflight.json`. It does not deploy.
@@ -188,11 +189,12 @@ It checks the permanent cluster ID, image digests, voter placement, readiness,
 and Secret mounts. It records the observation time for the external probe. It does not deploy or certify load.
 
 ```sh
+W="${SIFT_WORK_DIR:-$PWD/work}"
 python3 -B scripts/production/verify_runtime.py \
-  --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-  --prepared-dir /private/tmp/sift-production/prepared \
-  --kubeconfig /private/tmp/sift-production/kubeconfig \
-  --output /private/tmp/sift-production/runtime-check.json
+  --candidate-manifest "$W/final-candidate-manifest.json" \
+  --prepared-dir "$W/prepared" \
+  --kubeconfig "$W/kubeconfig" \
+  --output "$W/runtime-check.json"
 ```
 
 Read the existing public HTTPS `/readyz` check in the same GCP project.
@@ -201,13 +203,14 @@ after its end so Monitoring can publish the points. Use an unauthenticated
 public check with TLS certificate validation.
 
 ```sh
+W="${SIFT_WORK_DIR:-$PWD/work}"
 python3 -B scripts/production/capture_external_availability.py \
-  --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-  --prepared-dir /private/tmp/sift-production/prepared \
-  --runtime-check /private/tmp/sift-production/runtime-check.json \
+  --candidate-manifest "$W/final-candidate-manifest.json" \
+  --prepared-dir "$W/prepared" \
+  --runtime-check "$W/runtime-check.json" \
   --endpoint "$SIFT_PROBE_ENDPOINT" --check-id "$SIFT_UPTIME_CHECK_ID" \
   --start "$SIFT_PROBE_START_UTC" --end "$SIFT_PROBE_END_UTC" \
-  --output /private/tmp/sift-production/evidence/external-availability-observation.json
+  --output "$W/evidence/external-availability-observation.json"
 ```
 
 Expose log collector metrics with `sift collect --metrics-port 9318`.
@@ -246,15 +249,16 @@ The Webhook reference must already exist in the configured Secret.
 Run `load_30m` first. Use `load_24h` with the same candidate after it passes.
 
 ```sh
+W="${SIFT_WORK_DIR:-$PWD/work}"
 python3 -B scripts/production/run_load.py \
-  --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-  --prepared-dir /private/tmp/sift-production/prepared \
-  --samples /private/tmp/sift-production/samples.json \
-  --kubeconfig /private/tmp/sift-production/kubeconfig \
-  --token-file /private/tmp/sift-production/admin-token \
+  --candidate-manifest "$W/final-candidate-manifest.json" \
+  --prepared-dir "$W/prepared" \
+  --samples "$W/samples.json" \
+  --kubeconfig "$W/kubeconfig" \
+  --token-file "$W/admin-token" \
   --webhook-reference validation \
   --gate load_30m \
-  --output-dir /private/tmp/sift-production/load-30m
+  --output-dir "$W/load-30m"
 ```
 
 The load output proves only its own gate. Measure Webhook delivery separately.

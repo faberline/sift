@@ -34,6 +34,7 @@ mod mcp_surface;
 mod metric_store;
 mod metric_workload_script;
 mod operational_cli;
+mod operator_doc_paths;
 mod operator_reconcile_oracle;
 mod otlp_gcp_ingest;
 mod otlp_grpc;

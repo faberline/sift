@@ -2,7 +2,7 @@
 
 This runbook orders the 13 gates of the 0.2.0 production contract in
 `docs/production-v1.md`. It does not change that contract. Work directory:
-`W=/private/tmp/sift-production`. Keep every file in `$W` private; do not commit them.
+`W="${SIFT_WORK_DIR:-$PWD/work}"`. Keep every file in `$W` private; do not commit them.
 
 ## Before you start
 
@@ -35,51 +35,51 @@ Dispatch needs the user's approval of the figure in docs/operations/production-a
 
    ```sh
    python3 -B scripts/production/prepare.py \
-     --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-     --config /private/tmp/sift-production/config.json \
-     --cluster /private/tmp/sift-production/cluster.json \
-     --samples /private/tmp/sift-production/samples.json \
-     --output-dir /private/tmp/sift-production/prepared
+     --candidate-manifest "$W/final-candidate-manifest.json" \
+     --config "$W/config.json" \
+     --cluster "$W/cluster.json" \
+     --samples "$W/samples.json" \
+     --output-dir "$W/prepared"
    ```
 
 3. Verify the live runtime (`docs/production-v1.md`):
 
    ```sh
    python3 -B scripts/production/verify_runtime.py \
-     --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-     --prepared-dir /private/tmp/sift-production/prepared \
-     --kubeconfig /private/tmp/sift-production/kubeconfig \
-     --output /private/tmp/sift-production/runtime-check.json
+     --candidate-manifest "$W/final-candidate-manifest.json" \
+     --prepared-dir "$W/prepared" \
+     --kubeconfig "$W/kubeconfig" \
+     --output "$W/runtime-check.json"
    ```
 
 4. Capture the external availability observation (`docs/production-v1.md`):
 
    ```sh
    python3 -B scripts/production/capture_external_availability.py \
-     --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-     --prepared-dir /private/tmp/sift-production/prepared \
-     --runtime-check /private/tmp/sift-production/runtime-check.json \
+     --candidate-manifest "$W/final-candidate-manifest.json" \
+     --prepared-dir "$W/prepared" \
+     --runtime-check "$W/runtime-check.json" \
      --endpoint "$SIFT_PROBE_ENDPOINT" --check-id "$SIFT_UPTIME_CHECK_ID" \
      --start "$SIFT_PROBE_START_UTC" --end "$SIFT_PROBE_END_UTC" \
-     --output /private/tmp/sift-production/evidence/external-availability-observation.json
+     --output "$W/evidence/external-availability-observation.json"
    ```
 
 5. Load gate `load_30m` (`docs/production-v1.md`):
 
    ```sh
    python3 -B scripts/production/run_load.py \
-     --candidate-manifest /private/tmp/sift-production/final-candidate-manifest.json \
-     --prepared-dir /private/tmp/sift-production/prepared \
-     --samples /private/tmp/sift-production/samples.json \
-     --kubeconfig /private/tmp/sift-production/kubeconfig \
-     --token-file /private/tmp/sift-production/admin-token \
+     --candidate-manifest "$W/final-candidate-manifest.json" \
+     --prepared-dir "$W/prepared" \
+     --samples "$W/samples.json" \
+     --kubeconfig "$W/kubeconfig" \
+     --token-file "$W/admin-token" \
      --webhook-reference validation \
      --gate load_30m \
-     --output-dir /private/tmp/sift-production/load-30m
+     --output-dir "$W/load-30m"
    ```
 
 6. Load gate `load_24h`: the same command with `--gate load_24h` and
-   `--output-dir /private/tmp/sift-production/load-24h`. Run it only after `load_30m` passes.
+   `--output-dir "$W/load-24h"`. Run it only after `load_30m` passes.
 
 7. Fault drills. Four drills are required: `node failure`, `PVC replacement`,
    `long GCS outage` and `whole-disk restore`.
