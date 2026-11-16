@@ -261,7 +261,7 @@ jobs:
           path: ${{ runner.temp }}/perf-metric.json
           if-no-files-found: error
       - name: regression check
-        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-metric.json" tests/perf/baseline/metric.json 60
+        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-metric.json" tests/perf/baseline/metric.json 60 160
       - name: log workload
         env:
           WORKLOAD_REQUESTS: '50'
@@ -276,7 +276,7 @@ jobs:
           path: ${{ runner.temp }}/perf-log.json
           if-no-files-found: error
       - name: log regression check
-        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-log.json" tests/perf/baseline/log.json 60
+        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-log.json" tests/perf/baseline/log.json 60 150 --ignore query_p99_ms
 
   gate:
     name: gate

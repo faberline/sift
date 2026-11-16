@@ -225,12 +225,14 @@ def render(directory, sift, version):
     require(container["image"] == IMAGE, "smoke workload has the wrong image digest")
     require(container["readinessProbe"]["httpGet"] == {"path": "/readyz", "port": "http"}
             and service["ports"][0]["targetPort"] == "http", "smoke readiness does not match the service")
+    require([port["port"] for port in service["ports"]] == [7380, 4317],
+            "smoke service must expose only ports 7380 and 4317")
     require(policy["podSelector"]["matchLabels"] == service["selector"] == template["metadata"]["labels"]
             and policy["policyTypes"] == ["Ingress"]
             and policy["ingress"] == [{
                 "from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "sift-smoke-probe"}}}],
-                "ports": [{"port": service["ports"][0]["port"], "protocol": "TCP"}],
-            }], "smoke network policy must allow only the probe to reach the service port")
+                "ports": [{"port": 7380, "protocol": "TCP"}, {"port": 4317, "protocol": "TCP"}],
+            }], "smoke network policy must allow only the probe to reach ports 7380 and 4317")
 
     restore = k8s / "overlays/gke-restore-drill"
     kustomization = restore / "kustomization.yaml"
