@@ -155,6 +155,9 @@ jobs:
       - name: restore drill unit tests
         working-directory: k8s/gke-test-job/restore-drill
         run: python3 -m unittest test_drill -v
+      - name: smoke unit tests
+        working-directory: k8s/gke-test-job/smoke
+        run: python3 -m unittest test_smoke -v
       - name: production acceptance unit tests
         working-directory: scripts/production
         run: |
