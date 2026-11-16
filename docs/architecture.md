@@ -116,11 +116,13 @@ cargo clippy --locked --all-targets
 cargo test --locked --no-fail-fast
 ```
 
-Run the architecture check from the workspace repository:
+Run the architecture check from the repository root (it needs `uv` and a local or fetched `main` commit):
 
 ```sh
-scripts/meta/rust_arch_contract.py check --repo sift --strict --base main
+scripts/check-architecture.sh
 ```
+
+The script runs the rust-arch contract checker in strict mode against the `main` commit.
 
 The completion check has zero architecture errors and warnings.
 There are no exceptions to suppress a finding.
@@ -130,5 +132,3 @@ No measured source file is above 400 lines.
 
 [ADR 0001](adr/0001-ddd-layout.md) records the original layout.
 [ADR 0002](adr/0002-ddd-p2.md) records the P2 batches.
-[The completion report](refactor-completion.md) lists local commits, test counts
-and the existing test and document limits.

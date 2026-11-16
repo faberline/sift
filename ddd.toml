@@ -1,5 +1,5 @@
-# Sift's bounded contexts and layers, checked by the workspace's
-# rust-arch contract (scripts/meta/rust_arch_contract.py). The [policy] table
+# Sift's bounded contexts and layers, checked by the
+# rust-arch contract (`scripts/check-architecture.sh`). The [policy] table
 # is copied verbatim from the canonical policy.toml; everything after it is
 # Sift's own.
 schema = 1

@@ -9,7 +9,7 @@
 ## Context
 
 Every faberlines Rust repo is being brought under one architecture contract,
-checked by the workspace repo's `scripts/meta/rust_arch_contract.py` against a
+checked by this repository's `scripts/check-architecture.sh` against a
 `ddd.toml` at the repo root. Before this change Sift was 46 source files and
 30,188 lines, with most of the service in two files: `src/lib.rs` (5,560
 lines) and `src/bin/sift.rs` (1,702 lines). The first check, at workspace
@@ -144,5 +144,4 @@ Service state is private and archive services have no journal ownership cycle.
 X7, X8 and X9 are complete. Domain still receives time explicitly.
 The architecture checker and its policy remain unchanged.
 The historical P1 exceptions above are no longer active.
-See [ADR 0002](0002-ddd-p2.md) and the
-[completion report](../refactor-completion.md) for local validation and limits.
+See [ADR 0002](0002-ddd-p2.md) for the P2 validation and limits.
