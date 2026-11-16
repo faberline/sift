@@ -18,7 +18,7 @@ fn emits_candidate_build_provenance_as_json() {
 use metrics_remote_write::proto::WriteRequest;
 use prost::Message as _;
 use prost14::Message as _;
-use transport_otlp::proto::ExportLogsServiceRequest;
+use transport_otlp::proto::{ExportLogsServiceRequest, ExportTraceServiceRequest};
 
 #[test]
 fn emits_valid_otlp_logs_protobuf_with_unique_event_ids() {
@@ -63,6 +63,87 @@ fn emits_valid_otlp_logs_protobuf_with_unique_event_ids() {
         })
         .collect::<Vec<_>>();
     assert_eq!(event_ids, ["fixture-0", "fixture-1", "fixture-2"]);
+}
+
+#[test]
+fn emits_valid_otlp_traces_protobuf_as_one_span_chain() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sift"))
+        .args([
+            "acceptance-payload",
+            "--kind",
+            "otlp-traces-protobuf",
+            "--items",
+            "3",
+            "--project",
+            "project-a",
+            "--event-prefix",
+            "fixture",
+            "--timestamp-unix-nano",
+            "1700000000000000000",
+        ])
+        .output()
+        .expect("run acceptance payload generator");
+    assert!(output.status.success(), "{output:?}");
+
+    let request = ExportTraceServiceRequest::decode(output.stdout.as_slice())
+        .expect("decode generated OTLP trace protobuf");
+    let spans = &request.resource_spans[0].scope_spans[0].spans;
+    assert_eq!(spans.len(), 3);
+
+    let trace_id = hex::decode(format!("{:032x}", 1_700_000_000_000_000_000u128)).unwrap();
+    for span in spans {
+        assert_eq!(span.trace_id, trace_id);
+    }
+    assert_eq!(spans[0].span_id, 1u64.to_be_bytes().to_vec());
+    assert_eq!(spans[1].span_id, 2u64.to_be_bytes().to_vec());
+    assert_eq!(spans[2].span_id, 3u64.to_be_bytes().to_vec());
+    assert!(spans[0].parent_span_id.is_empty());
+    assert_eq!(spans[1].parent_span_id, spans[0].span_id);
+    assert_eq!(spans[2].parent_span_id, spans[1].span_id);
+    assert_eq!(spans[2].start_time_unix_nano, 1_700_000_000_000_002_000);
+    for span in spans {
+        assert_eq!(span.end_time_unix_nano, span.start_time_unix_nano + 500);
+    }
+    assert_eq!(spans[1].name, "Sift acceptance span 1");
+
+    let event_id = spans[2]
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key == "sift.event_id")
+        .and_then(|attribute| attribute.value.as_ref())
+        .and_then(|value| value.value.as_ref())
+        .map(|value| match value {
+            transport_otlp::proto::any_value::Value::StringValue(value) => value.as_str(),
+            _ => panic!("event id must be a string"),
+        })
+        .expect("event id attribute");
+    assert_eq!(event_id, "fixture-2");
+}
+
+#[test]
+fn traces_payload_rejects_a_zero_timestamp() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sift"))
+        .args([
+            "acceptance-payload",
+            "--kind",
+            "otlp-traces-protobuf",
+            "--items",
+            "3",
+            "--project",
+            "project-a",
+            "--event-prefix",
+            "fixture",
+            "--timestamp-unix-nano",
+            "0",
+        ])
+        .output()
+        .expect("run acceptance payload generator");
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("must be above zero for traces"),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]

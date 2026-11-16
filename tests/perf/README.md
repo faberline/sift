@@ -87,3 +87,22 @@ the same six keys and the same rules as the metric baseline.
 
     bash tests/perf/log_workload.sh
     python3 -B tests/perf/check_regression.py <result file> tests/perf/baseline/log.json 60
+
+# Trace workload
+
+`trace_workload.sh` starts a local `sift`, writes a fixed trace workload as
+OTLP traces (protobuf) to `/v1/traces`, reads the written traces back with
+`GET /api/v1/traces/{trace_id}`, and prints one JSON line of measured evidence.
+Each request writes one trace, so `WORKLOAD_REQUESTS` is the number of traces
+and `WORKLOAD_ITEMS` is the number of spans in each trace.
+
+It takes the same settings as the metric workload, except
+`WORKLOAD_KEEP_RESPONSES`. `samples_written` counts spans written, and
+`queried_samples` counts spans returned by the trace reads. Each read uses the
+trace of request `k % requests`.
+
+`check_regression.py` checks a trace result against `baseline/trace.json` with
+the same six keys and the same rules as the metric baseline.
+
+    bash tests/perf/trace_workload.sh
+    python3 -B tests/perf/check_regression.py <result file> tests/perf/baseline/trace.json 60

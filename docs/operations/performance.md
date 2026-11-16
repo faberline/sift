@@ -88,8 +88,32 @@ regression passes every run. The limits for p50, p95 and CPU pass the slowest
 of 18 measured runs with at least 50 percent margin. The baseline is
 `tests/perf/baseline/log.json`.
 
+## Trace workload
+
+The workload is `tests/perf/trace_workload.sh`. It starts sift, writes OTLP
+traces (protobuf) to `/v1/traces`, then reads the traces back with
+`GET /api/v1/traces/{trace_id}` and reports one JSON line.
+
+Settings: 50 requests, one trace of 1000 spans per request, and 21 trace reads.
+
+| Metric | Value |
+|---|---|
+| Throughput (samples per second) | 4029.727 |
+| Query p50 (ms) | 676.363 |
+| Query p95 (ms) | 680.546 |
+| Query p99 (ms) | 683.482 |
+| Peak RSS (KiB) | 466192 |
+| CPU (seconds) | 32.65 |
+
+These numbers come from the `perf-trace` artifact of the CI job `test-perf` on
+the `ubuntu-24.04` runner. A person replaces them when a later CI run shows the
+numbers are off.
+
+CI passes the threshold 60 for every key: throughput must not fall below 40
+percent of the baseline, and latency, peak RSS and CPU must not rise above 160
+percent of the baseline. The baseline is `tests/perf/baseline/trace.json`.
+
 ## Not covered
 
 - The paid load run of 10,000 items per second on GKE is not part of this
   gate. It is tracked by issue #83.
-- The trace workload is tracked by issue #131.
