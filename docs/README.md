@@ -9,7 +9,6 @@ and [`llms.txt`](../llms.txt).
 | [production-v1.md](production-v1.md) | The 0.2.0 inputs, control state, query, load, recovery, and cutover contract. |
 | [architecture.md](architecture.md) | How the source is cut into bounded contexts and layers, ports, shared service ownership and the dependency rules. |
 | [public-api.md](public-api.md) | Public Rust paths and the unchanged CLI, API and persisted byte contracts. |
-| [refactor-completion.md](refactor-completion.md) | Local P2 commits, checks, added cases and the existing test and document limits. |
 | [glossary.md](glossary.md) | The terms Sift's code and docs use, and the ones that mean something different in other repos. |
 | [domain/contexts.md](domain/contexts.md) | One section per context: what it owns, its services, ports and adapters. |
 | [adr/](adr/0001-ddd-layout.md) | Architecture decisions and the reasons behind them. |
@@ -25,6 +24,5 @@ and [`llms.txt`](../llms.txt).
 | [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
 
 The architecture contract itself is [`ddd.toml`](../ddd.toml) at the repository
-root, checked by the workspace's rust-arch contract
-(`scripts/meta/rust_arch_contract.py` in the workspace repo); see
+root. Run the check with `scripts/check-architecture.sh`; see
 [architecture.md](architecture.md#checking) for the command.
