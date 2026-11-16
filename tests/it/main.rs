@@ -18,6 +18,7 @@ mod faberline_core_test_script;
 mod gke_operation_scope;
 mod gke_smoke_grpc;
 mod ha_backup_e2e;
+mod ignored_tests_doc;
 mod integrity_api;
 mod joint_recovery_http;
 pub use joint_recovery_http::verify_restored_process;
