@@ -302,6 +302,12 @@ jobs:
         run: cargo deny check bans sources
       - name: architecture check
         run: bash scripts/check-architecture.sh
+      - name: install aw
+        run: cargo install --locked --git https://github.com/faberline/aw --rev 440aa413d467c0d850cf976f277441724852217c aw
+      - name: core-reuse check (S4)
+        run: |
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/faberline/core "$RUNNER_TEMP/core"
+          aw standards check --repo . --core "$RUNNER_TEMP/core"
 
   gate:
     name: gate
