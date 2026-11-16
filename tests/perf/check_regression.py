@@ -1,6 +1,10 @@
 """Compare a metric workload result with a stored baseline.
 
-Usage: check_regression.py <result file> <baseline file> <threshold percent>
+Usage: check_regression.py <result file> <baseline file> <threshold percent> [<upper threshold percent>] [--ignore <key>[,<key>...]]
+
+The optional upper threshold applies to the latency, memory and CPU keys.
+Without it, the threshold applies to them too.
+An ignored key is read and validated but not compared.
 
 Exit codes: 0 pass, 1 regression, 2 bad input.
 """
@@ -32,9 +36,21 @@ def _number(value, where):
     return float(value)
 
 
-def check(result, baseline, threshold):
-    """Return one message per regression. An empty list means pass."""
+def check(result, baseline, threshold, upper_threshold=None, ignore=()):
+    """Return one message per regression. An empty list means pass.
+
+    `threshold` applies to throughput. `upper_threshold` applies to the
+    latency, memory and CPU keys; when it is None it equals `threshold`.
+    A key in `ignore` is validated like any other key but not compared.
+    """
+    if upper_threshold is None:
+        upper_threshold = threshold
+    ignored = set(ignore)
+    unknown = sorted(ignored - set(KEYS))
+    if unknown:
+        raise InputError(f"ignore key is not a compared key: {unknown[0]}")
     t = threshold / 100.0
+    u = upper_threshold / 100.0
     messages = []
     for key in KEYS:
         if key not in result:
@@ -45,6 +61,8 @@ def check(result, baseline, threshold):
         b = _number(baseline[key], f"baseline {key}")
         if b <= 0:
             raise InputError(f"baseline {key} must be > 0: {b}")
+        if key in ignored:
+            continue
         if key in HIGHER_IS_BETTER:
             limit = b * (1 - t)
             if r < limit:
@@ -52,7 +70,7 @@ def check(result, baseline, threshold):
                     f"regression: {key} result={r} baseline={b} limit={limit}"
                 )
         else:
-            limit = b * (1 + t)
+            limit = b * (1 + u)
             if r > limit:
                 messages.append(
                     f"regression: {key} result={r} baseline={b} limit={limit}"
@@ -83,18 +101,31 @@ def _threshold(text):
     return value
 
 
+USAGE = (
+    "usage: check_regression.py <result file> <baseline file> <threshold percent> "
+    "[<upper threshold percent>] [--ignore <key>[,<key>...]]"
+)
+
+
 def main(argv):
-    if len(argv) != 3:
-        print(
-            "usage: check_regression.py <result file> <baseline file> <threshold percent>",
-            file=sys.stderr,
-        )
+    argv = list(argv)
+    ignore = []
+    if "--ignore" in argv:
+        at = argv.index("--ignore")
+        if at + 1 >= len(argv):
+            print(USAGE, file=sys.stderr)
+            return 2
+        ignore = [name for name in argv[at + 1].split(",") if name]
+        del argv[at : at + 2]
+    if len(argv) not in (3, 4):
+        print(USAGE, file=sys.stderr)
         return 2
     try:
         threshold = _threshold(argv[2])
+        upper_threshold = _threshold(argv[3]) if len(argv) == 4 else None
         result = _read_result(argv[0])
         baseline = _read_baseline(argv[1])
-        messages = check(result, baseline, threshold)
+        messages = check(result, baseline, threshold, upper_threshold, ignore)
     except (OSError, json.JSONDecodeError, InputError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

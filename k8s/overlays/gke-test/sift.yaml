@@ -10,6 +10,9 @@ spec:
     - name: http
       port: 7380
       targetPort: http
+    - name: grpc
+      port: 4317
+      targetPort: grpc
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -29,6 +32,8 @@ spec:
       ports:
         - protocol: TCP
           port: 7380
+        - protocol: TCP
+          port: 4317
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -98,6 +103,8 @@ spec:
           ports:
             - name: http
               containerPort: 7380
+            - name: grpc
+              containerPort: 4317
           readinessProbe:
             httpGet:
               path: /readyz
