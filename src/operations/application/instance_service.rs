@@ -32,35 +32,20 @@ impl InstanceService {
     ) -> anyhow::Result<service_k8s::service::ReconcilePlan> {
         // The metrics agent lists Kubernetes Pods in every auth mode.
         let (api_cidrs, api_ports) = self.renderer.discover_api_endpoint(client).await?;
-        Ok(service_k8s::service::ReconcilePlan {
-            children: self.renderer.render(instance, &api_cidrs, &api_ports),
-            context: Value::Null,
-        })
+        Ok(service_k8s::service::ReconcilePlan::new(
+            self.renderer.render(instance, &api_cidrs, &api_ports),
+            Value::Null,
+        ))
     }
 
     pub(crate) fn readiness_targets(&self, instance: &InstanceSpec) -> Vec<ReadinessTarget> {
         let name = instance.name.clone();
         vec![
-            ReadinessTarget {
-                kind: "StatefulSet",
-                name: format!("{name}-store"),
-            },
-            ReadinessTarget {
-                kind: "StatefulSet",
-                name: format!("{name}-control"),
-            },
-            ReadinessTarget {
-                kind: "Deployment",
-                name: format!("{name}-gateway"),
-            },
-            ReadinessTarget {
-                kind: "Deployment",
-                name: format!("{name}-query"),
-            },
-            ReadinessTarget {
-                kind: "DaemonSet",
-                name: format!("{name}-agent"),
-            },
+            ReadinessTarget::new("StatefulSet", format!("{name}-store")),
+            ReadinessTarget::new("StatefulSet", format!("{name}-control")),
+            ReadinessTarget::new("Deployment", format!("{name}-gateway")),
+            ReadinessTarget::new("Deployment", format!("{name}-query")),
+            ReadinessTarget::new("DaemonSet", format!("{name}-agent")),
         ]
     }
 
@@ -180,10 +165,12 @@ impl InstanceService {
         ]
         .into_iter()
         .filter(|(_, desired)| !desired)
-        .map(|(role, _)| service_k8s::service::PruneTarget {
-            api_version: "networking.gke.io/v1alpha1",
-            kind: "FQDNNetworkPolicy",
-            name: format!("{name}-{role}-google-apis"),
+        .map(|(role, _)| {
+            service_k8s::service::PruneTarget::new(
+                "networking.gke.io/v1alpha1",
+                "FQDNNetworkPolicy",
+                format!("{name}-{role}-google-apis"),
+            )
         })
         .collect()
     }
@@ -197,24 +184,24 @@ impl InstanceService {
         };
         let name = instance.name.clone();
         let namespace = instance.namespace.clone();
-        vec![service_k8s::service::ClusterScopedChild {
-            api_version: "rbac.authorization.k8s.io/v1",
-            kind: "ClusterRoleBinding",
-            name: format!("sift.{namespace}.{name}.auth-delegator"),
-            expected_labels: BTreeMap::from([
-                ("app.kubernetes.io/name".to_string(), APP.to_string()),
-                ("app.kubernetes.io/instance".to_string(), name),
-                (
-                    "app.kubernetes.io/component".to_string(),
-                    AUTH_DELEGATION_COMPONENT.to_string(),
-                ),
-                ("sift.axiom.dev/owner-namespace".to_string(), namespace),
-                (
-                    "service-k8s.axiom.dev/owner-uid".to_string(),
-                    uid.to_string(),
-                ),
-            ]),
-            desired: matches!(instance.settings.auth, AuthMode::Kubernetes),
-        }]
+        vec![service_k8s::service::ClusterScopedChild::new(
+            "rbac.authorization.k8s.io/v1",
+            "ClusterRoleBinding",
+            format!("sift.{namespace}.{name}.auth-delegator"),
+            matches!(instance.settings.auth, AuthMode::Kubernetes),
+        )
+        .with_expected_labels(BTreeMap::from([
+            ("app.kubernetes.io/name".to_string(), APP.to_string()),
+            ("app.kubernetes.io/instance".to_string(), name),
+            (
+                "app.kubernetes.io/component".to_string(),
+                AUTH_DELEGATION_COMPONENT.to_string(),
+            ),
+            ("sift.axiom.dev/owner-namespace".to_string(), namespace),
+            (
+                "service-k8s.axiom.dev/owner-uid".to_string(),
+                uid.to_string(),
+            ),
+        ]))]
     }
 }

@@ -32,7 +32,7 @@ async fn latest(store: &Arc<storage_object::GcsObjectStore>) -> Value {
     let store = store.clone();
     tokio::task::spawn_blocking(move || {
         let object = store.get("joint/recovery/latest.json").unwrap();
-        serde_json::from_slice(&object.bytes).unwrap()
+        serde_json::from_slice(object.bytes()).unwrap()
     })
     .await
     .unwrap()
@@ -224,9 +224,10 @@ async fn joint_record_restores_exact_events_control_state_and_notification_ids()
         .trim_start_matches('/')
         .to_owned();
     let store = objects.clone();
-    let snapshot = tokio::task::spawn_blocking(move || store.get(&control_key).unwrap().bytes)
-        .await
-        .unwrap();
+    let snapshot =
+        tokio::task::spawn_blocking(move || store.get(&control_key).unwrap().into_parts().1)
+            .await
+            .unwrap();
     let captured: Value =
         serde_json::from_slice(snapshot.strip_prefix(b"SIFT-CONTROL-1\n").unwrap()).unwrap();
     assert!(captured["records"]

@@ -179,6 +179,41 @@ Source: `docs/operations/structured-stdout.md` ("Collector guarantees");
 `<instance>-agent`); `src/operations/infrastructure/k8s/agent_workloads.rs`
 (checkpoint path `/var/lib/sift/agent/checkpoint.json`).
 
+## Secret rotation
+
+Two Secrets carry rotatable material.
+
+- Peer mTLS: `spec.peerTlsSecret`, with `tls.crt`, `tls.key` and `ca.crt`. It is mounted at `/var/run/secrets/sift/peer-tls` on the store and control roles.
+- Webhooks: `spec.alerting.webhookSecret`. It is mounted at `/var/run/secrets/sift/webhooks`, with one `<reference>.json` file per destination.
+
+The public API certificate is a Google-managed certificate on the Ingress. There is no Secret to rotate there; see [public-tls.md](public-tls.md).
+
+Webhook Secret:
+
+1. Update the Secret.
+2. The kubelet refreshes the mounted file, which can take about 60 to 90 seconds.
+3. The next notification reads the new file. No restart is needed.
+
+Peer TLS Secret:
+
+1. Update the Secret, for example `kubectl create secret generic <name> --from-file=tls.crt --from-file=tls.key --from-file=ca.crt --dry-run=client -o yaml | kubectl apply -f -`.
+2. The kubelet refreshes the files.
+3. Every pod checks the three files every 30 seconds and reloads when their content changed. Look for the log line `peer TLS material reloaded` on each pod.
+4. A failed reload logs `peer TLS reload failed` and keeps the old certificate. Fix the Secret and apply it again; new content triggers a new try.
+
+To replace the CA, first apply a Secret whose `ca.crt` holds the old and the new CA together. Wait until every pod logs the reload. Then apply the new certificate. Drop the old CA later.
+
+Run the rotation tests locally with:
+
+```
+cargo test --locked -p sift --lib peer_tls_
+cargo test --locked -p sift --lib webhook_secret_rotation
+```
+
+CI runs them in `cargo test --locked -p sift` (job `test-sift`).
+
+Not proven here: the kubelet refresh delay, and a rotation on a live kind cluster.
+
 ## Rejected or missing source data
 
 Rejected input goes to the quarantine file. On GKE the agent writes it to
@@ -208,3 +243,65 @@ Source: `docs/production-v1.md` (quarantine file; loss counters survive
 restart); `docs/operations/structured-stdout.md` ("Collector guarantees");
 `src/bin/sift/collect.rs` (default quarantine path);
 `src/operations/infrastructure/k8s/agent_workloads.rs` (GKE quarantine path).
+
+## Alerts
+
+Sift ships no fixed alert rules. An operator creates rules through the API, for example with `sift control alert-rules put`. The alerts that Sift ships are the four kinds below. An alert state has the phase `inactive`, `pending`, `firing` or `unknown`. A firing alert sends a webhook notification. In the commands below, `<project>` is the project of the rule.
+
+### metrics
+
+**Meaning**: A metric expression is compared with a threshold (`expression`, `comparison`, `threshold`).
+
+**First command**
+
+```sh
+sift control alerts list --project <project>
+```
+
+**Next step**: If the phase is `firing`, run `sift control alert-rules list --project <project>` to read the rule that fired (`expression`, `comparison`, `threshold`), and fix the cause that the rule names. If the phase is `unknown`, the query failed or has no data: read the `reason` field, and check `no_data` of the rule (`unknown`, `firing` or `inactive`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+### logs_count
+
+**Meaning**: The count of log records in `window_seconds`, optionally filtered, is compared with a threshold (`comparison`, `threshold`).
+
+**First command**
+
+```sh
+sift control alerts list --project <project>
+```
+
+**Next step**: If the phase is `firing`, run `sift control alert-rules list --project <project>` to read the rule that fired (`window_seconds`, `filter`, `comparison`, `threshold`), and check the logs that the filter selects. If the phase is `unknown`, the query failed or has no data: read the `reason` field, and check `no_data` of the rule (`unknown`, `firing` or `inactive`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+### new_error
+
+**Meaning**: An error group that did not exist before appears.
+
+**First command**
+
+```sh
+sift control error-groups list --project <project>
+```
+
+**Next step**: Find the new group, and fix the cause of the errors. Then set its status with `sift control error-groups status <id> --project <project> --request-id <id> --expected-revision <n> resolved`, or `ignored` (see `Action::Status` in `src/bin/sift/control.rs`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+### error_recurrence
+
+**Meaning**: A resolved error group occurs again.
+
+**First command**
+
+```sh
+sift control error-groups list --project <project>
+```
+
+**Next step**: Find the group that came back, and fix the cause of the errors. Then set its status with `sift control error-groups status <id> --project <project> --request-id <id> --expected-revision <n> resolved`, or `ignored` (see `Action::Status` in `src/bin/sift/control.rs`). To silence the alert for a while, run `sift control alerts mute <id> --project <project> --request-id <id> --expected-revision <n> --until <unix time>`.
+
+**Verified**: manual - the command needs a live Sift endpoint and a token, which CI does not have.
+
+Source: `src/alerting/domain/rule.rs` (`RuleSource`), `src/alerting/domain/state.rs` (`Phase`) and `src/bin/sift/control.rs`.

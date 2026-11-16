@@ -604,8 +604,8 @@ dependencies = [
 
 [[package]]
 name = "build-stamp"
-version = "0.4.14"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+version = "0.5.0"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 
 [[package]]
 name = "bumpalo"
@@ -735,6 +735,20 @@ version = "0.1.0"
 source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
 dependencies = [
  "anyhow",
+ "flate2",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+]
+
+[[package]]
+name = "cli-std"
+version = "0.1.0"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
+dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "flate2",
  "reqwest",
@@ -743,6 +757,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1677,7 +1692,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -1827,7 +1842,7 @@ dependencies = [
 [[package]]
 name = "index-text"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "serde",
  "serde_json",
@@ -2275,12 +2290,12 @@ dependencies = [
 [[package]]
 name = "metrics-prometheus"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 
 [[package]]
 name = "metrics-remote-write"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "prost 0.13.5",
  "snap",
@@ -2451,12 +2466,14 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "openapi-codegen"
 version = "0.5.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.5.0)",
  "serde",
  "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
  "toml",
 ]
 
@@ -2603,7 +2620,7 @@ checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 [[package]]
 name = "peer-tls"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "rustls",
@@ -2999,7 +3016,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3036,7 +3053,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -3064,8 +3081,8 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "raft-core"
-version = "0.4.14"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+version = "0.5.0"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "serde",
 ]
@@ -3073,12 +3090,12 @@ dependencies = [
 [[package]]
 name = "raft-runtime"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum 0.8.9",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.5.0)",
  "crc32fast",
  "memmap2",
  "peer-tls",
@@ -3090,6 +3107,7 @@ dependencies = [
  "server-lifecycle",
  "sha2",
  "storage-durable",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tracing",
@@ -3773,9 +3791,8 @@ dependencies = [
 [[package]]
 name = "server-http"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
- "anyhow",
  "axum 0.8.9",
  "rustls",
  "server-lifecycle",
@@ -3790,7 +3807,7 @@ dependencies = [
 [[package]]
 name = "server-lifecycle"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "thiserror 2.0.18",
  "tokio",
@@ -3800,11 +3817,11 @@ dependencies = [
 [[package]]
 name = "server-tcp"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
- "anyhow",
  "server-lifecycle",
  "socket2 0.6.3",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -3812,12 +3829,12 @@ dependencies = [
 [[package]]
 name = "service-auth"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum 0.8.9",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.5.0)",
  "jsonwebtoken",
  "k8s-openapi",
  "kube",
@@ -3826,6 +3843,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -3833,18 +3851,20 @@ dependencies = [
 [[package]]
 name = "service-backup"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "chrono",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.5.0)",
  "reqwest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "service-auth",
+ "sha2",
  "storage-durable",
  "storage-object",
+ "thiserror 2.0.18",
  "tokio",
  "urlencoding",
 ]
@@ -3852,7 +3872,7 @@ dependencies = [
 [[package]]
 name = "service-collector"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3865,8 +3885,8 @@ dependencies = [
 
 [[package]]
 name = "service-executor"
-version = "0.4.14"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+version = "0.5.0"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "futures",
  "thiserror 2.0.18",
@@ -3876,7 +3896,7 @@ dependencies = [
 [[package]]
 name = "service-http"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -3902,13 +3922,13 @@ dependencies = [
 [[package]]
 name = "service-k8s"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
  "base64 0.22.1",
  "chrono",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.5.0)",
  "futures",
  "k8s-openapi",
  "kube",
@@ -3930,7 +3950,7 @@ dependencies = [
 [[package]]
 name = "service-mcp"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -3943,7 +3963,7 @@ dependencies = [
 [[package]]
 name = "service-observability"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "http",
@@ -3960,7 +3980,7 @@ dependencies = [
 [[package]]
 name = "service-projection"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3970,6 +3990,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "storage-durable",
+ "thiserror 2.0.18",
  "tokio",
  "utoipa",
 ]
@@ -4025,7 +4046,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.5.0)",
  "crc32fast",
  "flate2",
  "hex",
@@ -4191,7 +4212,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "storage-durable"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "crc32fast",
@@ -4205,7 +4226,7 @@ dependencies = [
 [[package]]
 name = "storage-object"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4223,7 +4244,7 @@ dependencies = [
 [[package]]
 name = "storage-segment"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "serde",
  "serde_json",
@@ -4864,11 +4885,11 @@ dependencies = [
 [[package]]
 name = "transport-h2c"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "axum 0.8.9",
  "bytes",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.5.0)",
  "h2",
  "http",
  "hyper",
@@ -4884,7 +4905,7 @@ dependencies = [
 [[package]]
 name = "transport-otlp"
 version = "0.1.0"
-source = "git+https://github.com/faberline/core?tag=v0.4.14#029e765efaac4080bb9e8283005a9c6792953f54"
+source = "git+https://github.com/faberline/core?tag=v0.5.0#c96dc41142c49f2f406e35388336bc740d43391b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5077,7 +5098,7 @@ dependencies = [
  "blake3",
  "chrono",
  "clap",
- "cli-std",
+ "cli-std 0.1.0 (git+https://github.com/faberline/core?tag=v0.4.14)",
  "cron",
  "dirs",
  "getrandom 0.3.4",
@@ -5348,7 +5369,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

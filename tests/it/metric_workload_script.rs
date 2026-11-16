@@ -65,6 +65,7 @@ fn workload_prints_one_json_line_with_work() {
     assert!(json["queried_samples"].as_u64().unwrap() > 0);
     assert!(json["samples_per_second"].as_f64().unwrap() > 0.0);
     assert!(json["query_p95_ms"].as_f64().unwrap() >= json["query_p50_ms"].as_f64().unwrap());
+    assert!(json["query_p99_ms"].as_f64().unwrap() >= json["query_p95_ms"].as_f64().unwrap());
     assert!(json["peak_rss_kib"].as_u64().unwrap() > 0);
     assert!(json["cpu_seconds"].as_f64().unwrap() >= 0.0);
     assert_eq!(json["requests"], 2);

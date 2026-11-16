@@ -29,9 +29,9 @@ Draft: it applies only after the user confirms the 1.0.0 standard (faberline/aw 
 |---------|---------|------------|
 | Public HTTP and gRPC API | OpenAPI document `tests/fixtures/refactor_compatibility/openapi.json` | Test `openapi_bytes_do_not_change` |
 | CLI help and flags | `cli-help.json` | Test `cli_help_bytes_do_not_change` |
-| Wire formats (OTLP, Prometheus Remote Write 1.0) | Protocol versions of the wire | No test yet; tracked in #136. |
+| Wire formats (OTLP, Prometheus Remote Write 1.0) | Protocol versions of the wire | Tests `otlp_wire_bytes_do_not_change` and `remote_write_wire_bytes_do_not_change` |
 | On-disk formats | Versions listed in the compatibility policy | Tests `newer_data_root_format_is_refused_and_left_unchanged` and `current_binary_keeps_writing_the_previous_wal_format` |
-| `Sift` CRD | `k8s/crd/sift.yaml` | No test yet; tracked in #137. |
+| `Sift` CRD | `k8s/crd/sift.yaml` | Tests `crd_schema_file_does_not_change` and `crd_schema_shipped_by_the_binary_does_not_change` |
 
 Rules:
 

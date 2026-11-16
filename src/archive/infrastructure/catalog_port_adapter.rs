@@ -7,18 +7,15 @@ use anyhow::Result;
 impl From<storage_segment::CatalogEntry> for CatalogEntry {
     fn from(value: storage_segment::CatalogEntry) -> Self {
         Self {
-            key: value.key,
-            value: value.value,
+            key: value.key().to_string(),
+            value: value.value().to_vec(),
         }
     }
 }
-impl From<CatalogEntry> for storage_segment::CatalogEntry {
-    fn from(value: CatalogEntry) -> Self {
-        Self {
-            key: value.key,
-            value: value.value,
-        }
-    }
+fn segment_entry(
+    value: CatalogEntry,
+) -> Result<storage_segment::CatalogEntry, storage_segment::SegmentError> {
+    storage_segment::CatalogEntry::try_new(value.key, value.value)
 }
 fn mutation(value: storage_segment::CatalogMutation) -> CatalogMutation {
     CatalogMutation {
@@ -80,7 +77,9 @@ impl ArchiveCatalogPort for NativeCatalog {
         root: &CatalogRoot,
         entry: CatalogEntry,
     ) -> Result<CatalogMutation, Self::Error> {
-        self.0.upsert(&root.into(), entry.into()).map(mutation)
+        self.0
+            .upsert(&root.into(), segment_entry(entry)?)
+            .map(mutation)
     }
     fn build_sorted_observed(
         &self,
@@ -88,9 +87,10 @@ impl ArchiveCatalogPort for NativeCatalog {
         observed: &mut dyn FnMut(&CatalogPageRef) -> Result<(), Self::Error>,
     ) -> Result<CatalogBuild, Self::Error> {
         self.0
-            .build_sorted_observed(entries.map(|entry| entry.map(Into::into)), |reference| {
-                observed(&reference.clone().into())
-            })
+            .build_sorted_observed(
+                entries.map(|entry| entry.and_then(segment_entry)),
+                |reference| observed(&reference.clone().into()),
+            )
             .map(build)
     }
 }

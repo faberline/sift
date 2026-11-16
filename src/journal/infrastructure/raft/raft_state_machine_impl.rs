@@ -5,7 +5,7 @@ use std::io::Read;
 use std::sync::atomic::Ordering;
 
 use anyhow::{bail, Result};
-use raft_runtime::{Index, RaftStateMachine};
+use raft_runtime::{Index, RaftStateMachine, StateMachineError};
 
 use crate::journal::domain::append_policy::{
     append_decision_time, merge_pending_retention, validate_events, validate_retention_fence,
@@ -35,7 +35,37 @@ impl RaftStateMachine for SiftStateMachine {
         Some("sift-checkpoint-v7")
     }
 
-    fn apply(&self, index: Index, command: &[u8]) -> Result<()> {
+    fn apply(&self, index: Index, command: &[u8]) -> Result<(), StateMachineError> {
+        Ok(self.apply_impl(index.get(), command)?)
+    }
+
+    fn snapshot(&self, writer: &mut dyn std::io::Write) -> Result<(), StateMachineError> {
+        Ok(self.snapshot_impl(writer)?)
+    }
+
+    fn snapshot_at(
+        &self,
+        index: Index,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), StateMachineError> {
+        Ok(self.snapshot_at_impl(index.get(), writer)?)
+    }
+
+    fn validate_snapshot(&self, reader: &mut dyn Read) -> Result<(), StateMachineError> {
+        Ok(self.validate_snapshot_impl(reader)?)
+    }
+
+    fn restore(&self, reader: &mut dyn std::io::Read) -> Result<(), StateMachineError> {
+        Ok(self.restore_impl(reader)?)
+    }
+
+    fn applied_index(&self) -> Index {
+        Index::new(self.applied_index.load(Ordering::Acquire))
+    }
+}
+
+impl SiftStateMachine {
+    fn apply_impl(&self, index: u64, command: &[u8]) -> Result<()> {
         if index <= self.applied_index.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -153,7 +183,7 @@ impl RaftStateMachine for SiftStateMachine {
         Ok(())
     }
 
-    fn snapshot(&self, writer: &mut dyn std::io::Write) -> Result<()> {
+    fn snapshot_impl(&self, writer: &mut dyn std::io::Write) -> Result<()> {
         let applied_index = self
             .control
             .lock()
@@ -163,7 +193,7 @@ impl RaftStateMachine for SiftStateMachine {
         Ok(())
     }
 
-    fn snapshot_at(&self, index: Index, writer: &mut dyn std::io::Write) -> Result<()> {
+    fn snapshot_at_impl(&self, index: u64, writer: &mut dyn std::io::Write) -> Result<()> {
         if let Some(checkpoint) = self.archive_checkpoint_for(index)? {
             return write_archive_checkpoint(&checkpoint, writer);
         }
@@ -173,16 +203,16 @@ impl RaftStateMachine for SiftStateMachine {
         if let Some(checkpoint) = self.resident_checkpoint_for(index) {
             return write_resident_checkpoint(&checkpoint, writer);
         }
-        if index != self.applied_index() {
+        if index != Index::new(self.applied_index.load(Ordering::Acquire)).get() {
             bail!(
                 "Sift cannot snapshot Raft prefix {index}; current applied index is {}",
-                self.applied_index()
+                Index::new(self.applied_index.load(Ordering::Acquire)).get()
             );
         }
-        self.snapshot(writer)
+        self.snapshot_impl(writer)
     }
 
-    fn validate_snapshot(&self, reader: &mut dyn Read) -> Result<()> {
+    fn validate_snapshot_impl(&self, reader: &mut dyn Read) -> Result<()> {
         let stage = validate_streamed_snapshot(self.journal.as_ref(), reader)?;
         *self
             .validated_archive_stage
@@ -191,7 +221,7 @@ impl RaftStateMachine for SiftStateMachine {
         Ok(())
     }
 
-    fn restore(&self, reader: &mut dyn std::io::Read) -> Result<()> {
+    fn restore_impl(&self, reader: &mut dyn std::io::Read) -> Result<()> {
         let current_applied_index = self.applied_index.load(Ordering::Acquire);
         let staged_archive = self
             .validated_archive_stage
@@ -258,9 +288,5 @@ impl RaftStateMachine for SiftStateMachine {
             raw_cursor: self.journal.last_cursor(),
         };
         Ok(())
-    }
-
-    fn applied_index(&self) -> Index {
-        self.applied_index.load(Ordering::Acquire)
     }
 }

@@ -15,11 +15,11 @@ pub(super) fn read_events(path: &Path) -> Result<Vec<StoredEvent>> {
     storage_durable::FramedLogReader::read_frames(path, 0)?
         .into_iter()
         .map(|frame| {
-            let event: StoredEvent = serde_json::from_slice(&frame.payload)?;
-            if event.cursor != frame.seq {
+            let event: StoredEvent = serde_json::from_slice(frame.payload())?;
+            if event.cursor != frame.seq() {
                 bail!(
                     "segment frame {} contains cursor {} in {}",
-                    frame.seq,
+                    frame.seq(),
                     event.cursor,
                     path.display()
                 );
@@ -40,11 +40,11 @@ pub(super) fn read_events_after(path: &Path, after: u64, limit: usize) -> Result
     storage_durable::FramedLogReader::read_frames_bounded(path, after, limit)?
         .into_iter()
         .map(|frame| {
-            let event: StoredEvent = serde_json::from_slice(&frame.payload)?;
-            if event.cursor != frame.seq {
+            let event: StoredEvent = serde_json::from_slice(frame.payload())?;
+            if event.cursor != frame.seq() {
                 bail!(
                     "segment frame {} contains cursor {} in {}",
-                    frame.seq,
+                    frame.seq(),
                     event.cursor,
                     path.display()
                 );

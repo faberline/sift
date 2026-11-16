@@ -50,9 +50,10 @@ impl SpillCatalog {
     }
 
     pub(in crate::archive) fn upsert(&mut self, key: String, value: Vec<u8>) -> Result<()> {
-        let mutation = self
-            .catalog
-            .upsert(&self.root, storage_segment::CatalogEntry { key, value })?;
+        let mutation = self.catalog.upsert(
+            &self.root,
+            storage_segment::CatalogEntry::try_new(key, value)?,
+        )?;
         let written = mutation
             .written_page_keys
             .iter()
@@ -71,7 +72,7 @@ impl SpillCatalog {
         Ok(self
             .catalog
             .lookup(&self.root, key)?
-            .map(|entry| entry.value))
+            .map(|entry| entry.value().to_vec()))
     }
 
     pub(in crate::archive) fn remove(&mut self, key: &str) -> Result<()> {

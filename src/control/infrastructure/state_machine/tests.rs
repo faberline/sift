@@ -4,7 +4,9 @@ use crate::control::{
     application::service::ControlService, infrastructure::raft_port::RaftControlPort,
 };
 use crate::shared_kernel::control_record::Change;
-use raft_runtime::{FsyncPolicy, HostConfig, Membership, PeerTransport, RaftHost, RaftStore};
+use raft_runtime::{
+    FsyncPolicy, HostConfig, Membership, NodeId, PeerTransport, RaftHost, RaftStore,
+};
 use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -69,31 +71,36 @@ async fn three_control_voters_keep_records_receipts_and_notification_ids_after_l
         ];
         let key = KeyPair::generate().unwrap();
         let cert = params.signed_by(&key, &ca, &ca_key).unwrap();
-        let config = peer_tls::PeerTlsConfig {
-            cert: tls.path().join("tls.crt"),
-            key: tls.path().join("tls.key"),
-            ca: tls.path().join("ca.crt"),
-            required: true,
-        };
-        std::fs::write(&config.cert, cert.pem()).unwrap();
-        std::fs::write(&config.key, key.serialize_pem()).unwrap();
-        std::fs::write(&config.ca, ca.pem()).unwrap();
+        let config = peer_tls::PeerTlsConfig::new(
+            tls.path().join("tls.crt"),
+            tls.path().join("tls.key"),
+            tls.path().join("ca.crt"),
+            true,
+        );
+        std::fs::write(config.cert(), cert.pem()).unwrap();
+        std::fs::write(config.key(), key.serialize_pem()).unwrap();
+        std::fs::write(config.ca(), ca.pem()).unwrap();
         let transport = PeerTransport::from_config(&config).unwrap();
         let peers = urls
             .iter()
             .enumerate()
             .filter(|(peer, _)| *peer as u64 != id)
-            .map(|(peer, url)| (peer as u64, url.clone()))
+            .map(|(peer, url)| (NodeId::new(peer as u64), url.clone()))
             .collect::<HashMap<_, _>>();
         let machine = Arc::new(ControlStateMachine::open(root.path()).unwrap());
         let host = Arc::new(RaftHost::spawn_with_peer_transport(
-            id,
-            Membership {
-                voters: vec![0, 1, 2],
-                learners: Vec::new(),
-            },
+            NodeId::new(id),
+            Membership::new(
+                vec![NodeId::new(0), NodeId::new(1), NodeId::new(2)],
+                Vec::new(),
+            ),
             peers,
-            RaftStore::open(root.path().to_str().unwrap(), id, FsyncPolicy::Always).unwrap(),
+            RaftStore::open(
+                root.path().to_str().unwrap(),
+                NodeId::new(id),
+                FsyncPolicy::Always,
+            )
+            .unwrap(),
             machine.clone(),
             HostConfig::default(),
             transport.clone(),
@@ -129,7 +136,7 @@ async fn three_control_voters_keep_records_receipts_and_notification_ids_after_l
     for _ in 0..400 {
         if nodes
             .iter()
-            .all(|n| n.machine.applied_index() >= receipt.index)
+            .all(|n| n.machine.applied_index().get() >= receipt.index)
         {
             break;
         }
@@ -139,7 +146,7 @@ async fn three_control_voters_keep_records_receipts_and_notification_ids_after_l
         .host
         .as_ref()
         .unwrap()
-        .require_applied_index_on_all_voters(receipt.index)
+        .require_applied_index_on_all_voters(raft_runtime::Index::new(receipt.index))
         .await
         .unwrap();
     nodes[first]
@@ -166,14 +173,14 @@ async fn three_control_voters_keep_records_receipts_and_notification_ids_after_l
         if nodes
             .iter()
             .filter(|n| n.host.is_some())
-            .all(|n| n.machine.applied_index() >= receipt.index)
+            .all(|n| n.machine.applied_index().get() >= receipt.index)
         {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     for node in nodes.iter().filter(|n| n.host.is_some()) {
-        assert!(node.machine.applied_index() >= receipt.index);
+        assert!(node.machine.applied_index().get() >= receipt.index);
         assert_eq!(
             node.machine.records(Some("p"), RecordKind::SavedQuery)[0]
                 .value
@@ -196,7 +203,7 @@ async fn three_control_voters_keep_records_receipts_and_notification_ids_after_l
     ControlStateMachine::bootstrap(fresh.path(), &snapshot).unwrap();
     assert!(ControlStateMachine::bootstrap(fresh.path(), &snapshot).is_err());
     let restored = ControlStateMachine::open(fresh.path()).unwrap();
-    assert_eq!(restored.applied_index(), 0);
+    assert_eq!(restored.applied_index().get(), 0);
     assert_eq!(
         restored.records(Some("p"), RecordKind::Notification)[0].id,
         "fixed-notification-id"
@@ -207,7 +214,10 @@ async fn three_control_voters_keep_records_receipts_and_notification_ids_after_l
         changes: vec![saved(2, "restored")],
     };
     restored
-        .apply(1, &serde_json::to_vec(&command).unwrap())
+        .apply(
+            raft_runtime::Index::new(1),
+            &serde_json::to_vec(&command).unwrap(),
+        )
         .unwrap();
     assert_eq!(
         restored.records(Some("p"), RecordKind::SavedQuery)[0].revision,
