@@ -57,6 +57,15 @@ impl SiftProcess {
     fn stderr_text(&self) -> String {
         self.stderr.lock().unwrap().join("\n")
     }
+
+    /// Stderr of a child that has already exited. It joins the reader thread,
+    /// so the text is complete.
+    fn finished_stderr(&mut self) -> String {
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+        self.stderr_text()
+    }
 }
 
 impl Drop for SiftProcess {
@@ -74,19 +83,21 @@ fn reserve_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
-async fn wait_ready(process: &mut SiftProcess, client: &reqwest::Client, base: &str) {
+/// Returns `false` when the child exits because it could not bind its port.
+async fn wait_ready(process: &mut SiftProcess, client: &reqwest::Client, base: &str) -> bool {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if let Ok(response) = client.get(format!("{base}/readyz")).send().await {
             if response.status().is_success() {
-                return;
+                return true;
             }
         }
         if let Some(status) = process.child.try_wait().expect("poll Sift child") {
-            panic!(
-                "Sift exited before readiness with {status}: {}",
-                process.stderr_text()
-            );
+            let text = process.finished_stderr();
+            if text.contains("Address already in use") {
+                return false;
+            }
+            panic!("Sift exited before readiness with {status}: {text}");
         }
         assert!(
             Instant::now() < deadline,
@@ -95,6 +106,30 @@ async fn wait_ready(process: &mut SiftProcess, client: &reqwest::Client, base: &
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+const START_ATTEMPTS: u32 = 20;
+const START_PAUSE: Duration = Duration::from_millis(100);
+
+/// Start Sift and wait until it is ready. When the child cannot bind its
+/// port (another test took it), start it again, at most `START_ATTEMPTS`
+/// times. `fixed_port` is `Some` for a restart on the same address, and
+/// `None` for a first start, which takes a new port on each attempt.
+async fn start_ready(
+    data_dir: &Path,
+    client: &reqwest::Client,
+    fixed_port: Option<u16>,
+) -> (SiftProcess, u16) {
+    for _ in 0..START_ATTEMPTS {
+        let port = fixed_port.unwrap_or_else(reserve_port);
+        let base = format!("http://127.0.0.1:{port}");
+        let mut process = SiftProcess::spawn(port, data_dir);
+        if wait_ready(&mut process, client, &base).await {
+            return (process, port);
+        }
+        tokio::time::sleep(START_PAUSE).await;
+    }
+    panic!("Sift could not bind a port in {START_ATTEMPTS} attempts");
 }
 
 fn service_event(event: &str, message: &str, trace_id: Option<&str>, span_id: &str) -> Value {
@@ -246,15 +281,13 @@ async fn real_file_collector_ingests_queries_and_resumes() {
     ];
     std::fs::write(&source, format!("{}\n", lines.join("\n"))).unwrap();
 
-    let port = reserve_port();
-    let base = format!("http://127.0.0.1:{port}");
     let client = reqwest::Client::builder()
         .http1_only()
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    let mut process = SiftProcess::spawn(port, &data_dir);
-    wait_ready(&mut process, &client, &base).await;
+    let (process, port) = start_ready(&data_dir, &client, None).await;
+    let base = format!("http://127.0.0.1:{port}");
 
     let first = run_collector(&source, &checkpoint, &quarantine, &base);
     assert_eq!(first["accepted"], 2);
@@ -300,8 +333,7 @@ async fn real_file_collector_ingests_queries_and_resumes() {
     assert_eq!(all["records"].as_array().unwrap().len(), 2);
 
     drop(process);
-    let mut restarted = SiftProcess::spawn(port, &data_dir);
-    wait_ready(&mut restarted, &client, &base).await;
+    let (_restarted, _) = start_ready(&data_dir, &client, Some(port)).await;
     let recovered = wait_for_records(&client, &base, None, 2).await;
     assert_eq!(recovered["records"], all["records"]);
 
@@ -329,5 +361,49 @@ async fn real_file_collector_ingests_queries_and_resumes() {
     assert_eq!(queried["partial"], false);
     assert_eq!(queried["stats"]["returned"], 2);
     assert_eq!(queried["data"]["records"], all["records"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn start_ready_gives_a_ready_server_on_a_free_port() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::builder()
+        .http1_only()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let (process, port) = start_ready(&dir.path().join("sift-data"), &client, None).await;
+    assert_ne!(port, 0);
+    let response = client
+        .get(format!("http://127.0.0.1:{port}/readyz"))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    drop(process);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn start_ready_retries_while_the_port_is_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::builder()
+        .http1_only()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = held.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        drop(held);
+    });
+    let (process, got) = start_ready(&dir.path().join("sift-data"), &client, Some(port)).await;
+    assert_eq!(got, port);
+    let response = client
+        .get(format!("http://127.0.0.1:{port}/readyz"))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    drop(process);
 }
 // HANDWRITE-END
