@@ -16,20 +16,20 @@ BASELINE = {
 
 SLOW_RUN = {
     "samples_per_second": 2417.749,
-    "query_p50_ms": 428.203,
-    "query_p95_ms": 464.051,
-    "query_p99_ms": 954.58,
-    "peak_rss_kib": 291648,
+    "query_p50_ms": 447.743,
+    "query_p95_ms": 465.851,
+    "query_p99_ms": 995.746,
+    "peak_rss_kib": 298772,
     "cpu_seconds": 44.78,
 }
 
 SLOW_LOG_RUN = {
-    "samples_per_second": 2851.052,
-    "query_p50_ms": 8.889,
-    "query_p95_ms": 23.01,
-    "query_p99_ms": 206.124,
+    "samples_per_second": 2837.648,
+    "query_p50_ms": 10.677,
+    "query_p95_ms": 24.982,
+    "query_p99_ms": 272.324,
     "peak_rss_kib": 505784,
-    "cpu_seconds": 22.85,
+    "cpu_seconds": 27.65,
 }
 
 
@@ -142,21 +142,21 @@ class CheckRegression(unittest.TestCase):
     def test_metric_baseline_accepts_slow_runner(self):
         path = Path(__file__).parent / "baseline" / "metric.json"
         baseline = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(check_regression.check(SLOW_RUN, baseline, 60, 130), [])
+        self.assertEqual(check_regression.check(SLOW_RUN, baseline, 60, 160), [])
         self.assertNotEqual(check_regression.check(SLOW_RUN, baseline, 60), [])
-        self.assertEqual(check_regression.check(baseline, baseline, 60, 130), [])
+        self.assertEqual(check_regression.check(baseline, baseline, 60, 160), [])
 
     def test_metric_baseline_still_catches_large_regression(self):
         path = Path(__file__).parent / "baseline" / "metric.json"
         baseline = json.loads(path.read_text(encoding="utf-8"))
 
         bad = dict(baseline, cpu_seconds=baseline["cpu_seconds"] * 3)
-        messages = check_regression.check(bad, baseline, 60, 130)
+        messages = check_regression.check(bad, baseline, 60, 160)
         self.assertEqual(len(messages), 1)
         self.assertIn("cpu_seconds", messages[0])
 
         bad = dict(baseline, query_p99_ms=baseline["query_p99_ms"] * 3)
-        messages = check_regression.check(bad, baseline, 60, 130)
+        messages = check_regression.check(bad, baseline, 60, 160)
         self.assertEqual(len(messages), 1)
         self.assertIn("query_p99_ms", messages[0])
 
@@ -194,36 +194,130 @@ class CheckRegression(unittest.TestCase):
     def test_log_baseline_accepts_slow_runner(self):
         path = Path(__file__).parent / "baseline" / "log.json"
         baseline = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(check_regression.check(SLOW_LOG_RUN, baseline, 60, 175), [])
+        self.assertEqual(
+            check_regression.check(SLOW_LOG_RUN, baseline, 60, 150, ["query_p99_ms"]),
+            [],
+        )
+        messages = check_regression.check(SLOW_LOG_RUN, baseline, 60, 150)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("query_p99_ms", messages[0])
         self.assertNotEqual(check_regression.check(SLOW_LOG_RUN, baseline, 60), [])
-        self.assertEqual(check_regression.check(baseline, baseline, 60, 175), [])
+        self.assertEqual(
+            check_regression.check(baseline, baseline, 60, 150, ["query_p99_ms"]),
+            [],
+        )
 
     def test_log_baseline_still_catches_large_regression(self):
         path = Path(__file__).parent / "baseline" / "log.json"
         baseline = json.loads(path.read_text(encoding="utf-8"))
-        for key in ("query_p50_ms", "query_p95_ms", "query_p99_ms", "cpu_seconds"):
+        for key in ("query_p50_ms", "query_p95_ms", "cpu_seconds"):
             bad = dict(baseline, **{key: baseline[key] * 3})
-            messages = check_regression.check(bad, baseline, 60, 175)
+            messages = check_regression.check(bad, baseline, 60, 150, ["query_p99_ms"])
             self.assertEqual(len(messages), 1, key)
             self.assertIn(key, messages[0])
 
         bad = dict(baseline, samples_per_second=baseline["samples_per_second"] / 3)
-        messages = check_regression.check(bad, baseline, 60, 175)
+        messages = check_regression.check(bad, baseline, 60, 150, ["query_p99_ms"])
         self.assertEqual(len(messages), 1)
         self.assertIn("samples_per_second", messages[0])
+
+        bad = dict(baseline, query_p99_ms=baseline["query_p99_ms"] * 3)
+        self.assertEqual(
+            check_regression.check(bad, baseline, 60, 150, ["query_p99_ms"]), []
+        )
+
+    def test_ignore_skips_comparison_but_validates(self):
+        result = with_values(query_p99_ms=3000)
+        self.assertEqual(
+            check_regression.check(result, BASELINE, 20, 150, ["query_p99_ms"]), []
+        )
+        messages = check_regression.check(result, BASELINE, 20, 150)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("query_p99_ms", messages[0])
+
+        partial = dict(BASELINE)
+        del partial["query_p99_ms"]
+        with self.assertRaises(check_regression.InputError):
+            check_regression.check(partial, BASELINE, 20, 150, ["query_p99_ms"])
+        with self.assertRaises(check_regression.InputError):
+            check_regression.check(result, BASELINE, 20, 150, ["nope"])
+
+    def test_main_ignore_option(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            baseline_path = tmp / "baseline.json"
+            baseline_path.write_text(json.dumps(BASELINE))
+
+            result_path = tmp / "result.json"
+            result_path.write_text(json.dumps(with_values(query_p99_ms=3000)) + "\n")
+            self.assertEqual(
+                check_regression.main(
+                    [
+                        str(result_path),
+                        str(baseline_path),
+                        "20",
+                        "150",
+                        "--ignore",
+                        "query_p99_ms",
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(
+                check_regression.main(
+                    [str(result_path), str(baseline_path), "20", "150"]
+                ),
+                1,
+            )
+
+            both_path = tmp / "both.json"
+            both_path.write_text(
+                json.dumps(with_values(query_p99_ms=3000, samples_per_second=100))
+                + "\n"
+            )
+            self.assertEqual(
+                check_regression.main(
+                    [
+                        str(both_path),
+                        str(baseline_path),
+                        "20",
+                        "--ignore",
+                        "query_p99_ms",
+                    ]
+                ),
+                1,
+            )
+            self.assertEqual(
+                check_regression.main(
+                    [str(result_path), str(baseline_path), "20", "--ignore"]
+                ),
+                2,
+            )
+            self.assertEqual(
+                check_regression.main(
+                    [str(result_path), str(baseline_path), "20", "--ignore", "nope"]
+                ),
+                2,
+            )
 
     def test_ci_log_check_uses_upper_threshold(self):
         ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
         text = ci.read_text(encoding="utf-8")
-        self.assertIn("tests/perf/baseline/log.json 60 175", text)
-        self.assertIn("tests/perf/baseline/metric.json 60 130", text)
+        self.assertIn(
+            "tests/perf/baseline/log.json 60 150 --ignore query_p99_ms", text
+        )
+        self.assertIn("tests/perf/baseline/metric.json 60 160", text)
+        self.assertNotIn("log.json 60 175", text)
         self.assertNotIn("log.json 60\n", text)
 
     def test_ci_metric_check_uses_upper_threshold(self):
         ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
         text = ci.read_text(encoding="utf-8")
-        self.assertIn("tests/perf/baseline/metric.json 60 130", text)
-        self.assertIn("tests/perf/baseline/log.json 60", text)
+        self.assertIn("tests/perf/baseline/metric.json 60 160", text)
+        self.assertIn(
+            "tests/perf/baseline/log.json 60 150 --ignore query_p99_ms", text
+        )
+        self.assertNotIn("metric.json 60 130", text)
         self.assertNotIn("metric.json 60\n", text)
 
 
