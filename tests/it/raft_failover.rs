@@ -26,6 +26,26 @@ use tokio::{
 };
 
 const WAIT: Duration = Duration::from_secs(10);
+const REBIND_ATTEMPTS: u32 = 100;
+const REBIND_PAUSE: Duration = Duration::from_millis(50);
+
+/// Bind an address that a stopped voter used before. The port can still be
+/// closing, or another test of this process can hold it for a short time,
+/// so retry on `AddrInUse` for at most `REBIND_ATTEMPTS * REBIND_PAUSE` (5 s).
+async fn bind_again(address: SocketAddr) -> std::io::Result<TcpListener> {
+    let mut attempt = 1;
+    loop {
+        match TcpListener::bind(address).await {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AddrInUse && attempt < REBIND_ATTEMPTS =>
+            {
+                attempt += 1;
+                tokio::time::sleep(REBIND_PAUSE).await;
+            }
+            other => return other,
+        }
+    }
+}
 
 struct Authority {
     cert: Certificate,
@@ -336,7 +356,7 @@ async fn acknowledged_data_survives_leader_loss_over_mutual_tls() {
     let stopped_journal = DurableJournal::open(restored.data.path()).unwrap();
     assert_eq!(events(&stopped_journal), first_batch);
     drop(stopped_journal);
-    let listener = TcpListener::bind(addresses[first_leader]).await.unwrap();
+    let listener = bind_again(addresses[first_leader]).await.unwrap();
     restored.start(first_leader, listener, &urls).await;
     wait_for_event(&nodes, "after-failure", 3).await;
     assert_eq!(events(&nodes[first_leader].live().journal), second_batch);
@@ -374,9 +394,7 @@ async fn acknowledged_data_survives_leader_loss_over_mutual_tls() {
         };
         assert_eq!(&events(&journal), expected);
         drop(journal);
-        TcpListener::bind(address)
-            .await
-            .expect("peer port released");
+        bind_again(address).await.expect("peer port released");
         node.data.close().expect("remove temporary voter data");
         node.material
             .dir
@@ -453,7 +471,7 @@ async fn rolling_restart_of_three_voters_keeps_every_acknowledged_event() {
 
     for id in 0..3 {
         nodes[id].crash().await;
-        let listener = TcpListener::bind(addresses[id]).await.unwrap();
+        let listener = bind_again(addresses[id]).await.unwrap();
         nodes[id].start(id, listener, &urls).await;
         wait_for_leader(&nodes).await;
         let next = format!("after-restart-{id}");
@@ -483,15 +501,47 @@ async fn rolling_restart_of_three_voters_keeps_every_acknowledged_event() {
         let journal = DurableJournal::open(node.data.path()).unwrap();
         assert_eq!(events(&journal), expected);
         drop(journal);
-        TcpListener::bind(address)
-            .await
-            .expect("peer port released");
+        bind_again(address).await.expect("peer port released");
         node.data.close().expect("remove temporary voter data");
         node.material
             .dir
             .close()
             .expect("remove temporary voter PKI");
     }
+}
+
+#[tokio::test]
+async fn bind_again_binds_a_free_address() {
+    let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = probe.local_addr().unwrap();
+    drop(probe);
+    let listener = bind_again(address).await.unwrap();
+    assert_eq!(listener.local_addr().unwrap(), address);
+}
+
+#[tokio::test]
+async fn bind_again_waits_for_a_held_address_to_be_released() {
+    let held = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = held.local_addr().unwrap();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        drop(held);
+    });
+    let listener = bind_again(address)
+        .await
+        .expect("retry until the address is released");
+    assert_eq!(listener.local_addr().unwrap(), address);
+}
+
+#[tokio::test]
+async fn bind_again_gives_up_on_a_port_that_stays_held() {
+    let held = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = held.local_addr().unwrap();
+    let error = bind_again(address)
+        .await
+        .expect_err("a held port must not bind");
+    assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+    drop(held);
 }
 
 #[test]
