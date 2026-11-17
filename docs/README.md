@@ -20,6 +20,7 @@ and [`llms.txt`](../llms.txt).
 | [operations/configuration.md](operations/configuration.md) | Every CLI flag, environment variable and CRD field with default and meaning. |
 | [operations/limits.md](operations/limits.md) | Every limit with its value and where the code enforces it, and the known limits of this release. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
+| [security/threat-model.md](security/threat-model.md) | Trust boundaries of Sift, the control at each one and the test or CI job that proves it. |
 | [operations/performance.md](operations/performance.md) | Metric workload numbers, machine class, regression threshold and the CI gate. |
 | [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
 
