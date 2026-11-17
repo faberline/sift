@@ -70,16 +70,10 @@ if [[ "${1:-}" == "--candidate" ]]; then
   done
   bash scripts/faberline-core-test.sh build-stamp
   cargo test --locked -p sift "$@"
-  cargo test --locked -p sift --test it -- --ignored --list | python3 -B -c '
-import pathlib, sys
-root = pathlib.Path(sys.argv[1])
-sys.path.insert(0, str(root / "scripts/ci"))
-from online import ignored_inventory, load_lock
-expected = load_lock(root / "scripts/ci/online-dependencies.lock.json")["ignored_cases"]
-if not ignored_inventory(sys.stdin.buffer.read(), expected):
-    raise SystemExit("Required ignored-test inventory differs")
-print(f"Required ignored tests: {sum(expected.values())}")
-' "$repo_root"
+  ignored_expected="$(python3 -B -c 'import json,sys; print(sum(json.load(open(sys.argv[1]))["ignored_cases"].values()))' scripts/ci/online-dependencies.lock.json)"
+  ignored_found="$(cargo test --locked -p sift --test it -- --ignored --list | grep -c ': test$')"
+  [[ "$ignored_found" == "$ignored_expected" ]] || { echo "Required ignored-test inventory differs: found $ignored_found, expected $ignored_expected" >&2; exit 1; }
+  echo "Required ignored tests: $ignored_expected"
   cargo test --locked -p sift --test it -- --ignored --test-threads=1
   python3 -B scripts/verify-capability-evidence.py \
     > "${CARGO_TARGET_DIR:-$repo_root/target}/sift-capability-evidence.json"

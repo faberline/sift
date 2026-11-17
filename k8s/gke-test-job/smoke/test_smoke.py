@@ -301,6 +301,8 @@ class VerifyTest(unittest.TestCase):
                         mock.patch.object(smoke, "check_protocols",
                                           return_value={"otlp_logs_partial": "passed"}) as protocols, \
                         mock.patch.object(smoke, "wait_for_replacement", return_value="uid2"), \
+                        mock.patch.object(smoke, "check_mcp", return_value={"initialize": "passed"}), \
+                        mock.patch.object(smoke, "pod_namespace", return_value="ns1"), \
                         contextlib.redirect_stdout(out):
                     smoke.verify(api, URL)
             finally:
@@ -310,6 +312,211 @@ class VerifyTest(unittest.TestCase):
         self.assertEqual(result["result"], "PASS")
         self.assertEqual(result["protocols"], {"otlp_logs_partial": "passed"})
         protocols.assert_called_once_with(URL)
+
+    def test_verify_prints_mcp(self):
+        pod = {
+            "metadata": {"uid": "uid1"},
+            "status": {"containerStatuses": [{"name": "sift", "imageID": "img"}]},
+        }
+        claim = {"metadata": {"uid": "pvc"}, "spec": {"volumeName": "vol"}, "status": {"phase": "Bound"}}
+        event = {"message": "marker", "trace_id": "t", "span_id": "s"}
+
+        def api(method, resource, name, uid=None):
+            if method == "GET" and resource == "pods":
+                return pod
+            if method == "GET" and resource == "persistentvolumeclaims":
+                return claim
+            if method == "DELETE" and resource == "pods":
+                return None
+            raise AssertionError(f"unexpected {method} {resource}")
+
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                Path("event.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
+                with mock.patch.object(smoke, "read_checkpoint"), \
+                        mock.patch.object(smoke, "read_record", return_value="record"), \
+                        mock.patch.object(smoke, "check_protocols", return_value={"otlp_logs_partial": "passed"}), \
+                        mock.patch.object(smoke, "wait_for_replacement", return_value="uid2"), \
+                        mock.patch.object(smoke, "pod_namespace", return_value="ns1"), \
+                        mock.patch.object(smoke, "check_mcp", return_value={"initialize": "passed"}) as mcp, \
+                        contextlib.redirect_stdout(out):
+                    smoke.verify(api, URL)
+            finally:
+                os.chdir(cwd)
+
+        result = json.loads(out.getvalue().splitlines()[-1])
+        self.assertEqual(result["result"], "PASS")
+        self.assertEqual(result["mcp"], {"initialize": "passed"})
+        mcp.assert_called_once_with(URL, "ns1")
+
+
+def sse(message):
+    return f"event: message\ndata: {json.dumps(message)}\n\n"
+
+
+def message(names, read_only=True):
+    return {"result": {"tools": [{"name": name, "annotations": {"readOnlyHint": read_only}} for name in names]}}
+
+
+def init_answer(session=True):
+    headers = {"content-type": "text/event-stream"}
+    if session:
+        headers["mcp-session-id"] = "s1"
+    return 200, headers, sse({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-11-25"}})
+
+
+def tools_answer(names=None):
+    names = list(smoke.MCP_TOOLS) if names is None else names
+    body = message(names)
+    body["jsonrpc"] = "2.0"
+    body["id"] = 2
+    return 200, {"content-type": "text/event-stream"}, sse(body)
+
+
+def good_session():
+    return [init_answer(), (202, {}, ""), tools_answer(), (403, {}, "forbidden")]
+
+
+class FakeMcp:
+    """Stands in for smoke.mcp_post. Returns prepared answers and records each call."""
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.calls = []
+
+    def __call__(self, url, headers, payload, timeout=10):
+        self.calls.append(({key.lower(): value for key, value in headers.items()}, payload))
+        return self.answers.pop(0)
+
+
+def run_mcp(answers):
+    fake = FakeMcp(answers)
+    with mock.patch.object(smoke, "mcp_post", new=fake):
+        return smoke.check_mcp("http://x", "ns1"), fake
+
+
+class SseTest(unittest.TestCase):
+    def test_parse_sse_json(self):
+        text = 'id: 0\ndata: \n\nevent: message\ndata: {"jsonrpc":"2.0","id":1,"result":{}}\n\n'
+        self.assertEqual(smoke.parse_sse_json(text), [{"jsonrpc": "2.0", "id": 1, "result": {}}])
+
+    def test_parse_sse_json_empty_fails(self):
+        with self.assertRaises(RuntimeError) as context:
+            smoke.parse_sse_json("event: ping\n\n")
+        self.assertIn("SSE data event", str(context.exception))
+
+    def test_mcp_message_plain_json(self):
+        body = '{"jsonrpc":"2.0","id":2,"result":{}}'
+        self.assertEqual(
+            smoke.mcp_message({"content-type": "application/json"}, body, 2),
+            {"jsonrpc": "2.0", "id": 2, "result": {}},
+        )
+
+    def test_mcp_message_wrong_id_fails(self):
+        with self.assertRaises(RuntimeError):
+            smoke.mcp_message({"content-type": "text/event-stream"}, sse({"jsonrpc": "2.0", "id": 1, "result": {}}), 2)
+
+
+class ToolListTest(unittest.TestCase):
+    def test_good_list_passes(self):
+        smoke.check_tool_list(message(reversed(smoke.MCP_TOOLS)))
+
+    def test_changed_list_fails(self):
+        names = [name for name in smoke.MCP_TOOLS if name != "sift_query"]
+        with self.assertRaises(RuntimeError) as context:
+            smoke.check_tool_list(message(names))
+        self.assertIn("tool list drifted", str(context.exception))
+
+    def test_extra_tool_fails(self):
+        with self.assertRaises(RuntimeError) as context:
+            smoke.check_tool_list(message(list(smoke.MCP_TOOLS) + ["sift_write"]))
+        self.assertIn("tool list drifted", str(context.exception))
+
+    def test_not_read_only_fails(self):
+        with self.assertRaises(RuntimeError) as context:
+            smoke.check_tool_list(message(smoke.MCP_TOOLS, read_only=False))
+        self.assertIn("tool list drifted", str(context.exception))
+
+    def test_missing_annotations_fails(self):
+        body = message(smoke.MCP_TOOLS)
+        del body["result"]["tools"][0]["annotations"]
+        with self.assertRaises(RuntimeError) as context:
+            smoke.check_tool_list(body)
+        self.assertIn("tool list drifted", str(context.exception))
+
+
+class McpTest(unittest.TestCase):
+    def test_good_session(self):
+        result, fake = run_mcp(good_session())
+        self.assertEqual(result, {"initialize": "passed", "tools": 9, "origin_denied": "passed"})
+
+        hosts = [headers["host"] for headers, _ in fake.calls]
+        self.assertEqual(hosts, ["sift-smoke.ns1.svc.cluster.local"] * 4)
+        origins = [headers["origin"] for headers, _ in fake.calls]
+        self.assertEqual(origins[:3], ["http://sift-smoke.ns1.svc.cluster.local:7380"] * 3)
+
+        for headers, _ in fake.calls[1:3]:
+            self.assertEqual(headers["mcp-session-id"], "s1")
+            self.assertEqual(headers["mcp-protocol-version"], "2025-11-25")
+        self.assertEqual(fake.calls[0][1]["params"]["protocolVersion"], "2025-11-25")
+
+        denied_headers, _ = fake.calls[3]
+        self.assertEqual(denied_headers["origin"], "https://evil.example")
+        self.assertNotIn("mcp-session-id", denied_headers)
+        for headers, _ in fake.calls:
+            self.assertNotIn("authorization", headers)
+
+    def test_origin_accepted_fails(self):
+        answers = good_session()
+        answers[3] = (200, {}, "ok")
+        with self.assertRaises(RuntimeError) as context:
+            run_mcp(answers)
+        self.assertIn("mcp_origin_denied", str(context.exception))
+
+    def test_origin_other_status_fails(self):
+        answers = good_session()
+        answers[3] = (500, {}, "error")
+        with self.assertRaises(RuntimeError) as context:
+            run_mcp(answers)
+        self.assertIn("mcp_origin_denied", str(context.exception))
+
+    def test_missing_session_header_fails(self):
+        answers = good_session()
+        answers[0] = init_answer(session=False)
+        with self.assertRaises(RuntimeError) as context:
+            run_mcp(answers)
+        self.assertIn("mcp_initialize", str(context.exception))
+
+    def test_initialize_refused_fails(self):
+        answers = good_session()
+        answers[0] = (403, {}, "forbidden")
+        with self.assertRaises(RuntimeError) as context:
+            run_mcp(answers)
+        self.assertIn("mcp_initialize", str(context.exception))
+
+    def test_tool_list_drift_fails(self):
+        answers = good_session()
+        answers[2] = tools_answer(names=list(smoke.MCP_TOOLS)[:8])
+        with self.assertRaises(RuntimeError) as context:
+            run_mcp(answers)
+        self.assertIn("tool list drifted", str(context.exception))
+
+
+class OverlayTest(unittest.TestCase):
+    def test_overlay_allows_mcp_host(self):
+        path = Path(__file__).resolve().parent.parent.parent / "overlays" / "gke-test" / "sift.yaml"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        hosts_line = next(i for i, line in enumerate(lines) if line.strip().removeprefix("- ") == "name: SIFT_MCP_ALLOWED_HOSTS")
+        self.assertIn("sift-smoke.$(POD_NAMESPACE).svc.cluster.local", lines[hosts_line + 1])
+        self.assertIn("fieldPath: metadata.namespace", "\n".join(lines))
+        namespace_line = next(i for i, line in enumerate(lines) if line.strip().removeprefix("- ") == "name: POD_NAMESPACE")
+        self.assertLess(namespace_line, hosts_line)
+        origins_line = next(i for i, line in enumerate(lines) if line.strip().removeprefix("- ") == "name: SIFT_MCP_ALLOWED_ORIGINS")
+        self.assertIn("http://sift-smoke.$(POD_NAMESPACE).svc.cluster.local:7380", lines[origins_line + 1])
+        self.assertLess(namespace_line, origins_line)
 
 
 if __name__ == "__main__":

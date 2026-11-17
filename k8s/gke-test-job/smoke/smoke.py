@@ -27,6 +27,11 @@ SERVICE_ATTRIBUTES = [
     {"key": "service.name", "value": {"stringValue": "sift-acceptance"}},
     {"key": "deployment.environment.name", "value": {"stringValue": ENVIRONMENT}},
 ]
+MCP_PROTOCOL = "2025-11-25"
+MCP_TOOLS = [
+    "sift_correlate", "sift_get_trace", "sift_list_alert_rules", "sift_list_alerts",
+    "sift_list_error_groups", "sift_list_saved_queries", "sift_list_services", "sift_query", "sift_tail_logs",
+]
 
 
 def write_fixture():
@@ -471,6 +476,113 @@ def log_tail(url):
         fail("log_tail", "expected one smoke-log record in the tail")
 
 
+def parse_sse_json(text):
+    """Return the JSON value of each non-empty `data:` line of an SSE body."""
+    events = []
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):]
+        if payload.startswith(" "):
+            payload = payload[1:]
+        if payload:
+            events.append(json.loads(payload))
+    if not events:
+        raise RuntimeError("MCP response did not contain an SSE data event")
+    return events
+
+
+def mcp_message(headers, body, request_id):
+    """Return the JSON-RPC message with this id from a JSON or SSE response body."""
+    if headers.get("content-type", "").startswith("application/json"):
+        messages = [json.loads(body)]
+    else:
+        messages = parse_sse_json(body)
+    for message in messages:
+        if message.get("id") == request_id:
+            return message
+    raise RuntimeError(f"MCP response has no message for id {request_id}")
+
+
+def check_tool_list(message):
+    tools = message["result"]["tools"]
+    names = sorted(tool["name"] for tool in tools)
+    read_only = all(tool.get("annotations", {}).get("readOnlyHint") is True for tool in tools)
+    if names != MCP_TOOLS or not read_only:
+        raise RuntimeError("MCP tool list drifted")
+
+
+def mcp_post(url, headers, payload, timeout=10):
+    """POST one JSON-RPC message to /mcp; return (status, lower-case headers, body text)."""
+    request = urllib.request.Request(f"{url}/mcp", data=json.dumps(payload).encode(), method="POST")
+    request.add_header("content-type", "application/json")
+    request.add_header("accept", "application/json, text/event-stream")
+    for key, value in headers.items():
+        request.add_header(key, value)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, {k.lower(): v for k, v in response.headers.items()}, response.read().decode()
+    except urllib.error.HTTPError as error:
+        return error.code, {k.lower(): v for k, v in error.headers.items()}, error.read().decode()
+
+
+def pod_namespace():
+    return (SERVICE_ACCOUNT / "namespace").read_text().strip()
+
+
+def check_mcp(url, namespace):
+    """Run the MCP session, tool list and Origin checks against the Sift Service."""
+    host = f"sift-smoke.{namespace}.svc.cluster.local"
+    origin = f"http://{host}:7380"
+    base = {"host": host, "origin": origin}
+    initialize_payload = {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": MCP_PROTOCOL, "capabilities": {},
+                   "clientInfo": {"name": "sift-gke-smoke", "version": "1"}},
+    }
+
+    def step(name, action):
+        try:
+            return action()
+        except RuntimeError as error:
+            raise RuntimeError(f"mcp_{name}: {error}") from error
+
+    def initialize():
+        status, headers, body = mcp_post(url, base, initialize_payload)
+        if status != 200:
+            raise RuntimeError(f"HTTP {status}")
+        message = mcp_message(headers, body, 1)
+        if message.get("jsonrpc") != "2.0" or message.get("result") is None:
+            raise RuntimeError("no JSON-RPC result")
+        session = headers.get("mcp-session-id", "").strip()
+        if not session:
+            raise RuntimeError("no mcp-session-id header")
+        return session
+
+    def initialized(session_headers):
+        status, _, _ = mcp_post(url, session_headers, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        if not 200 <= status < 300:
+            raise RuntimeError(f"HTTP {status}")
+
+    def tools(session_headers):
+        status, headers, body = mcp_post(url, session_headers, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+        if status != 200:
+            raise RuntimeError(f"HTTP {status}")
+        check_tool_list(mcp_message(headers, body, 2))
+
+    def origin_denied():
+        status, _, _ = mcp_post(url, {"host": host, "origin": "https://evil.example"}, initialize_payload)
+        if status != 403:
+            raise RuntimeError(f"HTTP {status}, expected 403")
+
+    session = step("initialize", initialize)
+    session_headers = {**base, "mcp-session-id": session, "mcp-protocol-version": MCP_PROTOCOL}
+    step("initialized", lambda: initialized(session_headers))
+    step("tools", lambda: tools(session_headers))
+    step("origin_denied", origin_denied)
+    return {"initialize": "passed", "tools": len(MCP_TOOLS), "origin_denied": "passed"}
+
+
 def check_protocols(url, now_nanos=None):
     """Run the OTLP, Remote Write and read checks in order; raise on the first failure."""
     now = time.time_ns() if now_nanos is None else now_nanos
@@ -509,6 +621,7 @@ def verify(api, url):
     claim_uid, volume = bound_claim(api)
     before = read_record(url, event)
     protocols = check_protocols(url)
+    mcp = check_mcp(url, pod_namespace())
 
     api("DELETE", "pods", POD, uid=original_uid)
     replacement_uid = wait_for_replacement(api, original_uid, image)
@@ -520,7 +633,7 @@ def verify(api, url):
     print(json.dumps({
         "records": 1, "marker": event["message"], "original_pod_uid": original_uid,
         "replacement_pod_uid": replacement_uid, "pvc_uid": claim_uid, "volume": volume,
-        "image_id": image, "result": "PASS", "protocols": protocols,
+        "image_id": image, "result": "PASS", "protocols": protocols, "mcp": mcp,
     }))
 
 
