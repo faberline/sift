@@ -206,7 +206,7 @@ jobs:
         run: cargo build --locked -p sift --bins
       - name: cargo llvm-cov
         run: cargo llvm-cov --workspace --locked --json --summary-only --output-path target/coverage.json
-      - uses: faberline/aw/.github/actions/coverage@7ca7c1c8d24f0d29263cc43e7c37987bd853f202 # S8
+      - uses: faberline/aw/.github/actions/coverage@4340a382c73351cffff85edba7079e4c24adf3db # S8
         with:
           summary: target/coverage.json
 
