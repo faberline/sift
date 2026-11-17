@@ -126,6 +126,25 @@ async fn wait_ready(endpoint: &str) {
     panic!("{endpoint} did not become ready");
 }
 
+/// Waits until `127.0.0.1:<port>` accepts a TCP connection, or returns an error after `timeout`.
+async fn wait_for_tcp(port: u16, timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "127.0.0.1:{port} did not accept a connection within {timeout:?}"
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 async fn query(endpoint: &str) -> serde_json::Value {
     reqwest::Client::new()
         .post(format!("{endpoint}/api/v1/query"))
@@ -236,6 +255,9 @@ async fn gateway_ingest_and_query_use_the_store_role_source_of_truth() {
     let through_gateway = query(&gateway_endpoint).await;
     assert_eq!(record_count(&through_gateway), 1);
 
+    wait_for_tcp(gateway_grpc_port, Duration::from_secs(10))
+        .await
+        .expect("gateway gRPC port");
     let mut grpc = LogsServiceClient::connect(format!("http://127.0.0.1:{gateway_grpc_port}"))
         .await
         .unwrap();
@@ -370,4 +392,28 @@ async fn query_role_owns_async_job_state_across_its_restart() {
     }
 
     drop(query_process);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wait_for_tcp_waits_until_the_port_listens() {
+    let p = port();
+    let listener_thread = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        let listener = TcpListener::bind(("127.0.0.1", p)).unwrap();
+        let _ = listener.accept();
+    });
+    let start = Instant::now();
+    wait_for_tcp(p, Duration::from_secs(5)).await.unwrap();
+    assert!(start.elapsed() >= Duration::from_millis(250));
+    listener_thread.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wait_for_tcp_times_out_with_a_clear_error() {
+    let p = port();
+    let err = wait_for_tcp(p, Duration::from_millis(200))
+        .await
+        .unwrap_err();
+    assert!(err.contains(&format!("127.0.0.1:{p}")), "{err}");
+    assert!(err.contains("did not accept a connection"), "{err}");
 }
