@@ -1,9 +1,12 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 import check_regression
+import median_result
 
 BASELINE = {
     "samples_per_second": 1000,
@@ -31,6 +34,16 @@ SLOW_LOG_RUN = {
     "peak_rss_kib": 505784,
     "cpu_seconds": 27.65,
 }
+
+# Runs 1, 3 and 5 are measured on CI (43696743112, 43913197544, 43991449604).
+# Runs 2 and 4 are test samples, not measurements.
+TRACE_RUNS = [
+    {"samples_written": 50000, "queried_samples": 21000, "samples_per_second": 4029.727, "query_p50_ms": 676.363, "query_p95_ms": 680.546, "query_p99_ms": 683.482, "peak_rss_kib": 466192, "cpu_seconds": 32.65, "requests": 50, "items_per_request": 1000, "queries": 21},
+    {"samples_written": 50000, "queried_samples": 21000, "samples_per_second": 3900.0, "query_p50_ms": 690.0, "query_p95_ms": 695.0, "query_p99_ms": 700.0, "peak_rss_kib": 466000, "cpu_seconds": 34.0, "requests": 50, "items_per_request": 1000, "queries": 21},
+    {"samples_written": 50000, "queried_samples": 21000, "samples_per_second": 2652.503, "query_p50_ms": 977.881, "query_p95_ms": 984.382, "query_p99_ms": 997.561, "peak_rss_kib": 465828, "cpu_seconds": 49.81, "requests": 50, "items_per_request": 1000, "queries": 21},
+    {"samples_written": 50000, "queried_samples": 21000, "samples_per_second": 3800.0, "query_p50_ms": 700.0, "query_p95_ms": 705.0, "query_p99_ms": 710.0, "peak_rss_kib": 466100, "cpu_seconds": 35.0, "requests": 50, "items_per_request": 1000, "queries": 21},
+    {"samples_written": 50000, "queried_samples": 21000, "samples_per_second": 2759.793, "query_p50_ms": 1035.765, "query_p95_ms": 1044.052, "query_p99_ms": 1045.317, "peak_rss_kib": 465700, "cpu_seconds": 53.4, "requests": 50, "items_per_request": 1000, "queries": 21},
+]
 
 
 def with_values(**changes):
@@ -92,6 +105,32 @@ class CheckRegression(unittest.TestCase):
         messages = check_regression.check(bad, baseline, 60)
         self.assertEqual(len(messages), 1)
         self.assertIn("query_p95_ms", messages[0])
+
+    def test_trace_baseline_has_every_compared_key(self):
+        path = Path(__file__).parent / "baseline" / "trace.json"
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+        for key in (
+            "samples_per_second",
+            "query_p50_ms",
+            "query_p95_ms",
+            "query_p99_ms",
+            "peak_rss_kib",
+            "cpu_seconds",
+        ):
+            self.assertIn(key, baseline)
+            self.assertIsInstance(baseline[key], (int, float))
+            self.assertGreater(baseline[key], 0, key)
+
+    def test_trace_baseline_fails_when_exceeded_and_passes_unchanged(self):
+        path = Path(__file__).parent / "baseline" / "trace.json"
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(check_regression.check(baseline, baseline, 60), [])
+
+        bad = dict(baseline)
+        bad["query_p99_ms"] = baseline["query_p99_ms"] * 1.7
+        messages = check_regression.check(bad, baseline, 60)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("query_p99_ms", messages[0])
 
     def test_main_exit_codes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -319,6 +358,94 @@ class CheckRegression(unittest.TestCase):
         )
         self.assertNotIn("metric.json 60 130", text)
         self.assertNotIn("metric.json 60\n", text)
+
+    def _trace_baseline(self):
+        path = Path(__file__).parent / "baseline" / "trace.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_median_takes_median_of_each_key(self):
+        m = median_result.median_result(TRACE_RUNS)
+        self.assertEqual(m["cpu_seconds"], 35.0)
+        self.assertEqual(m["query_p99_ms"], 710.0)
+        self.assertEqual(m["samples_per_second"], 3800.0)
+        self.assertEqual(m["peak_rss_kib"], 466000)
+        self.assertEqual(m["runs"], 5)
+        self.assertEqual(m["cpu_seconds_runs"], [32.65, 34.0, 49.81, 35.0, 53.4])
+        self.assertEqual(m["samples_written"], 50000)
+
+    def test_median_needs_odd_count_of_at_least_three(self):
+        for runs in (TRACE_RUNS[:4], TRACE_RUNS[:2], TRACE_RUNS[:1]):
+            with self.subTest(count=len(runs)):
+                with self.assertRaises(median_result.InputError):
+                    median_result.median_result(runs)
+        median_result.median_result(TRACE_RUNS[:3])
+
+    def test_median_rejects_bad_run(self):
+        missing = [
+            {k: v for k, v in run.items() if k != "cpu_seconds"} if i == 1 else run
+            for i, run in enumerate(TRACE_RUNS)
+        ]
+        with self.assertRaises(median_result.InputError):
+            median_result.median_result(missing)
+        text = [dict(run) for run in TRACE_RUNS]
+        text[1]["cpu_seconds"] = "x"
+        with self.assertRaises(median_result.InputError):
+            median_result.median_result(text)
+
+    def test_median_main_writes_result_and_prints_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for i, run in enumerate(TRACE_RUNS, start=1):
+                path = Path(tmp) / f"r{i}.json"
+                path.write_text(json.dumps(run) + "\n", encoding="utf-8")
+                paths.append(str(path))
+            out = Path(tmp) / "median.json"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = median_result.main([str(out), *paths])
+            self.assertEqual(code, 0)
+            self.assertIn("median cpu_seconds=35.0", buf.getvalue())
+            self.assertIn("run 5 cpu_seconds=53.4", buf.getvalue())
+            written = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(written["cpu_seconds"], 35.0)
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(
+                    median_result.main([str(out), paths[0], paths[1]]), 2
+                )
+                self.assertEqual(
+                    median_result.main([str(out), *paths[:4]]), 2
+                )
+
+    def test_trace_median_of_five_passes_at_60(self):
+        median = median_result.median_result(TRACE_RUNS)
+        self.assertEqual(
+            check_regression.check(median, self._trace_baseline(), 60), []
+        )
+
+    def test_trace_single_slow_run_fails_at_60(self):
+        messages = check_regression.check(TRACE_RUNS[4], self._trace_baseline(), 60)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("cpu_seconds", messages[0])
+
+    def test_trace_median_still_catches_large_regression(self):
+        slow = [
+            dict(run, cpu_seconds=run["cpu_seconds"] * 3, query_p99_ms=run["query_p99_ms"] * 3)
+            for run in TRACE_RUNS
+        ]
+        median = median_result.median_result(slow)
+        messages = check_regression.check(median, self._trace_baseline(), 60)
+        self.assertEqual(len(messages), 2)
+        self.assertTrue(any("cpu_seconds" in m for m in messages))
+        self.assertTrue(any("query_p99_ms" in m for m in messages))
+
+    def test_ci_trace_step_uses_median_and_threshold_60(self):
+        ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+        text = ci.read_text(encoding="utf-8")
+        self.assertIn("for i in 1 2 3 4 5; do", text)
+        self.assertIn("tests/perf/median_result.py", text)
+        lines = [line for line in text.splitlines() if "tests/perf/baseline/trace.json" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].rstrip().endswith("tests/perf/baseline/trace.json 60"))
 
 
 if __name__ == "__main__":

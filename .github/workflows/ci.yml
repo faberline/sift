@@ -280,6 +280,27 @@ jobs:
           if-no-files-found: error
       - name: log regression check
         run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-log.json" tests/perf/baseline/log.json 60 150 --ignore query_p99_ms
+      - name: trace workload (5 runs)
+        env:
+          WORKLOAD_REQUESTS: '50'
+          WORKLOAD_ITEMS: '1000'
+          WORKLOAD_QUERIES: '21'
+        run: |
+          for i in 1 2 3 4 5; do
+            WORKLOAD_OUT="$RUNNER_TEMP/perf-trace-$i.json" bash tests/perf/trace_workload.sh
+          done
+      - name: trace median
+        run: python3 -B tests/perf/median_result.py "$RUNNER_TEMP/perf-trace.json" "$RUNNER_TEMP"/perf-trace-1.json "$RUNNER_TEMP"/perf-trace-2.json "$RUNNER_TEMP"/perf-trace-3.json "$RUNNER_TEMP"/perf-trace-4.json "$RUNNER_TEMP"/perf-trace-5.json
+      - name: upload trace result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-trace
+          path: |
+            ${{ runner.temp }}/perf-trace.json
+            ${{ runner.temp }}/perf-trace-?.json
+          if-no-files-found: error
+      - name: trace regression check
+        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-trace.json" tests/perf/baseline/trace.json 60
 
   test-security:
     name: "test: security (deny, architecture)"
