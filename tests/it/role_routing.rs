@@ -3,6 +3,7 @@
 use std::{
     net::TcpListener,
     process::{Child, Command, Stdio},
+    sync::atomic::{AtomicU32, Ordering},
     time::{Duration, Instant},
 };
 
@@ -14,21 +15,55 @@ use opentelemetry_proto::tonic::{
 };
 use tonic::Request as GrpcRequest;
 
-struct Process(Child);
+struct Process {
+    child: Child,
+    role: String,
+    log: tempfile::NamedTempFile,
+}
 
 impl Drop for Process {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
+impl Process {
+    /// Panics with the exit status and the captured stderr when the process has stopped.
+    fn assert_running(&mut self) {
+        if let Some(status) = self.child.try_wait().expect("poll Sift role") {
+            panic!(
+                "Sift {} role stopped with {status}\nstderr:\n{}",
+                self.role,
+                self.log_text()
+            );
+        }
+    }
+
+    /// The captured stderr of the role, or a note when it cannot be read.
+    fn log_text(&self) -> String {
+        std::fs::read_to_string(self.log.path())
+            .unwrap_or_else(|error| format!("<cannot read {}: {error}>", self.log.path().display()))
+    }
+}
+
+const PORT_BASE: u32 = 20_000;
+const PORT_SPAN: u32 = 10_000; // ports 20000..30000, below 32768
+
+/// A free loopback port that is unique in this process and outside the kernel's
+/// ephemeral range (outbound connections cannot take it as a local port).
 fn port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    // Start at a per-process offset so two test binaries that run one after the
+    // other do not always begin at the same number.
+    let start = std::process::id() % PORT_SPAN;
+    loop {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let candidate = u16::try_from(PORT_BASE + (start + n) % PORT_SPAN).unwrap();
+        if TcpListener::bind(("127.0.0.1", candidate)).is_ok() {
+            return candidate;
+        }
+    }
 }
 
 fn spawn_role(
@@ -40,6 +75,7 @@ fn spawn_role(
     store_grpc: Option<&str>,
     query: Option<&str>,
 ) -> Process {
+    let log = tempfile::NamedTempFile::new().expect("create role log");
     let mut command = Command::new(env!("CARGO_BIN_EXE_sift"));
     command
         .args([
@@ -55,7 +91,7 @@ fn spawn_role(
         .arg(data)
         .env("SIFT_AUTH", "off")
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::from(log.reopen().expect("open role log")));
     if let Some(grpc_port) = grpc_port {
         command.args(["--grpc-port", &grpc_port.to_string()]);
     }
@@ -68,7 +104,11 @@ fn spawn_role(
     if let Some(query) = query {
         command.env("SIFT_QUERY_ENDPOINT", query);
     }
-    Process(command.spawn().expect("start Sift role"))
+    Process {
+        child: command.spawn().expect("start Sift role"),
+        role: role.to_string(),
+        log,
+    }
 }
 
 fn grpc_log() -> ExportLogsServiceRequest {
@@ -169,7 +209,7 @@ async fn gateway_ingest_and_query_use_the_store_role_source_of_truth() {
     let query_data = tempfile::tempdir().unwrap();
     let gateway_data = tempfile::tempdir().unwrap();
 
-    let _store = spawn_role(
+    let mut store = spawn_role(
         "store",
         store_port,
         store_data.path(),
@@ -179,7 +219,7 @@ async fn gateway_ingest_and_query_use_the_store_role_source_of_truth() {
         None,
     );
     wait_ready(&store_endpoint).await;
-    let _query = spawn_role(
+    let mut query_role = spawn_role(
         "query",
         query_port,
         query_data.path(),
@@ -189,7 +229,7 @@ async fn gateway_ingest_and_query_use_the_store_role_source_of_truth() {
         None,
     );
     wait_ready(&query_endpoint).await;
-    let _gateway = spawn_role(
+    let mut gateway = spawn_role(
         "gateway",
         gateway_port,
         gateway_data.path(),
@@ -236,9 +276,17 @@ async fn gateway_ingest_and_query_use_the_store_role_source_of_truth() {
     let through_gateway = query(&gateway_endpoint).await;
     assert_eq!(record_count(&through_gateway), 1);
 
-    let mut grpc = LogsServiceClient::connect(format!("http://127.0.0.1:{gateway_grpc_port}"))
-        .await
-        .unwrap();
+    store.assert_running();
+    query_role.assert_running();
+    gateway.assert_running();
+    let mut grpc =
+        match LogsServiceClient::connect(format!("http://127.0.0.1:{gateway_grpc_port}")).await {
+            Ok(client) => client,
+            Err(error) => panic!(
+                "connect to gateway gRPC port {gateway_grpc_port}: {error:?}\ngateway stderr:\n{}",
+                gateway.log_text()
+            ),
+        };
     let mut request = GrpcRequest::new(grpc_log());
     request
         .metadata_mut()
@@ -370,4 +418,62 @@ async fn query_role_owns_async_job_state_across_its_restart() {
     }
 
     drop(query_process);
+}
+
+#[test]
+fn port_stays_outside_the_ephemeral_range_and_is_unique() {
+    let ports: Vec<u16> = (0..2000).map(|_| port()).collect();
+    for p in &ports {
+        assert!(
+            (20_000..30_000).contains(p),
+            "port {p} is outside 20000..30000"
+        );
+    }
+    let unique: std::collections::HashSet<u16> = ports.iter().copied().collect();
+    assert_eq!(unique.len(), ports.len(), "port() returned a number twice");
+}
+
+#[test]
+#[should_panic(expected = "role stopped with")]
+fn assert_running_names_the_exit_status_and_stderr_of_a_stopped_role() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let mut process = spawn_role(
+        "gateway",
+        port(),
+        file.path(),
+        Some(port()),
+        None,
+        None,
+        None,
+    );
+    for _ in 0..100 {
+        std::thread::sleep(Duration::from_millis(50));
+        process.assert_running();
+    }
+}
+
+#[test]
+fn assert_running_includes_the_captured_stderr() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let mut process = spawn_role(
+        "gateway",
+        port(),
+        file.path(),
+        Some(port()),
+        None,
+        None,
+        None,
+    );
+    for _ in 0..100 {
+        if process.child.try_wait().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        process.child.try_wait().unwrap().is_some(),
+        "role did not exit"
+    );
+    let text = process.log_text();
+    assert!(!text.trim().is_empty(), "stderr was not captured");
 }
