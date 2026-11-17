@@ -34,6 +34,29 @@ pub async fn reopen_service_state(
     }
 }
 
+/// Open `root` as a new `DurableJournal` after a previous owner stopped.
+/// Same rule as `reopen_service_state`: retry only the lock error
+/// ("another Sift process"), every 20 ms, until `timeout` has passed.
+/// Any other error, and the lock error after the timeout, is returned unchanged.
+pub async fn reopen_journal(
+    root: &std::path::Path,
+    timeout: std::time::Duration,
+) -> anyhow::Result<sift::DurableJournal> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match sift::DurableJournal::open(root) {
+            Ok(journal) => return Ok(journal),
+            Err(error)
+                if format!("{error:#}").contains("another Sift process")
+                    && std::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// The timeout that the restart tests use. It is far above the observed
 /// release delay and far below the CI job timeout.
 pub const REOPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
