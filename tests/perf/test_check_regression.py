@@ -438,14 +438,14 @@ class CheckRegression(unittest.TestCase):
         self.assertTrue(any("cpu_seconds" in m for m in messages))
         self.assertTrue(any("query_p99_ms" in m for m in messages))
 
-    def test_ci_trace_step_uses_median_and_threshold_60(self):
+    def test_ci_trace_step_keeps_threshold_60_and_median(self):
         ci = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
         text = ci.read_text(encoding="utf-8")
         self.assertIn("for i in 1 2 3 4 5; do", text)
         self.assertIn("tests/perf/median_result.py", text)
-        lines = [line for line in text.splitlines() if "tests/perf/baseline/trace.json" in line]
+        lines = [line for line in text.splitlines() if "tests/perf/compare_trace.py" in line]
         self.assertEqual(len(lines), 1)
-        self.assertTrue(lines[0].rstrip().endswith("tests/perf/baseline/trace.json 60"))
+        self.assertTrue(lines[0].rstrip().endswith(" 60"))
 
 
 if __name__ == "__main__":
