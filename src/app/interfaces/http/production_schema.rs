@@ -1,7 +1,7 @@
 //! The V2 and control contracts use the same field names as their handlers.
 use serde_json::json;
 use utoipa::openapi::{
-    path::{Operation, PathItem, PathItemType},
+    path::{Operation, PathItem},
     OpenApi,
 };
 pub(super) fn extend(document: &mut OpenApi) {
@@ -66,14 +66,13 @@ pub(super) fn extend(document: &mut OpenApi) {
             let mut typed: Operation =
                 serde_json::from_value(operation).expect("static production operation");
             typed.extensions = None;
-            let method = match method {
-                "get" => PathItemType::Get,
-                "post" => PathItemType::Post,
-                "put" => PathItemType::Put,
-                "delete" => PathItemType::Delete,
+            match method {
+                "get" => item.get = Some(typed),
+                "post" => item.post = Some(typed),
+                "put" => item.put = Some(typed),
+                "delete" => item.delete = Some(typed),
                 _ => unreachable!(),
-            };
-            item.operations.insert(method, typed);
+            }
         }
         document.paths.paths.insert(path.into(), item);
     }

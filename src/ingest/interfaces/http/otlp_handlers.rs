@@ -15,7 +15,13 @@ use crate::app::interfaces::http::api_error::ApiError;
 use crate::app::service_state::ServiceState;
 use crate::ingest::application::retention_admission::retention_rejection;
 
-#[utoipa::path(post, path = "/v1/logs", responses((status = 200, description = "OTLP logs export response")))]
+// OpenAPI description of an OTLP request body: raw bytes (no doc comment: it would become a schema description).
+#[allow(dead_code)]
+#[derive(utoipa::ToSchema)]
+#[schema(value_type = String, format = Binary)]
+struct OtlpBody(Vec<u8>);
+
+#[utoipa::path(post, path = "/v1/logs", tag = "crate", request_body(content = inline(OtlpBody), description = "", content_type = "application/octet-stream"), responses((status = 200, description = "OTLP logs export response")))]
 pub(crate) async fn ingest_logs(
     State(state): State<Arc<ServiceState>>,
     principal: Option<Extension<RoleMapPrincipal>>,
@@ -32,7 +38,7 @@ pub(crate) async fn ingest_logs(
     .await
 }
 
-#[utoipa::path(post, path = "/v1/traces", responses((status = 200, description = "OTLP traces export response")))]
+#[utoipa::path(post, path = "/v1/traces", tag = "crate", request_body(content = inline(OtlpBody), description = "", content_type = "application/octet-stream"), responses((status = 200, description = "OTLP traces export response")))]
 pub(crate) async fn ingest_traces(
     State(state): State<Arc<ServiceState>>,
     principal: Option<Extension<RoleMapPrincipal>>,
@@ -49,7 +55,7 @@ pub(crate) async fn ingest_traces(
     .await
 }
 
-#[utoipa::path(post, path = "/v1/metrics", responses((status = 200, description = "OTLP metrics export response")))]
+#[utoipa::path(post, path = "/v1/metrics", tag = "crate", request_body(content = inline(OtlpBody), description = "", content_type = "application/octet-stream"), responses((status = 200, description = "OTLP metrics export response")))]
 pub(crate) async fn ingest_metrics(
     State(state): State<Arc<ServiceState>>,
     principal: Option<Extension<RoleMapPrincipal>>,

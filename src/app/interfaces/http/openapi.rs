@@ -2,7 +2,7 @@
 //! schemas, plus a summary entry for each query and Prometheus route.
 
 use anyhow::{Context, Result};
-use service_http::DetailedErrorEnvelope as ErrorEnvelope;
+use service_http::{DetailedErrorEnvelope, ErrorEnvelope};
 use utoipa::OpenApi;
 
 use crate::ingest::interfaces::http::otlp_handlers::{
@@ -53,6 +53,7 @@ use crate::shared_kernel::event::{
         IntegrityArchiveV1,
         IntegrityStorageV1,
         IntegrityReportV1,
+        DetailedErrorEnvelope,
         ErrorEnvelope
     )),
     tags((name = "telemetry", description = "Sift logs, metrics, and traces"))
@@ -61,9 +62,9 @@ struct SiftApi;
 
 pub fn openapi() -> utoipa::openapi::OpenApi {
     use utoipa::openapi::{
-        path::{OperationBuilder, ParameterBuilder, ParameterIn, PathItem, PathItemType},
+        path::{HttpMethod, OperationBuilder, ParameterBuilder, ParameterIn, PathItem},
         response::ResponseBuilder,
-        schema::{ObjectBuilder, SchemaType},
+        schema::{ObjectBuilder, Type},
         Required,
     };
 
@@ -104,8 +105,8 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
         ),
     ] {
         let method = match method {
-            "get" => PathItemType::Get,
-            "post" => PathItemType::Post,
+            "get" => HttpMethod::Get,
+            "post" => HttpMethod::Post,
             _ => unreachable!("phase-one OpenAPI method is fixed"),
         };
         let mut operation = OperationBuilder::new()
@@ -120,7 +121,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
                     .name(name)
                     .parameter_in(ParameterIn::Path)
                     .required(Required::True)
-                    .schema(Some(ObjectBuilder::new().schema_type(SchemaType::String))),
+                    .schema(Some(ObjectBuilder::new().schema_type(Type::String))),
             );
         }
         if matches!(
@@ -132,7 +133,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
                     .name("project")
                     .parameter_in(ParameterIn::Query)
                     .required(Required::True)
-                    .schema(Some(ObjectBuilder::new().schema_type(SchemaType::String))),
+                    .schema(Some(ObjectBuilder::new().schema_type(Type::String))),
             );
         }
         if path == "/api/v1/traces/{trace_id}" {
@@ -142,7 +143,7 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
                     .parameter_in(ParameterIn::Query)
                     .schema(Some(
                         ObjectBuilder::new()
-                            .schema_type(SchemaType::Integer)
+                            .schema_type(Type::Integer)
                             .minimum(Some(0.0)),
                     )),
             );

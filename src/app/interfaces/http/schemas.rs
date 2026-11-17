@@ -3,16 +3,24 @@
 
 macro_rules! schema_adapter {
     ($model:ty, $description:ty) => {
-        impl<'s> utoipa::ToSchema<'s> for $model {
-            fn schema() -> (
-                &'s str,
-                utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>,
-            ) {
-                <$description as utoipa::ToSchema<'s>>::schema()
+        impl utoipa::PartialSchema for $model {
+            fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+                <$description as utoipa::PartialSchema>::schema()
+            }
+        }
+
+        impl utoipa::ToSchema for $model {
+            fn name() -> std::borrow::Cow<'static, str> {
+                <$description as utoipa::ToSchema>::name()
             }
 
-            fn aliases() -> Vec<(&'s str, utoipa::openapi::schema::Schema)> {
-                <$description as utoipa::ToSchema<'s>>::aliases()
+            fn schemas(
+                schemas: &mut Vec<(
+                    String,
+                    utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>,
+                )>,
+            ) {
+                <$description as utoipa::ToSchema>::schemas(schemas)
             }
         }
     };

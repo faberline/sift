@@ -21,10 +21,11 @@ use crate::operations::interfaces::http::integrity_report_v1::{
 #[utoipa::path(
     get,
     path = "/admin/integrity",
+    tag = "crate",
     params(("project" = String, Query, description = "project to verify")),
     responses(
         (status = 200, description = "project count, ID digest, and watermarks", body = IntegrityReportV1),
-        (status = 403, description = "wildcard admin role required", body = ErrorEnvelope)
+        (status = 403, description = "wildcard admin role required", body = service_http::ErrorEnvelope)
     )
 )]
 pub(crate) async fn admin_integrity(
