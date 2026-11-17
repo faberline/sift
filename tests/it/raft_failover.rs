@@ -353,7 +353,10 @@ async fn acknowledged_data_survives_leader_loss_over_mutual_tls() {
     }
 
     let restored = &mut nodes[first_leader];
-    let stopped_journal = DurableJournal::open(restored.data.path()).unwrap();
+    let stopped_journal =
+        crate::support::reopen_journal(restored.data.path(), crate::support::REOPEN_TIMEOUT)
+            .await
+            .unwrap();
     assert_eq!(events(&stopped_journal), first_batch);
     drop(stopped_journal);
     let listener = bind_again(addresses[first_leader]).await.unwrap();
@@ -386,7 +389,10 @@ async fn acknowledged_data_survives_leader_loss_over_mutual_tls() {
         if node.running.is_some() {
             node.crash().await;
         }
-        let journal = DurableJournal::open(node.data.path()).unwrap();
+        let journal =
+            crate::support::reopen_journal(node.data.path(), crate::support::REOPEN_TIMEOUT)
+                .await
+                .unwrap();
         let expected = if id == next_leader {
             &second_batch
         } else {
@@ -498,7 +504,10 @@ async fn rolling_restart_of_three_voters_keeps_every_acknowledged_event() {
         if node.running.is_some() {
             node.crash().await;
         }
-        let journal = DurableJournal::open(node.data.path()).unwrap();
+        let journal =
+            crate::support::reopen_journal(node.data.path(), crate::support::REOPEN_TIMEOUT)
+                .await
+                .unwrap();
         assert_eq!(events(&journal), expected);
         drop(journal);
         bind_again(address).await.expect("peer port released");
