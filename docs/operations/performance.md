@@ -109,9 +109,7 @@ These numbers come from the `perf-trace` artifact of the CI job `test-perf` on
 the `ubuntu-24.04` runner. A person replaces them when a later CI run shows the
 numbers are off.
 
-CI passes the threshold 60 for every key: throughput must not fall below 40
-percent of the baseline, and latency, peak RSS and CPU must not rise above 160
-percent of the baseline. The baseline is `tests/perf/baseline/trace.json`.
+CI runs the trace workload 5 times in one job and compares the median of each key with the baseline. The threshold is `60` for every key: throughput must not fall below 40 percent of the baseline, and latency, peak RSS and CPU must not rise above 160 percent of the baseline. The median ignores one or two slow runs. It does not help when the whole job runs on a slow machine, because the 5 runs share one machine. If the median fails, a person reads the per-run numbers in the `perf-trace` artifact (`perf-trace-1.json` to `perf-trace-5.json`) and decides; a pull request changes neither the threshold nor the baseline. The baseline is `tests/perf/baseline/trace.json`.
 
 ## Not covered
 

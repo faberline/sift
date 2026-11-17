@@ -104,5 +104,8 @@ trace of request `k % requests`.
 `check_regression.py` checks a trace result against `baseline/trace.json` with
 the same six keys and the same rules as the metric baseline.
 
-    bash tests/perf/trace_workload.sh
-    python3 -B tests/perf/check_regression.py <result file> tests/perf/baseline/trace.json 60
+CI runs the workload 5 times and checks the median. `median_result.py <output file> <result file> ...` takes an odd number of results (3 or more), writes the median of the six compared keys as one JSON line (with `runs` and `cpu_seconds_runs`) and prints the `cpu_seconds` of each run.
+
+    for i in 1 2 3 4 5; do WORKLOAD_OUT=/path/to/trace-$i.json bash tests/perf/trace_workload.sh; done
+    python3 -B tests/perf/median_result.py /path/to/trace.json /path/to/trace-{1,2,3,4,5}.json
+    python3 -B tests/perf/check_regression.py /path/to/trace.json tests/perf/baseline/trace.json 60
