@@ -46,7 +46,7 @@ pub(super) fn extend(document: &mut OpenApi) {
                     required = vec!["project"];
                 } else if method == "put" {
                     if path.ends_with("/mute") {
-                        properties["until"] = json!({"type":"integer","nullable":true});
+                        properties["until"] = json!({"type":["integer","null"]});
                     } else if path.contains("error-groups") {
                         properties["status"] =
                             json!({"type":"string","enum":["open","resolved","ignored"]});
