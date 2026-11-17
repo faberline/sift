@@ -670,7 +670,11 @@ async fn remote_write_stale_marker_survives_restart_and_hides_the_series() {
     state.finish_drain().await.unwrap();
     drop(app);
     drop(state);
-    let reopened = router(Arc::new(ServiceState::open(temp.path()).unwrap()));
+    let reopened = router(Arc::new(
+        crate::support::reopen_service_state(temp.path(), crate::support::REOPEN_TIMEOUT)
+            .await
+            .unwrap(),
+    ));
     let stale_after_restart = reopened
         .oneshot(
             Request::builder()

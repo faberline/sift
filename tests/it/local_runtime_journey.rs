@@ -101,7 +101,11 @@ async fn ingested_logs_survive_restart_with_identical_records() {
     drop(app);
     drop(state);
 
-    let reopened = Arc::new(ServiceState::open(temp.path()).unwrap());
+    let reopened = Arc::new(
+        crate::support::reopen_service_state(temp.path(), crate::support::REOPEN_TIMEOUT)
+            .await
+            .unwrap(),
+    );
     let after = reopened.journal().query(Default::default()).unwrap();
     assert_eq!(before, after, "records changed across restart");
 }
