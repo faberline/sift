@@ -42,7 +42,35 @@ pub const REOPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1
 mod tests {
     use std::time::Duration;
 
-    use super::{reopen_service_state, REOPEN_TIMEOUT};
+    use super::{reopen_journal, reopen_service_state, REOPEN_TIMEOUT};
+
+    #[tokio::test]
+    async fn reopen_journal_waits_until_the_first_journal_is_released() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = sift::DurableJournal::open(temp.path()).unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(first);
+        });
+
+        let reopened = reopen_journal(temp.path(), REOPEN_TIMEOUT).await;
+        releaser.join().unwrap();
+        assert!(reopened.is_ok(), "{:#}", reopened.err().unwrap());
+    }
+
+    #[tokio::test]
+    async fn reopen_journal_returns_the_lock_error_after_the_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = sift::DurableJournal::open(temp.path()).unwrap();
+
+        let result = reopen_journal(temp.path(), Duration::from_millis(100)).await;
+        let error = result.err().expect("the lock must refuse");
+        assert!(
+            format!("{error:#}").contains("another Sift process"),
+            "{error:#}"
+        );
+        drop(first);
+    }
 
     #[tokio::test]
     async fn reopen_waits_until_the_first_state_is_released() {
