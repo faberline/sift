@@ -313,6 +313,45 @@ class VerifyTest(unittest.TestCase):
         self.assertEqual(result["protocols"], {"otlp_logs_partial": "passed"})
         protocols.assert_called_once_with(URL)
 
+    def test_verify_prints_mcp(self):
+        pod = {
+            "metadata": {"uid": "uid1"},
+            "status": {"containerStatuses": [{"name": "sift", "imageID": "img"}]},
+        }
+        claim = {"metadata": {"uid": "pvc"}, "spec": {"volumeName": "vol"}, "status": {"phase": "Bound"}}
+        event = {"message": "marker", "trace_id": "t", "span_id": "s"}
+
+        def api(method, resource, name, uid=None):
+            if method == "GET" and resource == "pods":
+                return pod
+            if method == "GET" and resource == "persistentvolumeclaims":
+                return claim
+            if method == "DELETE" and resource == "pods":
+                return None
+            raise AssertionError(f"unexpected {method} {resource}")
+
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                Path("event.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
+                with mock.patch.object(smoke, "read_checkpoint"), \
+                        mock.patch.object(smoke, "read_record", return_value="record"), \
+                        mock.patch.object(smoke, "check_protocols", return_value={"otlp_logs_partial": "passed"}), \
+                        mock.patch.object(smoke, "wait_for_replacement", return_value="uid2"), \
+                        mock.patch.object(smoke, "pod_namespace", return_value="ns1"), \
+                        mock.patch.object(smoke, "check_mcp", return_value={"initialize": "passed"}) as mcp, \
+                        contextlib.redirect_stdout(out):
+                    smoke.verify(api, URL)
+            finally:
+                os.chdir(cwd)
+
+        result = json.loads(out.getvalue().splitlines()[-1])
+        self.assertEqual(result["result"], "PASS")
+        self.assertEqual(result["mcp"], {"initialize": "passed"})
+        mcp.assert_called_once_with(URL, "ns1")
+
 
 def sse(message):
     return f"event: message\ndata: {json.dumps(message)}\n\n"
@@ -466,47 +505,6 @@ class McpTest(unittest.TestCase):
         self.assertIn("tool list drifted", str(context.exception))
 
 
-class VerifyMcpTest(unittest.TestCase):
-    def test_verify_prints_mcp(self):
-        pod = {
-            "metadata": {"uid": "uid1"},
-            "status": {"containerStatuses": [{"name": "sift", "imageID": "img"}]},
-        }
-        claim = {"metadata": {"uid": "pvc"}, "spec": {"volumeName": "vol"}, "status": {"phase": "Bound"}}
-        event = {"message": "marker", "trace_id": "t", "span_id": "s"}
-
-        def api(method, resource, name, uid=None):
-            if method == "GET" and resource == "pods":
-                return pod
-            if method == "GET" and resource == "persistentvolumeclaims":
-                return claim
-            if method == "DELETE" and resource == "pods":
-                return None
-            raise AssertionError(f"unexpected {method} {resource}")
-
-        out = io.StringIO()
-        with tempfile.TemporaryDirectory() as tmp:
-            cwd = os.getcwd()
-            os.chdir(tmp)
-            try:
-                Path("event.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
-                with mock.patch.object(smoke, "read_checkpoint"), \
-                        mock.patch.object(smoke, "read_record", return_value="record"), \
-                        mock.patch.object(smoke, "check_protocols", return_value={"otlp_logs_partial": "passed"}), \
-                        mock.patch.object(smoke, "wait_for_replacement", return_value="uid2"), \
-                        mock.patch.object(smoke, "pod_namespace", return_value="ns1"), \
-                        mock.patch.object(smoke, "check_mcp", return_value={"initialize": "passed"}) as mcp, \
-                        contextlib.redirect_stdout(out):
-                    smoke.verify(api, URL)
-            finally:
-                os.chdir(cwd)
-
-        result = json.loads(out.getvalue().splitlines()[-1])
-        self.assertEqual(result["result"], "PASS")
-        self.assertEqual(result["mcp"], {"initialize": "passed"})
-        mcp.assert_called_once_with(URL, "ns1")
-
-
 class OverlayTest(unittest.TestCase):
     def test_overlay_allows_mcp_host(self):
         path = Path(__file__).resolve().parent.parent.parent / "overlays" / "gke-test" / "sift.yaml"
@@ -516,6 +514,9 @@ class OverlayTest(unittest.TestCase):
         self.assertIn("fieldPath: metadata.namespace", "\n".join(lines))
         namespace_line = next(i for i, line in enumerate(lines) if line.strip().removeprefix("- ") == "name: POD_NAMESPACE")
         self.assertLess(namespace_line, hosts_line)
+        origins_line = next(i for i, line in enumerate(lines) if line.strip().removeprefix("- ") == "name: SIFT_MCP_ALLOWED_ORIGINS")
+        self.assertIn("http://sift-smoke.$(POD_NAMESPACE).svc.cluster.local:7380", lines[origins_line + 1])
+        self.assertLess(namespace_line, origins_line)
 
 
 if __name__ == "__main__":
