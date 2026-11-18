@@ -11,7 +11,7 @@ pub struct ScrapeConfig {
     pub project: String,
     pub environment: String,
     pub node: String,
-    pub namespace: Option<String>,
+    pub namespaces: Vec<String>,
     pub token: Option<String>,
     pub token_file: Option<PathBuf>,
     pub state: PathBuf,
@@ -57,62 +57,37 @@ pub async fn run(config: ScrapeConfig) -> Result<()> {
     let kube = kube::Client::try_default()
         .await
         .context("create Kubernetes discovery client")?;
-    let pods: Api<Pod> = match &config.namespace {
-        Some(ns) => Api::namespaced(kube, ns),
-        None => Api::all(kube),
+    let apis: Vec<Api<Pod>> = if config.namespaces.is_empty() {
+        vec![Api::all(kube)]
+    } else {
+        config
+            .namespaces
+            .iter()
+            .map(|ns| Api::namespaced(kube.clone(), ns))
+            .collect()
     };
     let mut ticks = tokio::time::interval(config.interval);
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         ticks.tick().await;
-        let discovered = match pods
-            .list(&ListParams::default().fields(&format!("spec.nodeName={}", config.node)))
-            .await
-        {
-            Ok(pods) => pods,
-            Err(error) => {
-                if config.once {
-                    return Err(error.into());
-                }
-                tracing::warn!(%error, "metric target discovery failed");
-                continue;
-            }
-        };
-        for pod in discovered.items {
-            if pod.metadata.uid.as_deref().is_none_or(str::is_empty) {
-                continue;
-            }
-            if pod.spec.as_ref().and_then(|s| s.node_name.as_deref()) != Some(config.node.as_str())
+        let mut items: Vec<Pod> = Vec::new();
+        for api in &apis {
+            match api
+                .list(&ListParams::default().fields(&format!("spec.nodeName={}", config.node)))
+                .await
             {
-                continue;
-            }
-            let annotations = pod.metadata.annotations.as_ref();
-            if annotations
-                .and_then(|a| a.get("prometheus.io/scrape"))
-                .map(String::as_str)
-                != Some("true")
-            {
-                continue;
-            }
-            if pod
-                .metadata
-                .labels
-                .as_ref()
-                .and_then(|l| l.get("sift.axiom.dev/scrape"))
-                .map(String::as_str)
-                != Some("true")
-            {
-                continue;
-            }
-            let Some(ip) = pod.status.as_ref().and_then(|s| s.pod_ip.as_deref()) else {
-                continue;
-            };
-            let url = match target_url(ip, annotations) {
-                Ok(url) => url,
+                Ok(list) => items.extend(list.items),
                 Err(error) => {
-                    tracing::warn!(pod=pod.metadata.name.as_deref(),%error,"invalid metric target skipped");
-                    continue;
+                    if config.once {
+                        return Err(error.into());
+                    }
+                    tracing::warn!(%error, "metric target discovery failed");
                 }
+            }
+        }
+        for pod in items {
+            let Some(url) = scrape_target(&pod, &config.node) else {
+                continue;
             };
             let samples = match fetch(&client, url).await {
                 Ok(samples) => samples,
@@ -172,6 +147,40 @@ pub async fn run(config: ScrapeConfig) -> Result<()> {
         }
         if config.once {
             return Ok(());
+        }
+    }
+}
+fn scrape_target(pod: &Pod, node: &str) -> Option<url::Url> {
+    if pod.metadata.uid.as_deref().is_none_or(str::is_empty) {
+        return None;
+    }
+    if pod.spec.as_ref().and_then(|s| s.node_name.as_deref()) != Some(node) {
+        return None;
+    }
+    let annotations = pod.metadata.annotations.as_ref();
+    if annotations
+        .and_then(|a| a.get("prometheus.io/scrape"))
+        .map(String::as_str)
+        != Some("true")
+    {
+        return None;
+    }
+    if pod
+        .metadata
+        .labels
+        .as_ref()
+        .and_then(|l| l.get("sift.axiom.dev/scrape"))
+        .map(String::as_str)
+        != Some("true")
+    {
+        return None;
+    }
+    let ip = pod.status.as_ref().and_then(|s| s.pod_ip.as_deref())?;
+    match target_url(ip, annotations) {
+        Ok(url) => Some(url),
+        Err(error) => {
+            tracing::warn!(pod=pod.metadata.name.as_deref(),%error,"invalid metric target skipped");
+            None
         }
     }
 }

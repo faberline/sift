@@ -12,9 +12,9 @@ pub(super) struct ScrapeArgs {
     environment: String,
     #[arg(long, env = "NODE_NAME")]
     node: String,
-    /// Restrict discovery to this namespace. Default: all namespaces.
-    #[arg(long)]
-    namespace: Option<String>,
+    /// Restrict discovery to these namespaces. Default: all namespaces.
+    #[arg(long = "namespace", value_delimiter = ',')]
+    namespaces: Vec<String>,
     #[arg(long, env = "SIFT_TOKEN", conflicts_with = "token_file")]
     token: Option<String>,
     #[arg(long, env = "SIFT_TOKEN_FILE", conflicts_with = "token")]
@@ -32,7 +32,7 @@ pub(super) async fn scrape(args: ScrapeArgs) -> Result<()> {
         project: args.project,
         environment: args.environment,
         node: args.node,
-        namespace: args.namespace,
+        namespaces: args.namespaces,
         token: args.token,
         token_file: args.token_file,
         state: args.state,
