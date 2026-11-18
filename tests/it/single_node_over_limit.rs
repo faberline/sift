@@ -81,7 +81,8 @@ fn quota_limits() -> IngestLimits {
 async fn above_the_quota_the_server_rejects_with_retry_after_and_stores_exactly_the_acknowledged_items(
 ) {
     let temp = tempfile::tempdir().unwrap();
-    let state = Arc::new(ServiceState::open_with_ingest_limits(temp.path(), quota_limits()).unwrap());
+    let state =
+        Arc::new(ServiceState::open_with_ingest_limits(temp.path(), quota_limits()).unwrap());
     let app = router(state.clone());
 
     let mut acknowledged = 0usize;
@@ -122,7 +123,10 @@ async fn above_the_quota_the_server_rejects_with_retry_after_and_stores_exactly_
     let stored = read_all(&state);
     assert_eq!(stored.len(), acknowledged);
 
-    let ids: HashSet<String> = stored.iter().map(|row| row.event.event_id.clone()).collect();
+    let ids: HashSet<String> = stored
+        .iter()
+        .map(|row| row.event.event_id.clone())
+        .collect();
     assert_eq!(ids.len(), stored.len(), "every stored record is unique");
 
     let first_rejected = first_rejected.expect("a rejection happened");
@@ -158,7 +162,8 @@ async fn below_the_quota_every_batch_is_acknowledged_and_stored() {
 #[tokio::test]
 async fn the_rejection_is_scoped_to_one_project_and_is_retryable() {
     let temp = tempfile::tempdir().unwrap();
-    let state = Arc::new(ServiceState::open_with_ingest_limits(temp.path(), quota_limits()).unwrap());
+    let state =
+        Arc::new(ServiceState::open_with_ingest_limits(temp.path(), quota_limits()).unwrap());
     let app = router(state.clone());
 
     let mut saw_rejection = false;
