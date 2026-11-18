@@ -64,6 +64,7 @@ mod sharded_journal;
 mod shared_library_graph;
 mod shared_library_manifest_aliases;
 mod shared_runtime_structure;
+mod single_node_over_limit;
 mod stability_e2e;
 mod storage_mvp_defaults;
 mod structured_stdout_collector_e2e;
