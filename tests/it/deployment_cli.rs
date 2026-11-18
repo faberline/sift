@@ -1046,6 +1046,7 @@ fn fqdn_client(served: bool) -> kube::Client {
     kube::Client::new(service, "default")
 }
 
+// Prune still reads google-apis policies (core v0.5.1 prune has no client); reconcile needs no FQDN support.
 #[tokio::test]
 async fn no_gcs_renders_no_fqdn_policy_and_needs_no_fqdn_support() {
     let mut sift = sift_resource(3, 3);
@@ -1063,6 +1064,12 @@ async fn no_gcs_renders_no_fqdn_policy_and_needs_no_fqdn_support() {
         .children()
         .iter()
         .any(|object| object["kind"] == "FQDNNetworkPolicy"));
+
+    let prunes = sift.prunes();
+    assert_eq!(prunes.len(), 3);
+    assert!(prunes.iter().all(|target| {
+        target.api_version() == "networking.gke.io/v1alpha1" && target.kind() == "FQDNNetworkPolicy"
+    }));
 }
 
 #[tokio::test]
