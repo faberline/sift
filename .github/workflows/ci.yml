@@ -340,7 +340,11 @@ jobs:
       - name: install cargo-deny
         run: cargo install --locked cargo-deny@0.20.2
       - name: cargo deny
-        run: cargo deny check bans sources
+        run: cargo deny check
+      - name: install cargo-audit
+        run: cargo install --locked cargo-audit@0.23.0
+      - name: cargo audit
+        run: cargo audit --deny warnings
       - name: architecture check
         run: bash scripts/check-architecture.sh
       - name: install aw

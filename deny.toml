@@ -10,8 +10,17 @@ no-default-features = false
 [advisories]
 db-path = "~/.cargo/advisory-db"
 version = 2
-# Ignore specific advisories (none currently)
-ignore = []
+# Desk decision (faberline/aw#610, option A): only these six unmaintained
+# advisories are allowed. Re-check all six by 2027-02-15. Keep this list equal
+# to the list in .cargo/audit.toml.
+ignore = [
+    { id = "RUSTSEC-2025-0012", reason = "backoff 0.4.0 is unmaintained; kube-runtime 0.98.0 pulls it in and has no replacement yet. Re-check 2027-02-15." },
+    { id = "RUSTSEC-2024-0384", reason = "instant 0.1.13 is unmaintained; backoff pulls it in. Re-check 2027-02-15." },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile 2.2.0 is unmaintained; kube-client 0.98.0 and core peer-tls pull it in. Re-check 2027-02-15." },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml 0.2.11 is unmaintained; serde_yaml 0.9 pulls it in (kube-client, sift, vat dev). Re-check 2027-02-15." },
+    { id = "RUSTSEC-2025-0141", reason = "bincode 2.0.1 is unmaintained; promql-parser 0.11.0 pulls it in (cfgrammar, lrlex, lrpar, lrtable). Re-check 2027-02-15." },
+    { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.44 is unmaintained; arrow-array and parquet 59.2.0, sift and cron pull it in. Re-check 2027-02-15." },
+]
 
 [licenses]
 version = 2

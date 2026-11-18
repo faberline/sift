@@ -1,11 +1,16 @@
 # cargo-audit configuration
 # Docs: https://rustsec.org/advisories/
+#
+# Only the six unmaintained advisories below are allowed (desk decision,
+# faberline/aw#610, option A). Re-check all six by 2027-02-15. Keep this list
+# equal to the `ignore` list in deny.toml.
 
 [advisories]
 ignore = [
-    # RUSTSEC-2023-0071: rsa timing sidechannel attack
-    # This comes from sqlx-mysql which is pulled in by sqlx even though we only use postgres.
-    # The MySQL driver is not used in our codebase, so this vulnerability doesn't affect us.
-    # TODO: Remove this once sqlx provides feature flags to exclude mysql support
-    "RUSTSEC-2023-0071",
+    "RUSTSEC-2025-0012", # backoff 0.4.0 unmaintained; kube-runtime 0.98.0 pulls it in, no replacement yet. Re-check 2027-02-15.
+    "RUSTSEC-2024-0384", # instant 0.1.13 unmaintained; backoff pulls it in. Re-check 2027-02-15.
+    "RUSTSEC-2025-0134", # rustls-pemfile 2.2.0 unmaintained; kube-client 0.98.0 and core peer-tls pull it in. Re-check 2027-02-15.
+    "RUSTSEC-2024-0449", # unsafe-libyaml 0.2.11 unmaintained; serde_yaml 0.9 pulls it in (kube-client, sift, vat dev). Re-check 2027-02-15.
+    "RUSTSEC-2025-0141", # bincode 2.0.1 unmaintained; promql-parser 0.11.0 pulls it in (cfgrammar, lrlex, lrpar, lrtable). Re-check 2027-02-15.
+    "RUSTSEC-2026-0543", # chrono 0.4.44 unmaintained; arrow-array and parquet 59.2.0, sift and cron pull it in. Re-check 2027-02-15.
 ]
