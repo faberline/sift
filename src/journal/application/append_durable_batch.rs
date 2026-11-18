@@ -11,7 +11,7 @@ use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::recent_cursor::recent_receipt_at;
 use crate::shared_kernel::append_result::AppendResult;
 use crate::shared_kernel::event::EventEnvelope;
-use crate::shared_kernel::retention_boundary::retention_rejection_at;
+use crate::shared_kernel::retention_boundary::{retention_rejection_at, RetentionDays};
 use crate::shared_kernel::single_signal_batch::ensure_single_signal;
 use crate::shared_kernel::stored_event::StoredEvent;
 
@@ -104,7 +104,9 @@ impl JournalRuntime {
             // window even when the telemetry event crosses the 180-day
             // retention boundary meanwhile. Only a new event is subject to
             // retention admission.
-            if let Some(message) = retention_rejection_at(&event, acknowledged_at) {
+            if let Some(message) =
+                retention_rejection_at(&event, acknowledged_at, RetentionDays::configured())
+            {
                 bail!(message);
             }
 

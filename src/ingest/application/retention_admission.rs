@@ -4,8 +4,8 @@
 use chrono::Utc;
 
 use crate::shared_kernel::event::EventEnvelope;
-use crate::shared_kernel::retention_boundary::retention_rejection_at;
+use crate::shared_kernel::retention_boundary::{retention_rejection_at, RetentionDays};
 
 pub(crate) fn retention_rejection(event: &EventEnvelope) -> Option<String> {
-    retention_rejection_at(event, Utc::now())
+    retention_rejection_at(event, Utc::now(), RetentionDays::configured())
 }

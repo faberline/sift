@@ -3,3 +3,4 @@
 
 pub(crate) mod data_layout;
 pub(crate) mod local_capacity;
+pub(crate) mod retention_setting;
