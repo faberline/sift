@@ -93,7 +93,7 @@ impl CriSource {
 
     pub(super) fn refresh_files(&mut self) -> Result<()> {
         let mut discovered = discover(&self.root, &self.checkpoint.files)?;
-        discovered.retain(|file| file.workload.in_namespace(self.config.namespace.as_deref()));
+        discovered.retain(|file| file.workload.in_namespaces(&self.config.namespaces));
         let present: HashSet<_> = discovered
             .iter()
             .map(|file| file.identity.clone())
@@ -135,7 +135,7 @@ impl CriSource {
         }
 
         for (identity, file) in &mut self.checkpoint.files {
-            if !file.workload.in_namespace(self.config.namespace.as_deref()) {
+            if !file.workload.in_namespaces(&self.config.namespaces) {
                 continue;
             }
             if present.contains(identity) || file.retired || self.staged_losses.contains(identity) {

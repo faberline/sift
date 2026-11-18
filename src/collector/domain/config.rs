@@ -24,8 +24,8 @@ pub struct CriMetadata {
 pub struct CriSourceConfig {
     pub root: PathBuf,
     pub metadata: CriMetadata,
-    /// Collect only this namespace. None keeps the explicit node-wide mode.
-    pub namespace: Option<String>,
+    /// Collect only these namespaces. An empty list keeps the explicit node-wide mode.
+    pub namespaces: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,7 +121,7 @@ impl CollectorConfig {
             return Err(CollectorConfigError::CheckpointIsQuarantine);
         }
         if let SourceSpec::Cri(cri) = &self.source {
-            if let Some(namespace) = &cri.namespace {
+            for namespace in &cri.namespaces {
                 validate_metadata("namespace", namespace)?;
             }
             validate_metadata("gcp_project", &cri.metadata.gcp_project)?;
@@ -186,5 +186,30 @@ mod tests {
         let mut invalid = config(SourceSpec::File("logs.jsonl".into()));
         invalid.max_line_bytes = MAX_LINE_BYTES + 1;
         assert!(invalid.validate().is_err());
+    }
+
+    fn cri_with_namespaces(namespaces: Vec<String>) -> SourceSpec {
+        SourceSpec::Cri(CriSourceConfig {
+            root: "pods".into(),
+            metadata: CriMetadata {
+                gcp_project: "p".to_string(),
+                cluster: None,
+                location: None,
+                node: None,
+            },
+            namespaces,
+        })
+    }
+
+    #[test]
+    fn cri_namespace_list_entries_are_validated() {
+        let invalid = config(cri_with_namespaces(vec!["a".to_string(), String::new()]));
+        assert!(invalid.validate().is_err());
+
+        let valid = config(cri_with_namespaces(vec!["a".to_string(), "b".to_string()]));
+        assert!(valid.validate().is_ok());
+
+        let node_wide = config(cri_with_namespaces(Vec::new()));
+        assert!(node_wide.validate().is_ok());
     }
 }

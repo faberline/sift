@@ -35,9 +35,9 @@ pub async fn run_collector_with_options(
     let sink = crate::collector::infrastructure::durable_delivery::DurableDelivery {
         client,
         path: config.checkpoint_path.with_extension("pending.json"),
-        namespace: match &config.source {
-            crate::collector::domain::config::SourceSpec::Cri(cri) => cri.namespace.clone(),
-            _ => None,
+        namespaces: match &config.source {
+            crate::collector::domain::config::SourceSpec::Cri(cri) => cri.namespaces.clone(),
+            _ => Vec::new(),
         },
     };
     sink.replay(&config).await?;
