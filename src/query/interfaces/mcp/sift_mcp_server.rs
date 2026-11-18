@@ -1,7 +1,7 @@
 //! The MCP tool handler: Sift's read-only tools, their arguments and results.
 
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{tool, tool_router, ErrorData, Json};
 use schemars1::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -261,8 +261,8 @@ impl SiftMcpServer {
 
 #[rmcp::tool_handler]
 impl rmcp::ServerHandler for SiftMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("sift", env!("CARGO_PKG_VERSION")))
             .with_instructions("Read-only logs, metrics, traces, and correlation tools for Sift")
     }
