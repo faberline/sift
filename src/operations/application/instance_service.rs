@@ -1,7 +1,7 @@
 //! Render workloads and report instance state through the platform port.
 
 use crate::operations::domain::instance_names::{
-    APP, AUTH_DELEGATION_COMPONENT, BACKUP_COMPONENT, STORE_COMPONENT,
+    APP, AUTH_DELEGATION_COMPONENT, BACKUP_COMPONENT, CONTROL_COMPONENT, STORE_COMPONENT,
 };
 use crate::operations::domain::instance_renderer::InstanceRenderer;
 use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSpec};
@@ -31,9 +31,17 @@ impl InstanceService {
         client: kube::Client,
     ) -> anyhow::Result<service_k8s::service::ReconcilePlan> {
         // The metrics agent lists Kubernetes Pods in every auth mode.
-        let (api_cidrs, api_ports) = self.renderer.discover_api_endpoint(client).await?;
+        let (api_cidrs, api_ports) = self.renderer.discover_api_endpoint(client.clone()).await?;
+        let children = self.renderer.render(instance, &api_cidrs, &api_ports);
+        // Only a GCS destination or an alerting host list renders an FQDN policy.
+        if children
+            .iter()
+            .any(|child| child["kind"] == "FQDNNetworkPolicy")
+        {
+            self.renderer.ensure_fqdn_support(client).await?;
+        }
         Ok(service_k8s::service::ReconcilePlan::new(
-            self.renderer.render(instance, &api_cidrs, &api_ports),
+            children,
             Value::Null,
         ))
     }
@@ -161,6 +169,7 @@ impl InstanceService {
             .is_some_and(|backup| backup.destination.starts_with("gs://"));
         [
             (STORE_COMPONENT, store_uses_gcs),
+            (CONTROL_COMPONENT, store_uses_gcs),
             (BACKUP_COMPONENT, backup_uses_gcs),
         ]
         .into_iter()
