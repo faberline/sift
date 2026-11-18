@@ -24,7 +24,7 @@ pub use crate::operations::{
     interfaces::{
         crd::sift_spec::{
             ArchiveSpec, AuthMode, BackupSpec, BootstrapSpec, IngestSpec, PlacementSpec, Sift,
-            SiftSpec, SiftStatus, StorageSpec,
+            SiftSpec, SiftStatus, StorageSpec, Topology,
         },
         http::gateway_proxy::{gateway_router, gateway_router_with_control, query_router},
         operator::run as run_operator,
