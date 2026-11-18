@@ -13,6 +13,7 @@ use sift::{access::SiftVerifier, ServiceState};
 use crate::serve_args::{LogFormat, RunRole, ServeArgs};
 
 pub(super) async fn serve(args: ServeArgs) -> Result<()> {
+    sift::node::configure_retention_days(args.retention_days)?;
     if args.ephemeral && (args.role != RunRole::All || production_environment()) {
         anyhow::bail!(
             "--ephemeral is forbidden for production Sift roles; use writable persistent storage"

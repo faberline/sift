@@ -27,6 +27,7 @@ Run the unified h2c/HTTP1 operational-event service
 | `--grace-secs` | `SIFT_GRACE_SECS` | `20` | Seconds that in-flight requests get to finish on shutdown. |
 | `--max-body-bytes` | `SIFT_MAX_BODY_BYTES` | `1048576` | Largest accepted request body, in bytes. |
 | `--otlp-endpoint` | `SIFT_OTLP_ENDPOINT` | - | OTLP endpoint given to the server's telemetry setup. |
+| `--retention-days` | `SIFT_RETENTION_DAYS` | `180` | Days of events Sift keeps and accepts, 1 to 180. |
 
 ### `sift collect`
 
@@ -431,6 +432,7 @@ Variables are read at run time unless the row says otherwise. A name in backtick
 | `SIFT_GRACE_SECS` | `sift serve` (`--grace-secs`) | 20 | Seconds that in-flight requests get to finish on shutdown. |
 | `SIFT_MAX_BODY_BYTES` | `sift serve` (`--max-body-bytes`) | 1048576 | Largest accepted request body, in bytes. |
 | `SIFT_OTLP_ENDPOINT` | `sift serve` (`--otlp-endpoint`) | none | OTLP endpoint given to the server's telemetry setup. |
+| `SIFT_RETENTION_DAYS` | `sift serve` (`--retention-days`) | 180 | Days of events Sift keeps and accepts, 1 to 180. |
 | `SIFT_PRODUCTION` | `sift serve` | none | `1`, `true` or `on` marks a production environment. Production refuses `--ephemeral`. |
 | `SIFT_ENVIRONMENT` | `sift serve` | none | `prod` or `production` marks a production environment. Production refuses `--ephemeral`. |
 
