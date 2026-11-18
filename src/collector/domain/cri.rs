@@ -25,8 +25,8 @@ pub(in crate::collector) struct WorkloadIdentity {
 }
 
 impl WorkloadIdentity {
-    pub(in crate::collector) fn in_namespace(&self, namespace: Option<&str>) -> bool {
-        namespace.is_none_or(|namespace| self.namespace == namespace)
+    pub(in crate::collector) fn in_namespaces(&self, namespaces: &[String]) -> bool {
+        namespaces.is_empty() || namespaces.contains(&self.namespace)
     }
 
     pub(in crate::collector) fn source_key(&self) -> String {

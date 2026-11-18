@@ -9,7 +9,7 @@ use std::path::PathBuf;
 pub(crate) struct DurableDelivery {
     pub client: CollectorClient,
     pub path: PathBuf,
-    pub namespace: Option<String>,
+    pub namespaces: Vec<String>,
 }
 
 impl DurableDelivery {
@@ -28,9 +28,11 @@ impl DurableDelivery {
                         || event.environment != config.environment
                         || match &config.source {
                             crate::collector::domain::config::SourceSpec::Cri(cri) => {
-                                cri.namespace.as_ref().is_some_and(|namespace| {
-                                    event.resource.get("k8s.namespace.name") != Some(namespace)
-                                })
+                                !cri.namespaces.is_empty()
+                                    && event
+                                        .resource
+                                        .get("k8s.namespace.name")
+                                        .is_none_or(|value| !cri.namespaces.contains(value))
                             }
                             _ => false,
                         }
@@ -77,11 +79,14 @@ impl BatchSink<OperationalEventV2> for DurableDelivery {
         &self,
         events: &[OperationalEventV2],
     ) -> Result<DeliveryReceipt, DeliveryFailure> {
-        if self.namespace.as_ref().is_some_and(|namespace| {
-            events
-                .iter()
-                .any(|event| event.resource.get("k8s.namespace.name") != Some(namespace))
-        }) {
+        if !self.namespaces.is_empty()
+            && events.iter().any(|event| {
+                event
+                    .resource
+                    .get("k8s.namespace.name")
+                    .is_none_or(|value| !self.namespaces.contains(value))
+            })
+        {
             return Err(DeliveryFailure::permanent(
                 "queued log belongs to another Kubernetes namespace; keep its source state",
             ));
