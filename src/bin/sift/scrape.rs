@@ -12,9 +12,9 @@ pub(super) struct ScrapeArgs {
     environment: String,
     #[arg(long, env = "NODE_NAME")]
     node: String,
-    /// Restrict discovery to this namespace. Default: all namespaces.
-    #[arg(long)]
-    namespace: Option<String>,
+    /// Restrict discovery to these namespaces. Default: all namespaces.
+    #[arg(long = "namespace", value_delimiter = ',')]
+    namespaces: Vec<String>,
     #[arg(long, env = "SIFT_TOKEN", conflicts_with = "token_file")]
     token: Option<String>,
     #[arg(long, env = "SIFT_TOKEN_FILE", conflicts_with = "token")]
@@ -32,7 +32,7 @@ pub(super) async fn scrape(args: ScrapeArgs) -> Result<()> {
         project: args.project,
         environment: args.environment,
         node: args.node,
-        namespace: args.namespace,
+        namespaces: args.namespaces,
         token: args.token,
         token_file: args.token_file,
         state: args.state,
@@ -40,4 +40,34 @@ pub(super) async fn scrape(args: ScrapeArgs) -> Result<()> {
         once: args.once,
     })
     .await
+}
+#[cfg(test)]
+mod tests {
+    use super::ScrapeArgs;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Wrapper {
+        #[command(flatten)]
+        args: ScrapeArgs,
+    }
+
+    #[test]
+    fn namespace_option_is_repeatable_and_comma_separated() {
+        let parsed = Wrapper::try_parse_from([
+            "x",
+            "--project",
+            "p",
+            "--node",
+            "n",
+            "--namespace",
+            "a,b",
+            "--namespace",
+            "c",
+        ])
+        .unwrap();
+        assert_eq!(parsed.args.namespaces, ["a", "b", "c"]);
+        let parsed = Wrapper::try_parse_from(["x", "--project", "p", "--node", "n"]).unwrap();
+        assert!(parsed.args.namespaces.is_empty());
+    }
 }
