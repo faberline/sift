@@ -58,6 +58,7 @@ spec:
                       type: object
                       additionalProperties: { type: string }
                 auth: { type: string, enum: ["off", "required", "kubernetes"] }
+                topology: { type: string, enum: ["ha", "singleNode"], default: ha }
                 tokensSecret: { type: string }
                 alerting:
                   type: object

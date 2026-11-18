@@ -43,6 +43,8 @@ pub struct SiftSpec {
     #[serde(default)]
     pub auth: AuthMode,
     #[serde(default)]
+    pub topology: Topology,
+    #[serde(default)]
     pub tokens_secret: Option<String>,
     #[serde(default)]
     pub backup: Option<BackupSpec>,
@@ -63,6 +65,14 @@ pub enum AuthMode {
     Off,
     Required,
     Kubernetes,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Topology {
+    #[default]
+    Ha,
+    SingleNode,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -162,4 +172,36 @@ pub struct SiftStatus {
 
 fn three() -> u32 {
     3
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SiftSpec, Topology};
+
+    fn spec_with(extra: &str) -> Result<SiftSpec, serde_json::Error> {
+        let mut json =
+            String::from(r#"{"image":"example.invalid/sift:test","peerTlsSecret":"sift-peer-tls""#);
+        if !extra.is_empty() {
+            json.push(',');
+            json.push_str(extra);
+        }
+        json.push('}');
+        serde_json::from_str(&json)
+    }
+
+    #[test]
+    fn topology_defaults_to_ha() {
+        assert_eq!(spec_with("").unwrap().topology, Topology::Ha);
+    }
+
+    #[test]
+    fn topology_single_node_is_accepted() {
+        let spec = spec_with(r#""topology":"singleNode""#).unwrap();
+        assert_eq!(spec.topology, Topology::SingleNode);
+    }
+
+    #[test]
+    fn topology_unknown_value_is_refused() {
+        assert!(spec_with(r#""topology":"cluster""#).is_err());
+    }
 }

@@ -1,9 +1,10 @@
 //! Convert the already-defaulted CRD into plain instance settings.
 
-use crate::operations::interfaces::crd::sift_spec::{AuthMode, Sift};
+use crate::operations::interfaces::crd::sift_spec::{AuthMode, Sift, Topology};
 use crate::shared_kernel::instance_spec::{
     InstanceAlerting, InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap,
     InstanceIngest, InstancePlacement, InstanceSettings, InstanceSpec, InstanceStorage,
+    InstanceTopology,
 };
 use kube::ResourceExt;
 
@@ -45,6 +46,10 @@ impl From<&Sift> for InstanceSpec {
                     AuthMode::Required => InstanceAuth::Required,
                     AuthMode::Kubernetes => InstanceAuth::Kubernetes,
                 },
+                topology: match spec.topology {
+                    Topology::Ha => InstanceTopology::Ha,
+                    Topology::SingleNode => InstanceTopology::SingleNode,
+                },
                 tokens_secret: spec.tokens_secret.clone(),
                 alerting: InstanceAlerting {
                     webhook_secret: spec.alerting.webhook_secret.clone(),
@@ -61,5 +66,36 @@ impl From<&Sift> for InstanceSpec {
                 gke_location: spec.gke_location.clone(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InstanceSpec, Sift};
+    use crate::operations::interfaces::crd::sift_spec::SiftSpec;
+    use crate::shared_kernel::instance_spec::InstanceTopology;
+
+    fn sift(topology: Option<&str>) -> Sift {
+        let mut value = serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls"
+        });
+        if let Some(topology) = topology {
+            value["topology"] = serde_json::Value::String(topology.into());
+        }
+        let spec: SiftSpec = serde_json::from_value(value).unwrap();
+        Sift::new("events", spec)
+    }
+
+    #[test]
+    fn topology_reaches_the_instance_settings() {
+        let settings = InstanceSpec::from(&sift(Some("singleNode"))).settings;
+        assert_eq!(settings.topology, InstanceTopology::SingleNode);
+    }
+
+    #[test]
+    fn topology_default_reaches_the_instance_settings_as_ha() {
+        let settings = InstanceSpec::from(&sift(None)).settings;
+        assert_eq!(settings.topology, InstanceTopology::Ha);
     }
 }
