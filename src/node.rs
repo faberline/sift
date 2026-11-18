@@ -5,13 +5,7 @@
 pub(crate) mod domain;
 pub(crate) mod infrastructure;
 
-/// Sets the retention window (1 to 180 days) that ingest and the journal use.
-pub fn configure_retention_days(days: u32) -> anyhow::Result<()> {
-    let retention = crate::shared_kernel::retention_boundary::RetentionDays::new(days)?;
-    crate::shared_kernel::retention_boundary::set_configured(retention);
-    Ok(())
-}
-
+pub use crate::node::infrastructure::retention_setting::configure_retention_days;
 pub use crate::node::{
     domain::storage_role::StorageRole,
     infrastructure::{

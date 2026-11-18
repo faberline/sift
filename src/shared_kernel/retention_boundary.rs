@@ -17,11 +17,11 @@ static CONFIGURED: AtomicU32 = AtomicU32::new(MAX_RETENTION_DAYS);
 impl RetentionDays {
     pub(crate) const DEFAULT: RetentionDays = RetentionDays(MAX_RETENTION_DAYS);
 
-    pub(crate) fn new(days: u32) -> anyhow::Result<RetentionDays> {
+    pub(crate) fn new(days: u32) -> Result<RetentionDays, String> {
         if (1..=MAX_RETENTION_DAYS).contains(&days) {
             Ok(RetentionDays(days))
         } else {
-            Err(anyhow::anyhow!(
+            Err(format!(
                 "retention days {days} is outside the range 1..={MAX_RETENTION_DAYS}"
             ))
         }
