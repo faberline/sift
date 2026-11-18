@@ -13,6 +13,8 @@ const PARENT_SPAN: &str = "b7ad6b7169203331";
 const CANARY: &str = "sift-vat-synthetic-authorization-canary";
 // Core drops some Defer access logs under concurrent probes (faberline/sift#18, Core 1c8507e); remove the retry when the pinned Core has the repair.
 const DEFER_ATTEMPTS: u32 = 3;
+// Core logs an access event at DEBUG when its thread-local probe flag is stale (faberline/sift#252, access_log.rs CURRENT_REQUEST_IS_PROBE); keep http.access at DEBUG until the pinned Core fixes it.
+const SERVICE_RUST_LOG: &str = "info,http.access=debug";
 
 fn debug_binary(name: &str) -> PathBuf {
     if name == "sift" {
@@ -82,7 +84,7 @@ RELAY_AUTH = "off"
 DEFER_AUTH = "off"
 SIFT_AUTH = "off"
 VAT_SERVICE_OBSERVABILITY_PROBE = "1"
-RUST_LOG = "info"
+RUST_LOG = "{rust_log}"
 
 [[services]]
 id = "lumen"
@@ -126,6 +128,7 @@ cmd = [{probe}, "--exact", {probe_test}, "--nocapture"]
 timeout_s = 90
 "#,
         lumen = serde_json::to_string(&lumen.to_string_lossy()).unwrap(),
+        rust_log = SERVICE_RUST_LOG,
         tape = serde_json::to_string(&tape.to_string_lossy()).unwrap(),
         relay = serde_json::to_string(&relay.to_string_lossy()).unwrap(),
         defer = serde_json::to_string(&defer.to_string_lossy()).unwrap(),
@@ -535,6 +538,13 @@ async fn access_log_wait_returns_span_of_matching_trace() {
     )
     .await;
     assert_eq!(span, Some("1111111111111111".to_owned()));
+}
+
+#[test]
+fn service_log_filter_keeps_debug_access_logs() {
+    let directives: Vec<&str> = SERVICE_RUST_LOG.split(',').collect();
+    assert!(directives.contains(&"info"));
+    assert!(directives.contains(&"http.access=debug"));
 }
 
 fn checkpoint_path(producer: &Producer) -> PathBuf {
