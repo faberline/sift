@@ -321,31 +321,8 @@ fn role_egress_has_no_world_wide_dns_or_https_rule() {
 
 #[tokio::test]
 async fn reconcile_limits_egress_to_the_discovered_api_endpoint() {
-    let service = tower::service_fn(
-        |request: axum::http::Request<kube::client::Body>| async move {
-            assert_eq!(
-                request.uri().path(),
-                "/api/v1/namespaces/default/endpoints/kubernetes"
-            );
-            let body = json!({
-                "apiVersion": "v1",
-                "kind": "Endpoints",
-                "metadata": {"name":"kubernetes", "namespace":"default"},
-                "subsets": [{
-                    "addresses": [{"ip":"10.20.30.40"}],
-                    "ports": [{"name":"https", "port":6443, "protocol":"TCP"}]
-                }]
-            });
-            Ok::<_, std::convert::Infallible>(
-                axum::http::Response::builder()
-                    .status(200)
-                    .header("content-type", "application/json")
-                    .body(kube::client::Body::from(serde_json::to_vec(&body).unwrap()))
-                    .unwrap(),
-            )
-        },
-    );
-    let client = kube::Client::new(service, "default");
+    // Serves the endpoints this test checks, and the FQDN discovery of the GCS backup.
+    let client = fqdn_client(true);
     let api_rule = json!({
         "to": [{"ipBlock": {"cidr": "10.20.30.40/32"}}],
         "ports": [{"protocol": "TCP", "port": 6443}]
@@ -1008,6 +985,138 @@ fn mvp_crd_and_operator_render_archive_restore_limits_and_role_storage() {
         ("mvp-agent".to_string(), 3),
     ])));
     assert_eq!(restoring["status"]["restorePhase"], "Restoring");
+}
+
+/// A fake Kubernetes API: the default/kubernetes endpoints, and API discovery
+/// for networking.gke.io/v1alpha1, which lists FQDNNetworkPolicy only when
+/// `served` is true.
+fn fqdn_client(served: bool) -> kube::Client {
+    let service = tower::service_fn(
+        move |request: axum::http::Request<kube::client::Body>| async move {
+            let (status, body) = match request.uri().path() {
+                "/api/v1/namespaces/default/endpoints/kubernetes" => (
+                    200,
+                    json!({
+                        "apiVersion": "v1",
+                        "kind": "Endpoints",
+                        "metadata": {"name":"kubernetes", "namespace":"default"},
+                        "subsets": [{
+                            "addresses": [{"ip":"10.20.30.40"}],
+                            "ports": [{"name":"https", "port":6443, "protocol":"TCP"}]
+                        }]
+                    }),
+                ),
+                "/apis/networking.gke.io/v1alpha1" if served => (
+                    200,
+                    json!({
+                        "kind": "APIResourceList",
+                        "apiVersion": "v1",
+                        "groupVersion": "networking.gke.io/v1alpha1",
+                        "resources": [{
+                            "name": "fqdnnetworkpolicies",
+                            "singularName": "fqdnnetworkpolicy",
+                            "namespaced": true,
+                            "kind": "FQDNNetworkPolicy",
+                            "verbs": ["get", "list"]
+                        }]
+                    }),
+                ),
+                "/apis/networking.gke.io/v1alpha1" => (
+                    404,
+                    json!({
+                        "kind": "Status",
+                        "apiVersion": "v1",
+                        "status": "Failure",
+                        "reason": "NotFound",
+                        "code": 404,
+                        "message": "not found"
+                    }),
+                ),
+                other => panic!("unexpected Kubernetes request: {other}"),
+            };
+            Ok::<_, std::convert::Infallible>(
+                axum::http::Response::builder()
+                    .status(status)
+                    .header("content-type", "application/json")
+                    .body(kube::client::Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+        },
+    );
+    kube::Client::new(service, "default")
+}
+
+// Prune still reads google-apis policies (core v0.5.1 prune has no client); reconcile needs no FQDN support.
+#[tokio::test]
+async fn no_gcs_renders_no_fqdn_policy_and_needs_no_fqdn_support() {
+    let mut sift = sift_resource(3, 3);
+    sift.spec.backup = None;
+    assert!(!sift
+        .render()
+        .iter()
+        .any(|object| object["kind"] == "FQDNNetworkPolicy"));
+
+    let plan = sift
+        .reconcile_plan(fqdn_client(false))
+        .await
+        .expect("reconcile without GCS on a cluster without FQDN Network Policy");
+    assert!(!plan
+        .children()
+        .iter()
+        .any(|object| object["kind"] == "FQDNNetworkPolicy"));
+
+    let prunes = sift.prunes();
+    assert_eq!(prunes.len(), 3);
+    assert!(prunes.iter().all(|target| {
+        target.api_version() == "networking.gke.io/v1alpha1" && target.kind() == "FQDNNetworkPolicy"
+    }));
+}
+
+#[tokio::test]
+async fn gcs_without_fqdn_support_fails_with_a_clear_error() {
+    let sift = sift_resource(3, 3);
+    let result = sift.reconcile_plan(fqdn_client(false)).await;
+    let Err(error) = result else {
+        panic!("GCS without FQDN Network Policy support must fail");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("FQDN Network Policy is required but not served"),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn gcs_with_fqdn_support_reconciles() {
+    let sift = sift_resource(3, 3);
+    let plan = sift
+        .reconcile_plan(fqdn_client(true))
+        .await
+        .expect("reconcile GCS with FQDN Network Policy support");
+    object(
+        plan.children(),
+        "FQDNNetworkPolicy",
+        "events-backup-google-apis",
+    );
+}
+
+#[test]
+fn removing_gcs_prunes_every_google_apis_policy() {
+    let mut sift = sift_resource(3, 3);
+    sift.spec.backup = None;
+    let prunes = sift.prunes();
+    for role in ["store", "control", "backup"] {
+        let name = format!("events-{role}-google-apis");
+        assert!(
+            prunes.iter().any(|target| {
+                target.api_version() == "networking.gke.io/v1alpha1"
+                    && target.kind() == "FQDNNetworkPolicy"
+                    && target.name() == name
+            }),
+            "missing prune target {name}"
+        );
+    }
 }
 
 // HANDWRITE-END
