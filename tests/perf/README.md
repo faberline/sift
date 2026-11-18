@@ -102,10 +102,25 @@ It takes the same settings as the metric workload, except
 trace of request `k % requests`.
 
 `check_regression.py` checks a trace result against `baseline/trace.json` with
-the same six keys and the same rules as the metric baseline.
+the same six keys and the same rules as the metric baseline. The CI step does
+not use that file any more: `baseline/trace.json` stays in the repository, but
+the CI step `trace regression check` does not compare with it.
 
-CI runs the workload 5 times and checks the median. `median_result.py <output file> <result file> ...` takes an odd number of results (3 or more), writes the median of the six compared keys as one JSON line (with `runs` and `cpu_seconds_runs`) and prints the `cpu_seconds` of each run.
+CI builds the base commit (`HEAD^`) and the head commit, runs
+`trace_workload.sh` for base and head alternately, five times each, and takes
+the median of each side. `median_result.py <output file> <result file> ...`
+takes an odd number of results (3 or more), writes the median of the six
+compared keys as one JSON line (with `runs` and `cpu_seconds_runs`) and prints
+the `cpu_seconds` of each run. `compare_trace.py <head median> <base median> 60`
+checks the head median against the base median: head may be at most 160
+percent of base for the latency, memory and CPU keys, and at least 40 percent
+of base for throughput. It prints both medians and the ratio of each key, and
+writes them to the job summary.
 
-    for i in 1 2 3 4 5; do WORKLOAD_OUT=/path/to/trace-$i.json bash tests/perf/trace_workload.sh; done
-    python3 -B tests/perf/median_result.py /path/to/trace.json /path/to/trace-{1,2,3,4,5}.json
-    python3 -B tests/perf/check_regression.py /path/to/trace.json tests/perf/baseline/trace.json 60
+    for i in 1 2 3 4 5; do
+      SIFT_BIN=/path/to/base/sift WORKLOAD_OUT=/path/to/trace-base-$i.json bash tests/perf/trace_workload.sh
+      WORKLOAD_OUT=/path/to/trace-head-$i.json bash tests/perf/trace_workload.sh
+    done
+    python3 -B tests/perf/median_result.py /path/to/trace-base.json /path/to/trace-base-{1,2,3,4,5}.json
+    python3 -B tests/perf/median_result.py /path/to/trace-head.json /path/to/trace-head-{1,2,3,4,5}.json
+    python3 -B tests/perf/compare_trace.py /path/to/trace-head.json /path/to/trace-base.json 60

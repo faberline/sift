@@ -24,6 +24,7 @@ pub enum SignalKind {
 #[allow(dead_code)]
 #[derive(serde::Serialize, utoipa::ToSchema)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[schema(no_recursion)]
 pub enum AttributeValue {
     String(String),
     Bool(bool),

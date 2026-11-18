@@ -17,10 +17,11 @@ use crate::app::service_state::ServiceState;
 #[utoipa::path(
     get,
     path = "/admin/backup",
+    tag = "crate",
     responses(
         (status = 200, description = "exact durable-journal snapshot bytes"),
-        (status = 403, description = "wildcard admin role required", body = ErrorEnvelope),
-        (status = 500, description = "snapshot serialization failed", body = ErrorEnvelope)
+        (status = 403, description = "wildcard admin role required", body = service_http::ErrorEnvelope),
+        (status = 500, description = "snapshot serialization failed", body = service_http::ErrorEnvelope)
     )
 )]
 pub(crate) async fn admin_backup(

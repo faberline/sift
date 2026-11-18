@@ -241,13 +241,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.96.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: checker unit tests
         working-directory: tests/perf
-        run: python3 -B -m unittest test_check_regression -v
+        run: python3 -B -m unittest test_check_regression test_trace_compare -v
       - name: build sift binary
         run: cargo build --locked -p sift --bin sift
       - name: metric workload
@@ -280,27 +281,43 @@ jobs:
           if-no-files-found: error
       - name: log regression check
         run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-log.json" tests/perf/baseline/log.json 60 150 --ignore query_p99_ms
-      - name: trace workload (5 runs)
+      - name: build base binary
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/base-target
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base-src" HEAD^
+          cd "$RUNNER_TEMP/base-src"
+          cargo build --locked -p sift --bin sift
+      - name: trace workload (base and head, 5 runs each)
         env:
           WORKLOAD_REQUESTS: '50'
           WORKLOAD_ITEMS: '1000'
           WORKLOAD_QUERIES: '21'
         run: |
           for i in 1 2 3 4 5; do
-            WORKLOAD_OUT="$RUNNER_TEMP/perf-trace-$i.json" bash tests/perf/trace_workload.sh
+            SIFT_BIN="$RUNNER_TEMP/base-target/debug/sift" WORKLOAD_OUT="$RUNNER_TEMP/perf-trace-base-$i.json" bash tests/perf/trace_workload.sh
+            WORKLOAD_OUT="$RUNNER_TEMP/perf-trace-head-$i.json" bash tests/perf/trace_workload.sh
           done
       - name: trace median
-        run: python3 -B tests/perf/median_result.py "$RUNNER_TEMP/perf-trace.json" "$RUNNER_TEMP"/perf-trace-1.json "$RUNNER_TEMP"/perf-trace-2.json "$RUNNER_TEMP"/perf-trace-3.json "$RUNNER_TEMP"/perf-trace-4.json "$RUNNER_TEMP"/perf-trace-5.json
+        run: |
+          python3 -B tests/perf/median_result.py "$RUNNER_TEMP/perf-trace-base.json" "$RUNNER_TEMP"/perf-trace-base-1.json "$RUNNER_TEMP"/perf-trace-base-2.json "$RUNNER_TEMP"/perf-trace-base-3.json "$RUNNER_TEMP"/perf-trace-base-4.json "$RUNNER_TEMP"/perf-trace-base-5.json
+          python3 -B tests/perf/median_result.py "$RUNNER_TEMP/perf-trace-head.json" "$RUNNER_TEMP"/perf-trace-head-1.json "$RUNNER_TEMP"/perf-trace-head-2.json "$RUNNER_TEMP"/perf-trace-head-3.json "$RUNNER_TEMP"/perf-trace-head-4.json "$RUNNER_TEMP"/perf-trace-head-5.json
       - name: upload trace result
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: perf-trace
           path: |
-            ${{ runner.temp }}/perf-trace.json
-            ${{ runner.temp }}/perf-trace-?.json
+            ${{ runner.temp }}/perf-trace-base.json
+            ${{ runner.temp }}/perf-trace-head.json
+            ${{ runner.temp }}/perf-trace-base-?.json
+            ${{ runner.temp }}/perf-trace-head-?.json
           if-no-files-found: error
+      # The comparison of this step is the base commit, measured in this job
+      # with the same workload on the same machine (faberline/aw#581, option A).
+      # The stored trace baseline file is not compared here any more.
+      # The threshold 60 is unchanged: head must be at most 160 percent of base.
       - name: trace regression check
-        run: python3 -B tests/perf/check_regression.py "$RUNNER_TEMP/perf-trace.json" tests/perf/baseline/trace.json 60
+        run: python3 -B tests/perf/compare_trace.py "$RUNNER_TEMP/perf-trace-head.json" "$RUNNER_TEMP/perf-trace-base.json" 60
 
   test-security:
     name: "test: security (deny, architecture)"
