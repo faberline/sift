@@ -291,3 +291,43 @@ async fn deliver(
     }
     Ok(())
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pod(value: Value) -> Pod {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn base_pod() -> Value {
+        json!({"metadata":{"name":"p","uid":"u1","namespace":"a","annotations":{"prometheus.io/scrape":"true","prometheus.io/port":"8080","prometheus.io/path":"/m"},"labels":{"sift.axiom.dev/scrape":"true"}},"spec":{"nodeName":"n1","containers":[{"name":"c"}]},"status":{"podIP":"10.0.0.5"}})
+    }
+
+    #[test]
+    fn scrape_target_builds_url_for_annotated_pod_on_this_node() {
+        let url = scrape_target(&pod(base_pod()), "n1").unwrap();
+        assert_eq!(url.as_str(), "http://10.0.0.5:8080/m");
+    }
+
+    #[test]
+    fn scrape_target_requires_the_scrape_label() {
+        let mut value = base_pod();
+        value["metadata"]["labels"] = json!({});
+        assert!(scrape_target(&pod(value), "n1").is_none());
+    }
+
+    #[test]
+    fn scrape_target_ignores_pod_on_another_node() {
+        assert!(scrape_target(&pod(base_pod()), "n2").is_none());
+    }
+
+    #[test]
+    fn scrape_target_rejects_port_zero_and_double_slash_path() {
+        let mut port_zero = base_pod();
+        port_zero["metadata"]["annotations"]["prometheus.io/port"] = json!("0");
+        assert!(scrape_target(&pod(port_zero), "n1").is_none());
+        let mut double_slash = base_pod();
+        double_slash["metadata"]["annotations"]["prometheus.io/path"] = json!("//x");
+        assert!(scrape_target(&pod(double_slash), "n1").is_none());
+    }
+}

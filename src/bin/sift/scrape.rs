@@ -41,3 +41,33 @@ pub(super) async fn scrape(args: ScrapeArgs) -> Result<()> {
     })
     .await
 }
+#[cfg(test)]
+mod tests {
+    use super::ScrapeArgs;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Wrapper {
+        #[command(flatten)]
+        args: ScrapeArgs,
+    }
+
+    #[test]
+    fn namespace_option_is_repeatable_and_comma_separated() {
+        let parsed = Wrapper::try_parse_from([
+            "x",
+            "--project",
+            "p",
+            "--node",
+            "n",
+            "--namespace",
+            "a,b",
+            "--namespace",
+            "c",
+        ])
+        .unwrap();
+        assert_eq!(parsed.args.namespaces, ["a", "b", "c"]);
+        let parsed = Wrapper::try_parse_from(["x", "--project", "p", "--node", "n"]).unwrap();
+        assert!(parsed.args.namespaces.is_empty());
+    }
+}
