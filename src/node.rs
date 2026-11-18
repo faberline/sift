@@ -5,6 +5,7 @@
 pub(crate) mod domain;
 pub(crate) mod infrastructure;
 
+pub use crate::node::infrastructure::retention_setting::configure_retention_days;
 pub use crate::node::{
     domain::storage_role::StorageRole,
     infrastructure::{

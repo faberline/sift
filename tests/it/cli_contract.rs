@@ -562,3 +562,27 @@ fn read_request_head(stream: &mut impl Read) -> String {
 }
 
 // HANDWRITE-END
+
+#[test]
+fn serve_refuses_retention_days_above_180() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sift"))
+        .args(["serve", "--ephemeral", "--retention-days", "181"])
+        .output()
+        .expect("run sift serve");
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("181"), "{stderr}");
+    assert!(stderr.contains("1..=180"), "{stderr}");
+}
+
+#[test]
+fn serve_refuses_zero_retention_days() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sift"))
+        .args(["serve", "--ephemeral", "--retention-days", "0"])
+        .output()
+        .expect("run sift serve");
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("0"), "{stderr}");
+    assert!(stderr.contains("1..=180"), "{stderr}");
+}
