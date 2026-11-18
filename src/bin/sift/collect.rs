@@ -26,9 +26,9 @@ pub(super) struct CollectArgs {
     /// Kubernetes node CRI pod-log root, normally /var/log/pods.
     #[arg(long, conflicts_with = "source", required_unless_present = "source")]
     cri_root: Option<PathBuf>,
-    /// Collect CRI logs only from this Kubernetes namespace.
-    #[arg(long, requires = "cri_root")]
-    namespace: Option<String>,
+    /// Collect CRI logs only from these Kubernetes namespaces. Repeat the option or separate names with commas.
+    #[arg(long = "namespace", value_delimiter = ',', requires = "cri_root")]
+    namespaces: Vec<String>,
     /// Stable identity used with byte offsets to derive idempotency keys.
     #[arg(long)]
     source_id: Option<String>,
@@ -104,9 +104,13 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
             .as_deref()
             .map(|node| format!("cri-node:{node}"))
             .unwrap_or_else(|| format!("cri-root:{}", canonical.display()));
-        let source_id = match &args.namespace {
-            Some(namespace) => format!("{source_id}:namespace:{namespace}"),
-            None => source_id,
+        let source_id = if args.namespaces.is_empty() {
+            source_id
+        } else {
+            let mut sorted = args.namespaces.clone();
+            sorted.sort();
+            sorted.dedup();
+            format!("{source_id}:namespace:{}", sorted.join(","))
         };
         (
             SourceSpec::Cri(CriSourceConfig {
@@ -117,7 +121,7 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
                     location: args.location,
                     node: args.node,
                 },
-                namespace: args.namespace,
+                namespaces: args.namespaces,
             }),
             source_id,
         )

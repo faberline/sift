@@ -420,6 +420,93 @@ async fn namespace_scoped_agent_does_not_collect_another_project_namespace() {
     assert_eq!(records[0]["resource"]["k8s.namespace.name"], "prod");
 }
 
+fn write_three_namespace_pods(root: &Path) {
+    for (index, namespace) in ["a", "b", "c"].into_iter().enumerate() {
+        let directory = root
+            .join(format!("{namespace}_app-0_uid-{namespace}"))
+            .join("app");
+        std::fs::create_dir_all(&directory).unwrap();
+        let span_id = format!("{:016x}", 0xa0 + index);
+        let log = service_event("ns", namespace, None, &span_id);
+        std::fs::write(
+            directory.join("0.log"),
+            cri_line("stdout", "F", &log.to_string()),
+        )
+        .unwrap();
+    }
+}
+
+fn namespaces_of(records: &Value) -> std::collections::BTreeSet<String> {
+    records["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|record| {
+            record["resource"]["k8s.namespace.name"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn namespace_list_collects_only_listed_namespaces() {
+    let _lock = PROCESS_TEST_LOCK.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("pods");
+    write_three_namespace_pods(&root);
+    let port = reserve_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut process = SiftProcess::spawn(port, &dir.path().join("server"));
+    let client = reqwest::Client::new();
+    wait_ready(&mut process, &client, &base).await;
+    let summary = successful_summary(
+        collector_command(
+            &root,
+            &dir.path().join("checkpoint.json"),
+            &dir.path().join("quarantine.jsonl"),
+            &base,
+        )
+        .args(["--namespace", "a,b"])
+        .output()
+        .unwrap(),
+    );
+    assert_eq!(summary["accepted"], 2);
+    let response = query_logs(&client, &base, None).await;
+    let expected: std::collections::BTreeSet<String> =
+        ["a", "b"].into_iter().map(String::from).collect();
+    assert_eq!(namespaces_of(&response), expected);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn empty_namespace_list_collects_every_namespace() {
+    let _lock = PROCESS_TEST_LOCK.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("pods");
+    write_three_namespace_pods(&root);
+    let port = reserve_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let mut process = SiftProcess::spawn(port, &dir.path().join("server"));
+    let client = reqwest::Client::new();
+    wait_ready(&mut process, &client, &base).await;
+    let summary = successful_summary(
+        collector_command(
+            &root,
+            &dir.path().join("checkpoint.json"),
+            &dir.path().join("quarantine.jsonl"),
+            &base,
+        )
+        .output()
+        .unwrap(),
+    );
+    assert_eq!(summary["accepted"], 3);
+    let response = query_logs(&client, &base, None).await;
+    let expected: std::collections::BTreeSet<String> =
+        ["a", "b", "c"].into_iter().map(String::from).collect();
+    assert_eq!(namespaces_of(&response), expected);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cri_partial_rotation_trace_metadata_and_cloud_coexistence() {
     let _process_guard = PROCESS_TEST_LOCK.lock().await;
