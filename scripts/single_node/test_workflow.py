@@ -1,19 +1,10 @@
-import json
 import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / '.github' / 'workflows' / 'sift-single-node-load.yml'
-RESULT = ROOT / 'docs' / 'operations' / 'single-node-capacity-result.json'
 TEXT = PATH.read_text()
-
-STEP_KEYS = {
-    'rate', 'seconds', 'offered_items', 'accepted_items', 'rejected_items', 'error_items',
-    'ingest_latency_p50_seconds', 'ingest_latency_p95_seconds', 'log_query_p95_seconds',
-    'metric_query_p95_seconds', 'query_errors', 'cpu_seconds', 'peak_rss_bytes',
-    'disk_bytes_added', 'disk_bytes_per_accepted_item',
-}
 
 
 def on_block():
@@ -25,6 +16,11 @@ def on_block():
             break
         block.append(line)
     return '\n'.join(block)
+
+
+def step_block(marker):
+    blocks = re.split(r'(?m)^(?=      - )', TEXT)
+    return next(block for block in blocks if marker in block)
 
 
 class WorkflowTest(unittest.TestCase):
@@ -58,16 +54,24 @@ class WorkflowTest(unittest.TestCase):
                      'actions/upload-artifact@'):
             self.assertIn(text, TEXT)
 
-    def test_committed_result_has_every_default_step(self):
-        data = json.loads(RESULT.read_text())
-        self.assertEqual(data['kind'], 'single-node-local-load')
-        self.assertIn('not a GKE claim', data['claim'])
-        self.assertEqual(data['step_seconds'], 60)
-        self.assertEqual([step['rate'] for step in data['steps']], [500, 1000, 2500, 5000, 10000])
-        self.assertIsInstance(data['machine']['cpus'], int)
-        self.assertIsInstance(data['machine']['memory_bytes'], int)
-        for step in data['steps']:
-            self.assertEqual(set(step), STEP_KEYS)
+    def test_logs_are_uploaded_even_when_the_driver_fails(self):
+        self.assertIn('        if: always()', step_block('name: single-node-load-logs'))
+
+    def test_server_log_and_driver_log_are_collected(self):
+        for text in ('driver.log', 'server.log', 'tee'):
+            self.assertIn(text, TEXT)
+
+    def test_result_upload_runs_only_after_success(self):
+        block = step_block('name: single-node-load-result')
+        self.assertNotIn('always()', block)
+        self.assertNotIn('failure()', block)
+
+    def test_data_directory_is_not_uploaded(self):
+        self.assertNotIn('single-node-load/data', TEXT)
+        self.assertIsNone(re.search(r'path:.*data', TEXT))
+
+    def test_no_result_file_is_committed(self):
+        self.assertFalse((ROOT / 'docs' / 'operations' / 'single-node-capacity-result.json').exists())
 
 
 if __name__ == '__main__':

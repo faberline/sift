@@ -34,7 +34,20 @@ jobs:
       - name: Run the local load driver
         env:
           STEP_SECONDS: ${{ inputs.step_seconds }}
-        run: python3 -B scripts/single_node/run_local_load.py --sift-bin target/release/sift --output-dir "$RUNNER_TEMP/single-node-load" --step-seconds "$STEP_SECONDS"
+        run: |
+          mkdir -p "$RUNNER_TEMP/single-node-logs"
+          python3 -B scripts/single_node/run_local_load.py --sift-bin target/release/sift --output-dir "$RUNNER_TEMP/single-node-load" --step-seconds "$STEP_SECONDS" 2>&1 | tee "$RUNNER_TEMP/single-node-logs/driver.log"
+      - name: Collect the Sift server log
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/single-node-logs"
+          if [ -f "$RUNNER_TEMP/single-node-load/server.log" ]; then cp "$RUNNER_TEMP/single-node-load/server.log" "$RUNNER_TEMP/single-node-logs/server.log"; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: single-node-load-logs
+          path: ${{ runner.temp }}/single-node-logs
+          if-no-files-found: warn
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: single-node-load-result
