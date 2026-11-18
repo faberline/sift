@@ -14,6 +14,7 @@ use crate::operations::infrastructure::k8s::agent_workloads::{
 };
 use crate::operations::infrastructure::k8s::api_endpoint_discovery::discover_kubernetes_api_endpoint;
 use crate::operations::infrastructure::k8s::backup_cron_job::backup_cron_job_plan;
+use crate::operations::infrastructure::k8s::fqdn_support::ensure_fqdn_network_policy_served;
 use crate::operations::infrastructure::k8s::network_policy::{
     fqdn_network_policy_plans, network_policy_plans,
 };
@@ -171,5 +172,12 @@ impl InstanceRenderer for KubernetesRenderer {
     ) -> crate::shared_kernel::port_future::PortFuture<'_, (Vec<String>, Vec<u16>), anyhow::Error>
     {
         Box::pin(discover_kubernetes_api_endpoint(client))
+    }
+
+    fn ensure_fqdn_support(
+        &self,
+        client: kube::Client,
+    ) -> crate::shared_kernel::port_future::PortFuture<'_, (), anyhow::Error> {
+        Box::pin(ensure_fqdn_network_policy_served(client))
     }
 }

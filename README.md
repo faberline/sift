@@ -293,13 +293,23 @@ Sift resource is deleted. The operator also discovers the ready
 `default/kubernetes` endpoint and limits review calls to that exact IP. Sift
 fails closed when either step fails.
 
-GKE deployments require Dataplane V2 with
+Dataplane V2 with
 [FQDN Network Policy](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/fqdn-network-policies)
-enabled. Sift uses it to allow the store and backup roles to reach only
-`storage.googleapis.com` on port 443. Each policy selects one Sift instance and
-one role. Removing a `gs://` destination removes its policy. Standard
-NetworkPolicy rules allow only the discovered Kubernetes API endpoint, the GKE
-metadata server, cluster DNS, and the named Sift role peers.
+is required only when a `gs://` archive, bootstrap manifest or backup
+destination, or `alerting.allowedHosts`, is configured. Without them the
+operator renders no `FQDNNetworkPolicy`, does not look for FQDN support, and
+installs on a cluster without it. The operator still checks for old
+`google-apis` policies when it prunes, so on a cluster that does not serve
+`networking.gke.io/v1alpha1` the instance reports the condition `PruneBlocked`
+with reason `ApiNotServed`; every other object is still applied. When a
+destination or host list is configured and the cluster does not serve
+`FQDNNetworkPolicy`, reconcile fails with "FQDN Network Policy is required but
+not served". Sift uses the policies to let the store, control and backup roles
+reach only `storage.googleapis.com` on port 443; the control role also gets a
+`webhooks` policy for `alerting.allowedHosts`. Each policy selects one Sift
+instance and one role. Removing a `gs://` destination removes its policy.
+Standard NetworkPolicy rules allow only the discovered Kubernetes API endpoint,
+the GKE metadata server, cluster DNS, and the named Sift role peers.
 
 ## Security
 
