@@ -24,6 +24,9 @@ pub(crate) struct InstanceSettings {
     pub ingest: InstanceIngest,
     pub placement: InstancePlacement,
     pub auth: InstanceAuth,
+    // Read by the single-node renderer of #221; no non-test code reads it yet.
+    #[allow(dead_code)]
+    pub topology: InstanceTopology,
     pub tokens_secret: Option<String>,
     pub backup: Option<InstanceBackup>,
     pub alerting: InstanceAlerting,
@@ -37,6 +40,12 @@ pub(crate) enum InstanceAuth {
     Off,
     Required,
     Kubernetes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InstanceTopology {
+    Ha,
+    SingleNode,
 }
 
 #[derive(Clone, Debug)]

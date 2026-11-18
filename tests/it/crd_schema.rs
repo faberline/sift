@@ -80,3 +80,12 @@ fn crd_schema_check_detects_a_change() {
         "a changed version name must differ from the golden file"
     );
 }
+
+#[test]
+fn crd_schema_lists_topology() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let topology = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+        ["properties"]["topology"];
+    assert_eq!(topology["enum"], serde_json::json!(["ha", "singleNode"]));
+    assert_eq!(topology["default"], "ha");
+}
