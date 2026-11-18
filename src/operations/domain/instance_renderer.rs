@@ -17,4 +17,5 @@ pub(crate) trait InstanceRenderer: Send + Sync {
         &self,
         client: Self::Client,
     ) -> PortFuture<'_, (Vec<String>, Vec<u16>), Self::Error>;
+    fn ensure_fqdn_support(&self, client: Self::Client) -> PortFuture<'_, (), Self::Error>;
 }
