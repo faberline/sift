@@ -344,7 +344,7 @@ jobs:
       - name: install cargo-audit
         run: cargo install --locked cargo-audit@0.23.0
       - name: cargo audit
-        run: cargo audit --deny warnings
+        run: cargo audit --db "$RUNNER_TEMP/rustsec-db" --deny warnings
       - name: architecture check
         run: bash scripts/check-architecture.sh
       - name: install aw
