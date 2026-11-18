@@ -33,6 +33,9 @@ pub(super) struct ServeArgs {
     pub(super) max_body_bytes: usize,
     #[arg(long, env = "SIFT_OTLP_ENDPOINT")]
     pub(super) otlp_endpoint: Option<String>,
+    /// Days of events Sift keeps and accepts, 1 to 180.
+    #[arg(long, env = "SIFT_RETENTION_DAYS", default_value_t = 180)]
+    pub(super) retention_days: u32,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
