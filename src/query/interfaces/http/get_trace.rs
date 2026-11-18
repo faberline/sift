@@ -28,10 +28,10 @@ pub(crate) struct HttpTraceQuery {
     ),
     responses(
         (status = 200, description = "complete or explicitly partial trace", body = projection::TraceResultV1),
-        (status = 400, description = "invalid trace query", body = ErrorEnvelope),
-        (status = 403, description = "project read denied", body = ErrorEnvelope),
-        (status = 404, description = "trace not found", body = ErrorEnvelope),
-        (status = 503, description = "projection has not reached min_cursor", body = ErrorEnvelope)
+        (status = 400, description = "invalid trace query", body = service_http::ErrorEnvelope),
+        (status = 403, description = "project read denied", body = service_http::ErrorEnvelope),
+        (status = 404, description = "trace not found", body = service_http::ErrorEnvelope),
+        (status = 503, description = "projection has not reached min_cursor", body = service_http::ErrorEnvelope)
     )
 )]
 pub(crate) async fn get_trace(
