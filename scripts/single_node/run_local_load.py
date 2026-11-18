@@ -46,7 +46,7 @@ def machine_shape(data_dir):
         memory_bytes = None
     fs_type = None
     try:
-        out = subprocess.run(['df', '-T', '--output=fstype', str(data_dir)], capture_output=True,
+        out = subprocess.run(['df', '--output=fstype', str(data_dir)], capture_output=True,
                              text=True, check=True).stdout.splitlines()
         fs_type = out[1].strip() if len(out) > 1 else None
     except (OSError, subprocess.CalledProcessError):
@@ -210,7 +210,10 @@ def main(argv=None):
     parser.add_argument('--templates', type=Path)
     args = parser.parse_args(argv)
 
-    rates = _rates(args.rates)
+    try:
+        rates = _rates(args.rates)
+    except ValueError:
+        parser.error('each rate must be a multiple of 10 from 10 through 10000')
     if not rates or any(rate % 10 or rate < 10 or rate > 10000 for rate in rates):
         parser.error('each rate must be a multiple of 10 from 10 through 10000')
     if args.step_seconds < 1:

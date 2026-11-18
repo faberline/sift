@@ -1,5 +1,5 @@
 """Tests for the one-process local load driver. Standard library only."""
-import contextlib, http.server, io, json, os, sys, tempfile, threading, time, unittest
+import contextlib, http.server, io, json, os, shutil, sys, tempfile, threading, time, unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'production'))
@@ -149,6 +149,21 @@ class LocalLoad(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     driver.main(['--sift-bin', 'x', '--output-dir', str(new), '--rates', '15'])
             self.assertFalse(new.exists())
+
+    def test_rates_that_are_not_integers_are_a_usage_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            new = Path(tmp) / 'new'
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    driver.main(['--sift-bin', 'x', '--output-dir', str(new), '--rates', 'abc'])
+            self.assertFalse(new.exists())
+
+    @unittest.skipUnless(sys.platform.startswith('linux') and shutil.which('df'), 'GNU df on Linux')
+    def test_machine_shape_reads_fs_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fs_type = driver.machine_shape(Path(tmp))['fs_type']
+        self.assertIsInstance(fs_type, str)
+        self.assertTrue(fs_type)
 
     @unittest.skipUnless(os.environ.get('SIFT_BIN'), 'set SIFT_BIN to the built sift binary')
     def test_real_binary_short_run(self):
