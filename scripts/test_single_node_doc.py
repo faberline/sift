@@ -45,6 +45,11 @@ class SingleNodeDocTest(unittest.TestCase):
         self.assertIn("not run", page.lower())
         self.assertIn("No live GKE evidence exists yet", page)
 
+    def test_lock_restart_is_stated(self):
+        page = self.read(PAGE)
+        self.assertIn("does not wait", page)
+        self.assertIn("another Sift process may be using it", page)
+
     def test_g4_names_existing_ci_jobs(self):
         page = self.read(PAGE)
         ci = self.read(".github/workflows/ci.yml")
