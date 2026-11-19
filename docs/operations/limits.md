@@ -33,7 +33,7 @@ This page lists each limit with its value and the file and item where the code e
 | Resident journal events | 100,000 | `src/journal/domain/journal_limits.rs` `DEFAULT_RESIDENT_JOURNAL_EVENTS` |
 | Event-ID idempotency window | 6 hours (21,600 s) | `src/shared_kernel/idempotency_window.rs` `IDEMPOTENCY_WINDOW_SECONDS` |
 | Hot retention | 30 days | `src/archive/application/evict_cold_segments.rs` `Duration::days(30)` |
-| Total retention | 180 days | `src/archive/application/retention_due.rs` `Duration::days(180)` |
+| Total retention | default and maximum 180 days; `--retention-days` sets 1 to 180 | `src/shared_kernel/retention_boundary.rs` `MAX_RETENTION_DAYS` |
 | Collector batch size | default 100, maximum 1,000 | `src/collector/domain/config.rs` `DEFAULT_BATCH_SIZE` `MAX_BATCH_SIZE` |
 | Collector line size | default 512 KiB, maximum 1 MiB | `src/collector/domain/config.rs` `DEFAULT_MAX_LINE_BYTES` `MAX_LINE_BYTES` |
 | Collector retries | 3 | `src/collector/domain/config.rs` `DEFAULT_MAX_RETRIES` |

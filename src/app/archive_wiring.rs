@@ -16,6 +16,7 @@ use crate::archive::application::committed_event_reader::CommittedEventReader;
 use crate::journal::application::raw_event_service::RawEventService as RawStorage;
 use crate::shared_kernel::archive_manifest::ArchiveManifest;
 use crate::shared_kernel::archive_receipts::*;
+use crate::shared_kernel::retention_boundary::RetentionDays;
 use crate::shared_kernel::segment_manifest::SegmentManifest;
 use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
@@ -138,6 +139,20 @@ pub fn expire_committed_events_at(
         &archive_services(),
         journal,
         now,
+        RetentionDays::configured(),
+    )
+}
+pub fn expire_committed_events_with_days_at(
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
+    now: DateTime<Utc>,
+    days: u32,
+) -> Result<ExpirationReceipt> {
+    let retention = RetentionDays::new(days).map_err(|error| anyhow::anyhow!(error))?;
+    crate::archive::application::retention_expiration::expire_committed_events_at(
+        &archive_services(),
+        journal,
+        now,
+        retention,
     )
 }
 pub fn finalize_archive_gc_after_checkpoint(root: &Path) -> Result<usize> {
@@ -195,7 +210,21 @@ pub fn resume_local_blob_gc_batch(
     )
 }
 pub fn retention_due_at(root: &Path, now: DateTime<Utc>) -> Result<bool> {
-    crate::archive::application::retention_due::retention_due_at(&archive_services(), root, now)
+    crate::archive::application::retention_due::retention_due_at(
+        &archive_services(),
+        root,
+        now,
+        RetentionDays::configured(),
+    )
+}
+pub fn retention_due_with_days_at(root: &Path, now: DateTime<Utc>, days: u32) -> Result<bool> {
+    let retention = RetentionDays::new(days).map_err(|error| anyhow::anyhow!(error))?;
+    crate::archive::application::retention_due::retention_due_at(
+        &archive_services(),
+        root,
+        now,
+        retention,
+    )
 }
 pub fn verify_committed_manifest_available(root: &Path) -> Result<bool> {
     crate::archive::application::archive_status_queries::verify_committed_manifest_available(
