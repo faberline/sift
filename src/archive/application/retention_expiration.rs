@@ -30,29 +30,32 @@ use crate::archive::domain::retention_policy::{
 };
 use crate::shared_kernel::archive_manifest::{ArchiveManifest, ArchiveRetentionScan};
 use crate::shared_kernel::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
+use crate::shared_kernel::retention_boundary::RetentionDays;
 use crate::shared_kernel::sha256_hex::sha256_hex;
 
-/// Remove events older than the fixed 180-day boundary from the committed
-/// manifest. A mixed Parquet segment is rewritten with only retained rows.
-/// The new objects and manifest commit before the prior objects are deleted.
+/// Remove events older than the retention window (`retention` days) from the
+/// committed manifest. A mixed Parquet segment is rewritten with only retained
+/// rows. The new objects and manifest commit before the prior objects are deleted.
 pub(crate) fn expire_committed_events_at(
     services: &ArchiveServices,
     journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
+    retention: RetentionDays,
 ) -> Result<ExpirationReceipt> {
-    expire_committed_events_bounded_at(services, journal, now)
+    expire_committed_events_bounded_at(services, journal, now, retention)
 }
 
 fn expire_committed_events_bounded_at(
     services: &ArchiveServices,
     journal: &crate::journal::application::journal_service::JournalService<'_>,
     now: DateTime<Utc>,
+    retention: RetentionDays,
 ) -> Result<ExpirationReceipt> {
     const BATCH_PARQUET_BYTES: u64 = 64 * 1024 * 1024;
 
     let root = journal.storage().root();
     let (current_state, current) = ensure_retention_head_reconciled(services, journal, root)?;
-    let (requested_cutoff_nanos, receipt_cutoff_nanos) = retention_cutoffs(now)?;
+    let (requested_cutoff_nanos, receipt_cutoff_nanos) = retention_cutoffs(now, retention)?;
     if current.retention_scan.is_none()
         && current
             .oldest_event_time_unix_nano
@@ -93,7 +96,7 @@ fn expire_committed_events_bounded_at(
     if let Some(receipt) =
         resume_uploaded_retention_manifest(&object_store, &bucket, &manifest_key, &current_state)?
     {
-        return finish_bounded_retention_commit(services, journal, &current, receipt);
+        return finish_bounded_retention_commit(services, journal, &current, receipt, retention);
     }
 
     let current_catalog = services.resources.catalog_for_uri(&current.catalog_uri)?;
@@ -259,12 +262,14 @@ fn expire_committed_events_bounded_at(
         manifest_sha256: commit.manifest.sha256,
         manifest,
     };
-    finish_bounded_retention_commit(services, journal, &current, receipt).map(|mut outcome| {
-        outcome.expired_events = pass.expired_events;
-        outcome.replaced_segments = pass.replaced_segments;
-        outcome.removed_segments = pass.removed_segments;
-        outcome
-    })
+    finish_bounded_retention_commit(services, journal, &current, receipt, retention).map(
+        |mut outcome| {
+            outcome.expired_events = pass.expired_events;
+            outcome.replaced_segments = pass.replaced_segments;
+            outcome.removed_segments = pass.removed_segments;
+            outcome
+        },
+    )
 }
 
 /// Reconcile the journal's retention with the archive, and read the committed
@@ -279,13 +284,13 @@ fn ensure_retention_head_reconciled(
     reconcile_live_committed_retention(services, journal)?;
     let current_state = services
         .read_commit_state(root)?
-        .context("180-day expiration requires a committed remote manifest")?;
+        .context("retention expiration requires a committed remote manifest")?;
     let current = services
         .fetch_verified_committed_root(root)?
-        .context("180-day expiration requires a readable remote manifest")?;
+        .context("retention expiration requires a readable remote manifest")?;
     if journal.last_cursor() < current.raft_snapshot_index {
         bail!(
-            "180-day expiration journal cursor {} is behind archive cursor {}",
+            "retention expiration journal cursor {} is behind archive cursor {}",
             journal.last_cursor(),
             current.raft_snapshot_index
         );
@@ -304,12 +309,17 @@ fn ensure_retention_head_reconciled(
     Ok((current_state, current))
 }
 
-/// The event cutoff, 180 days before `now`, and the dedupe receipt cutoff,
-/// one idempotency window before it, in Unix nanoseconds.
-fn retention_cutoffs(now: DateTime<Utc>) -> Result<(i64, i64)> {
-    let requested_cutoff_nanos = (now - chrono::Duration::days(180))
+/// The event cutoff, `retention` days before `now`, and the dedupe receipt
+/// cutoff, one idempotency window before it, in Unix nanoseconds.
+fn retention_cutoffs(now: DateTime<Utc>, retention: RetentionDays) -> Result<(i64, i64)> {
+    let requested_cutoff_nanos = (now - chrono::Duration::days(i64::from(retention.days())))
         .timestamp_nanos_opt()
-        .context("180-day retention cutoff is outside the nanosecond range")?;
+        .with_context(|| {
+            format!(
+                "{}-day retention cutoff is outside the nanosecond range",
+                retention.days()
+            )
+        })?;
     let receipt_cutoff_nanos = (now
         - chrono::Duration::seconds(
             crate::shared_kernel::idempotency_window::IDEMPOTENCY_WINDOW_SECONDS,
@@ -342,5 +352,32 @@ fn resume_uploaded_retention_manifest(
         }
         Err(storage_object::ObjectStoreError::NotFound { .. }) => Ok(None),
         Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retention_cutoffs;
+    use crate::shared_kernel::retention_boundary::RetentionDays;
+    use chrono::{Duration, TimeZone, Utc};
+
+    #[test]
+    fn retention_cutoffs_use_the_given_days() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        let thirty = RetentionDays::new(30).unwrap();
+        let (thirty_events, thirty_receipts) = retention_cutoffs(now, thirty).unwrap();
+        let (default_events, default_receipts) =
+            retention_cutoffs(now, RetentionDays::DEFAULT).unwrap();
+        assert_eq!(
+            thirty_events,
+            (now - Duration::days(30)).timestamp_nanos_opt().unwrap()
+        );
+        assert_eq!(
+            default_events,
+            (now - Duration::days(i64::from(RetentionDays::DEFAULT.days())))
+                .timestamp_nanos_opt()
+                .unwrap()
+        );
+        assert_eq!(thirty_receipts, default_receipts);
     }
 }
