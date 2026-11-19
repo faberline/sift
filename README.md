@@ -310,6 +310,7 @@ reach only `storage.googleapis.com` on port 443; the control role also gets a
 instance and one role. Removing a `gs://` destination removes its policy.
 Standard NetworkPolicy rules allow only the discovered Kubernetes API endpoint,
 the GKE metadata server, cluster DNS, and the named Sift role peers.
+The optional field `spec.retentionDays` sets how many days of events Sift keeps. The default is 180 and the maximum is 180; the Sift resource is refused with a value of 0 or above 180. A shorter value lowers PVC and GCS use. The operator passes it as `--retention-days` to the store, control and all-role workloads.
 
 ## Security
 

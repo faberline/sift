@@ -104,6 +104,17 @@ fn crd_schema_lists_metrics_namespaces() {
 }
 
 #[test]
+fn crd_schema_lists_retention_days() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let retention = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+        ["spec"]["properties"]["retentionDays"];
+    assert_eq!(retention["type"], "integer");
+    assert_eq!(retention["minimum"], 1);
+    assert_eq!(retention["maximum"], 180);
+    assert_eq!(retention["default"], 180);
+}
+
+#[test]
 fn crd_schema_lists_log_namespaces() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let namespaces = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]

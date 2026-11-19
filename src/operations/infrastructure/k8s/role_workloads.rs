@@ -244,17 +244,18 @@ fn role_container_plan(
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
         ports.push(json!({"name":"raft-mtls", "containerPort":PEER_MTLS_PORT}));
     }
-    let mut container = render::ContainerPlan::new(
-        "sift",
-        &spec.image,
-        vec![
-            "serve".into(),
-            "--role".into(),
-            role.into(),
-            "--data-dir".into(),
-            "/var/lib/sift".into(),
-        ],
-    );
+    let mut args = vec![
+        "serve".into(),
+        "--role".into(),
+        role.into(),
+        "--data-dir".into(),
+        "/var/lib/sift".into(),
+    ];
+    if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT | ALL_COMPONENT) {
+        args.push("--retention-days".into());
+        args.push(spec.retention_days.to_string());
+    }
+    let mut container = render::ContainerPlan::new("sift", &spec.image, args);
     container.ports = ports;
     container.env = role_env(cx, spec, role);
     container.volume_mounts = mounts;
