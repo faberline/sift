@@ -273,6 +273,33 @@ fn role_container_plan(
     container
 }
 
+/// The Kubernetes tolerations of the role Pods. Only the fields that are set
+/// are written, so the API server applies its own defaults to the rest.
+fn tolerations_json(spec: &SiftSpec) -> Vec<Value> {
+    spec.placement
+        .tolerations
+        .iter()
+        .map(|toleration| {
+            let mut object = serde_json::Map::new();
+            let fields = [
+                ("key", &toleration.key),
+                ("operator", &toleration.operator),
+                ("value", &toleration.value),
+                ("effect", &toleration.effect),
+            ];
+            for (name, value) in fields {
+                if let Some(value) = value {
+                    object.insert(name.to_string(), json!(value));
+                }
+            }
+            if let Some(seconds) = toleration.toleration_seconds {
+                object.insert("tolerationSeconds".to_string(), json!(seconds));
+            }
+            Value::Object(object)
+        })
+        .collect()
+}
+
 fn role_pod_plan(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> render::PodPlan {
     let (volumes, mounts) = role_support_volumes(spec, role);
     let service_account = if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
@@ -286,7 +313,8 @@ fn role_pod_plan(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> render::Pod
     )
     .with_automount_service_account_token(matches!(spec.auth, AuthMode::Kubernetes))
     .with_init_containers(vec![data_init_container()])
-    .with_volumes(volumes);
+    .with_volumes(volumes)
+    .with_tolerations(tolerations_json(spec));
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
         runtime = runtime.with_affinity(render::dedicated_node_affinity(
             serde_json::to_value(full_role_selector(cx, role)).expect("role selector is JSON"),

@@ -445,6 +445,7 @@ Variables are read at run time unless the row says otherwise. A name in backtick
 | `SIFT_MAX_DECODED_BODY_BYTES` | `sift serve` | 8388608 | Largest request body after decompression, in bytes. |
 | `SIFT_MAX_EVENT_BYTES` | `sift serve` | 262144 | Largest single event, in bytes. |
 | `SIFT_MAX_EVENTS_PER_BATCH` | `sift serve` | 1000 | Most events in one batch. |
+| `SIFT_TRACE_RETAINED_BYTES` | `sift serve` | 268435456 | Most bytes of spans that the trace projection keeps in memory (the JSON size of each span). The oldest spans go first, after the span-count limit of 100,000. The newest span always stays. |
 | `SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT` | `sift serve`; CRD `spec.ingest.maxConcurrentRequests` | 32 | Ingest requests that run at once per project. |
 | `SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW` | `sift serve`; CRD `spec.ingest.maxItemsPerMinute` | 720000 | Items one project may send in one quota window. |
 | `SIFT_INGEST_QUOTA_WINDOW_SECS` | `sift serve` | 60 | Length of the quota window, in seconds. |
@@ -559,11 +560,13 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.storage.controlSize` | string | no | 5Gi | Volume size of the control role. |
 | `spec.storage.gatewaySize` | string | no | 2Gi | Volume size of the gateway role. |
 | `spec.storage.querySize` | string | no | 2Gi | Volume size of the query role. |
+| `spec.storage.storageClass` | string | no | cluster default | StorageClass of the PVC of every role. Empty means the cluster default class. |
 | `spec.ingest` | object | no | none | Ingest limits. |
 | `spec.ingest.maxItemsPerMinute` | integer | no | 720000 | Items one project may send per minute. Sets `SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW`. |
 | `spec.ingest.maxConcurrentRequests` | integer | no | 32 | Ingest requests that run at once per project. Sets `SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT`. |
 | `spec.placement` | object | no | none | Pod placement. |
 | `spec.placement.nodeSelector` | object | no | none | Node labels that the pods must match. |
+| `spec.placement.tolerations` | array | no | none | Tolerations of the role Pods (store, control, query, gateway and the single Pod). Each item has `key`, `operator` (`Exists` or `Equal`), `value`, `effect` (`NoSchedule`, `PreferNoSchedule` or `NoExecute`) and `tolerationSeconds`. The log and metrics agents do not use it. |
 | `spec.auth` | string | no | none | Authentication mode: `off`, `required` or `kubernetes`. Sets `SIFT_AUTH`. |
 | `spec.tokensSecret` | string | no | none | Secret with the token registry for `SIFT_AUTH=required`. |
 | `spec.alerting` | object | no | none | Alert webhook settings. |

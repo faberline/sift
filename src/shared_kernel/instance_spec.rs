@@ -85,6 +85,7 @@ pub(crate) struct InstanceStorage {
     pub control_size: String,
     pub gateway_size: String,
     pub query_size: String,
+    pub storage_class: String,
 }
 #[derive(Clone, Debug)]
 pub(crate) struct InstanceIngest {
@@ -94,4 +95,14 @@ pub(crate) struct InstanceIngest {
 #[derive(Clone, Debug)]
 pub(crate) struct InstancePlacement {
     pub node_selector: BTreeMap<String, String>,
+    pub tolerations: Vec<InstanceToleration>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InstanceToleration {
+    pub key: Option<String>,
+    pub operator: Option<String>,
+    pub value: Option<String>,
+    pub effect: Option<String>,
+    pub toleration_seconds: Option<i64>,
 }

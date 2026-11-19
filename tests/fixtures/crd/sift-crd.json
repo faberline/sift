@@ -93,6 +93,10 @@
                       "querySize": {
                         "type": "string",
                         "default": "2Gi"
+                      },
+                      "storageClass": {
+                        "type": "string",
+                        "maxLength": 253
                       }
                     }
                   },
@@ -119,6 +123,40 @@
                         "type": "object",
                         "additionalProperties": {
                           "type": "string"
+                        }
+                      },
+                      "tolerations": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string"
+                            },
+                            "operator": {
+                              "type": "string",
+                              "enum": [
+                                "Exists",
+                                "Equal"
+                              ]
+                            },
+                            "value": {
+                              "type": "string"
+                            },
+                            "effect": {
+                              "type": "string",
+                              "enum": [
+                                "NoSchedule",
+                                "PreferNoSchedule",
+                                "NoExecute"
+                              ]
+                            },
+                            "tolerationSeconds": {
+                              "type": "integer",
+                              "format": "int64"
+                            }
+                          }
                         }
                       }
                     }

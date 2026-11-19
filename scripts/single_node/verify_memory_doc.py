@@ -40,7 +40,9 @@ FACTS = [
     ('src/ingest/domain/governance_policy.rs', 'const DEFAULT_MAX_STRING_BYTES: usize = 4_096;'),
     # Trace projection.
     ('src/projection/domain/trace.rs', 'DEFAULT_RETAINED_TRACE_SPANS: usize = 100_000'),
+    ('src/projection/domain/trace.rs', 'DEFAULT_RETAINED_TRACE_BYTES: usize = 256 * 1024 * 1024'),
     ('src/projection/infrastructure/trace_projection.rs', 'state.location_by_cursor.len() > self.max_spans'),
+    ('src/projection/infrastructure/trace_projection.rs', 'state.retained_bytes > self.max_bytes'),
     # Journal.
     ('src/journal/domain/journal_limits.rs', 'DEFAULT_RESIDENT_JOURNAL_EVENTS: usize = 100_000'),
     ('src/journal/application/recover_journal.rs', 'while state.recent_events.len() > resident_limit {'),
