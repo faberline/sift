@@ -5,8 +5,8 @@ use serde_json::Value;
 use service_k8s::render::{self, RenderCtx};
 
 use crate::operations::domain::instance_names::{
-    API_VERSION, APP, AUTH_DELEGATION_COMPONENT, AUTH_DELEGATOR_ROLE, BACKUP_COMPONENT,
-    CONTROL_COMPONENT, GATEWAY_COMPONENT, KIND, QUERY_COMPONENT, STORE_COMPONENT,
+    ALL_COMPONENT, API_VERSION, APP, AUTH_DELEGATION_COMPONENT, AUTH_DELEGATOR_ROLE,
+    BACKUP_COMPONENT, CONTROL_COMPONENT, GATEWAY_COMPONENT, KIND, QUERY_COMPONENT, STORE_COMPONENT,
 };
 use crate::operations::domain::instance_renderer::InstanceRenderer;
 use crate::operations::infrastructure::k8s::agent_workloads::{
@@ -16,13 +16,77 @@ use crate::operations::infrastructure::k8s::api_endpoint_discovery::discover_kub
 use crate::operations::infrastructure::k8s::backup_cron_job::backup_cron_job_plan;
 use crate::operations::infrastructure::k8s::fqdn_support::ensure_fqdn_network_policy_served;
 use crate::operations::infrastructure::k8s::network_policy::{
-    fqdn_network_policy_plans, network_policy_plans,
+    fqdn_network_policy_plans, network_policy_plans, single_node_network_policy_plans,
 };
 use crate::operations::infrastructure::k8s::role_workloads::{
     auth_delegator_binding_name, client_service_plan, deployment_role_plan, disruption_budget_plan,
-    headless_service_plan, role_service_plan, stateful_role_plan,
+    headless_service_plan, role_service_plan, single_node_service_plan, stateful_role_plan,
 };
-use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSpec};
+use crate::shared_kernel::instance_spec::{
+    InstanceAuth as AuthMode, InstanceSpec, InstanceTopology,
+};
+
+/// The auth-delegator binding of the instance. Its subjects are the service
+/// accounts that call the TokenReview and SubjectAccessReview APIs.
+fn auth_delegator_binding(
+    cx: &RenderCtx<'_>,
+    instance: &InstanceSpec,
+    service_accounts: &[String],
+) -> render::ClusterRoleBindingPlan {
+    let namespace = &instance.namespace;
+    let mut binding = render::ClusterRoleBindingPlan::new(
+        auth_delegator_binding_name(cx),
+        AUTH_DELEGATION_COMPONENT,
+        AUTH_DELEGATOR_ROLE,
+    );
+    for service_account in service_accounts {
+        binding = binding.with_service_account(render::ServiceAccountSubjectPlan::new(
+            namespace,
+            service_account,
+        ));
+    }
+    binding = binding.with_label("sift.axiom.dev/owner-namespace", namespace);
+    if let Some(uid) = instance.uid.as_deref() {
+        binding = binding.with_label("service-k8s.axiom.dev/owner-uid", uid);
+    }
+    binding
+}
+
+/// The single-node instance: one all-role StatefulSet with one volume, its
+/// Service, the instance service account, the network policies and, only for
+/// a `gs://` archive, the Google APIs policy. No peer, role or agent object.
+fn render_single_node(
+    cx: &RenderCtx<'_>,
+    instance: &InstanceSpec,
+    kubernetes_api_cidrs: &[String],
+    kubernetes_api_ports: &[u16],
+) -> Vec<Value> {
+    let name = instance.name.clone();
+    let mut plan = render::WorkloadPlan::new(cx);
+    plan.add_service_account(render::ServiceAccountPlan::new(&name, "runtime"));
+    if matches!(instance.settings.auth, AuthMode::Kubernetes) {
+        plan.add_cluster_role_binding(auth_delegator_binding(
+            cx,
+            instance,
+            std::slice::from_ref(&name),
+        ));
+    }
+    plan.add_service(single_node_service_plan(cx));
+    plan.add_stateful_set(stateful_role_plan(cx, &instance.settings, ALL_COMPONENT));
+    for policy in single_node_network_policy_plans(
+        cx,
+        &instance.settings,
+        kubernetes_api_cidrs,
+        kubernetes_api_ports,
+    ) {
+        plan.add_network_policy(policy);
+    }
+    for policy in fqdn_network_policy_plans(cx, &instance.settings) {
+        plan.add_fqdn_network_policy(policy);
+    }
+    plan.render()
+        .expect("Sift typed Kubernetes workload plan must be valid")
+}
 
 fn render_children(
     instance: &InstanceSpec,
@@ -37,6 +101,9 @@ fn render_children(
         .map(|uid| render::owner_ref(API_VERSION, KIND, &name, uid));
     let cx = RenderCtx::new(APP, "sift-operator", API_VERSION, KIND, &name, &namespace)
         .with_owner(owner);
+    if instance.settings.topology == InstanceTopology::SingleNode {
+        return render_single_node(&cx, instance, kubernetes_api_cidrs, kubernetes_api_ports);
+    }
     let mut plan = render::WorkloadPlan::new(&cx);
     plan.add_service_account(render::ServiceAccountPlan::new(&name, "runtime"));
     plan.add_service_account(render::ServiceAccountPlan::new(
@@ -96,25 +163,15 @@ fn render_children(
                 format!("{name}-control"),
             )),
         );
-        let mut binding = render::ClusterRoleBindingPlan::new(
-            auth_delegator_binding_name(&cx),
-            AUTH_DELEGATION_COMPONENT,
-            AUTH_DELEGATOR_ROLE,
-        )
-        .with_service_account(render::ServiceAccountSubjectPlan::new(&namespace, &name))
-        .with_service_account(render::ServiceAccountSubjectPlan::new(
-            &namespace,
-            format!("{name}-store"),
-        ))
-        .with_service_account(render::ServiceAccountSubjectPlan::new(
-            &namespace,
-            format!("{name}-control"),
-        ))
-        .with_label("sift.axiom.dev/owner-namespace", &namespace);
-        if let Some(uid) = instance.uid.as_deref() {
-            binding = binding.with_label("service-k8s.axiom.dev/owner-uid", uid);
-        }
-        plan.add_cluster_role_binding(binding);
+        plan.add_cluster_role_binding(auth_delegator_binding(
+            &cx,
+            instance,
+            &[
+                name.clone(),
+                format!("{name}-store"),
+                format!("{name}-control"),
+            ],
+        ));
     }
 
     plan.add_service(client_service_plan(&cx));

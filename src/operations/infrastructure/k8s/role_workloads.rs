@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use service_k8s::render::{self, RenderCtx};
 
 use crate::operations::domain::instance_names::{
-    APP, CONTROL_COMPONENT, GATEWAY_COMPONENT, HTTP_PORT, OTLP_GRPC_PORT, PEER_MTLS_PORT,
-    QUERY_COMPONENT, STORE_COMPONENT,
+    ALL_COMPONENT, APP, CONTROL_COMPONENT, GATEWAY_COMPONENT, HTTP_PORT, OTLP_GRPC_PORT,
+    PEER_MTLS_PORT, QUERY_COMPONENT, STORE_COMPONENT,
 };
 use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
@@ -28,7 +28,7 @@ fn storage_size<'a>(spec: &'a SiftSpec, role: &str) -> &'a str {
         return legacy;
     }
     match role {
-        STORE_COMPONENT => &spec.storage.store_size,
+        STORE_COMPONENT | ALL_COMPONENT => &spec.storage.store_size,
         CONTROL_COMPONENT => &spec.storage.control_size,
         GATEWAY_COMPONENT => &spec.storage.gateway_size,
         QUERY_COMPONENT => &spec.storage.query_size,
@@ -106,18 +106,26 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
     let mut env = vec![
         json!({"name":"SIFT_DATA_DIR", "value":"/var/lib/sift"}),
         json!({"name":"SIFT_AUTH", "value":auth}),
-        json!({"name":"SIFT_STORE_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
-        json!({"name":"SIFT_STORE_GRPC_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{OTLP_GRPC_PORT}", cx.name(), cx.ns())}),
-        json!({"name":"SIFT_QUERY_ENDPOINT", "value":format!("http://{}-query.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
-        json!({"name":"SIFT_CONTROL_ENDPOINT", "value":format!("http://{}-control.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
+    ];
+    // The single-node process serves every role itself: it has no peer
+    // endpoints, and a role endpoint would name a Service that does not exist.
+    if role != ALL_COMPONENT {
+        env.extend([
+            json!({"name":"SIFT_STORE_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
+            json!({"name":"SIFT_STORE_GRPC_ENDPOINT", "value":format!("http://{}-store.{}.svc.cluster.local:{OTLP_GRPC_PORT}", cx.name(), cx.ns())}),
+            json!({"name":"SIFT_QUERY_ENDPOINT", "value":format!("http://{}-query.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
+            json!({"name":"SIFT_CONTROL_ENDPOINT", "value":format!("http://{}-control.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
+        ]);
+    }
+    env.extend([
         json!({"name":"SIFT_MCP_ALLOWED_HOSTS", "value":format!("localhost,127.0.0.1,{},{}.{}.svc,{}.{}.svc.cluster.local", cx.name(), cx.name(), cx.ns(), cx.name(), cx.ns())}),
         json!({"name":"SIFT_MCP_ALLOWED_ORIGINS", "value":format!("http://{}.{}.svc.cluster.local:{HTTP_PORT}", cx.name(), cx.ns())}),
         json!({"name":"SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW", "value":spec.ingest.max_items_per_minute.to_string()}),
         json!({"name":"SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT", "value":spec.ingest.max_concurrent_requests.to_string()}),
         json!({"name":"SIFT_MAX_EVENTS_PER_BATCH", "value":"1000"}),
         json!({"name":"SIFT_INGEST_QUOTA_WINDOW_SECS", "value":"60"}),
-    ];
-    if role == STORE_COMPONENT {
+    ]);
+    if matches!(role, STORE_COMPONENT | ALL_COMPONENT) {
         env.push(json!({
             "name":"SIFT_ARCHIVE_INTERVAL_SECS",
             "value":"60"
@@ -135,13 +143,15 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
             }));
         }
     }
-    if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
+    if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT | ALL_COMPONENT) {
         if let Some(archive) = &spec.archive {
             if archive.destination.starts_with("gs://") {
                 env.push(json!({"name":"SIFT_RECOVERY_DESTINATION","value":archive.destination}));
                 env.push(json!({"name":"SIFT_RECOVERY_PROJECT","value":cx.name()}));
             }
         }
+    }
+    if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
         env.extend([
             json!({"name":"POD_NAME", "valueFrom":{"fieldRef":{"fieldPath":"metadata.name"}}}),
             json!({"name":"SHARD_COUNT", "value":"1"}),
@@ -158,7 +168,7 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
             json!({"name":"SIFT_PEER_TLS_CA", "value":"/var/run/secrets/sift/peer-tls/ca.crt"}),
         ]);
     }
-    if role == CONTROL_COMPONENT {
+    if matches!(role, CONTROL_COMPONENT | ALL_COMPONENT) {
         env.push(json!({"name":"SIFT_CONTROL_PROJECTS","value":cx.name()}));
         env.push(json!({"name":"SIFT_WEBHOOK_SECRET_DIRECTORY","value":"/var/run/secrets/sift/webhooks"}));
         env.push(json!({"name":"SIFT_WEBHOOK_ALLOWED_HOSTS","value":spec.alerting.allowed_hosts.join(",")}));
@@ -191,7 +201,7 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
 fn role_support_volumes(spec: &SiftSpec, role: &str) -> (Vec<Value>, Vec<Value>) {
     let mut volumes = Vec::new();
     let mut mounts = Vec::new();
-    if role == CONTROL_COMPONENT {
+    if matches!(role, CONTROL_COMPONENT | ALL_COMPONENT) {
         if let Some(secret) = &spec.alerting.webhook_secret {
             volumes
                 .push(json!({"name":"webhooks","secret":{"secretName":secret,"defaultMode":288}}));
@@ -228,7 +238,7 @@ fn role_container_plan(
     mounts: Vec<Value>,
 ) -> render::ContainerPlan {
     let mut ports = vec![json!({"name":"http", "containerPort":HTTP_PORT})];
-    if matches!(role, GATEWAY_COMPONENT | STORE_COMPONENT) {
+    if matches!(role, GATEWAY_COMPONENT | STORE_COMPONENT | ALL_COMPONENT) {
         ports.push(json!({"name":"otlp-grpc", "containerPort":OTLP_GRPC_PORT}));
     }
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
@@ -299,6 +309,19 @@ pub(super) fn client_service_plan(cx: &RenderCtx<'_>) -> render::ServicePlan {
     .with_selector_component(GATEWAY_COMPONENT)
 }
 
+pub(super) fn single_node_service_plan(cx: &RenderCtx<'_>) -> render::ServicePlan {
+    render::ServicePlan::cluster_ip(
+        cx.name(),
+        "frontend",
+        role_selector_labels(ALL_COMPONENT),
+        vec![
+            render::ServicePortPlan::tcp("http", HTTP_PORT, "http"),
+            render::ServicePortPlan::tcp("otlp-grpc", OTLP_GRPC_PORT, "otlp-grpc"),
+        ],
+    )
+    .with_selector_component(ALL_COMPONENT)
+}
+
 pub(super) fn role_service_plan(cx: &RenderCtx<'_>, role: &str) -> render::ServicePlan {
     let name = role_name(cx, role);
     let mut ports = vec![render::ServicePortPlan::tcp("http", HTTP_PORT, "http")];
@@ -333,10 +356,16 @@ pub(super) fn stateful_role_plan(
 ) -> render::StatefulSetPlan {
     let name = role_name(cx, role);
     let headless = format!("{name}-headless");
+    // The single-node Pod is the only replica and has no headless Service.
+    let (service_name, replicas) = if role == ALL_COMPONENT {
+        (cx.name().to_string(), 1)
+    } else {
+        (headless, 3)
+    };
     render::StatefulSetPlan::new(
         name,
-        headless,
-        3,
+        service_name,
+        replicas,
         role_pod_plan(cx, spec, role),
         render::PersistentVolumeClaimPlan::new(
             "data",

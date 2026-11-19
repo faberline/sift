@@ -1175,4 +1175,236 @@ fn log_agent_gets_the_namespace_list() {
     assert_eq!(log_agent_namespace_args(&objects), ["team-a,team-b"]);
 }
 
+fn single_node_resource(auth: &str, extra: Value) -> Sift {
+    let mut spec = json!({
+        "image": "example.invalid/sift:gke-test",
+        "peerTlsSecret": "sift-peer-tls",
+        "topology": "singleNode",
+        "auth": auth,
+        "dataSize": "1Gi"
+    });
+    if let (Some(spec), Some(extra)) = (spec.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            spec.insert(key.clone(), value.clone());
+        }
+    }
+    serde_json::from_value(json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": spec
+    }))
+    .expect("decode single-node Sift resource")
+}
+
+#[test]
+fn single_node_renders_one_all_role_statefulset() {
+    let objects = single_node_resource("off", json!({})).render();
+
+    let stateful_sets: Vec<&Value> = objects
+        .iter()
+        .filter(|object| object["kind"] == "StatefulSet")
+        .collect();
+    assert_eq!(stateful_sets.len(), 1);
+    let stateful_set = object(&objects, "StatefulSet", "events-all");
+    assert_eq!(stateful_set["spec"]["replicas"], 1);
+    assert_eq!(
+        stateful_set["spec"]["volumeClaimTemplates"]
+            .as_array()
+            .expect("volume claim templates")
+            .len(),
+        1
+    );
+    assert_eq!(
+        stateful_set["spec"]["template"]["spec"]["containers"][0]["args"],
+        json!(["serve", "--role", "all", "--data-dir", "/var/lib/sift"])
+    );
+
+    for kind in [
+        "Deployment",
+        "DaemonSet",
+        "PodDisruptionBudget",
+        "CronJob",
+        "Role",
+        "RoleBinding",
+        "FQDNNetworkPolicy",
+        "ClusterRoleBinding",
+    ] {
+        assert!(
+            !objects.iter().any(|object| object["kind"] == kind),
+            "single-node must not render a {kind}"
+        );
+    }
+
+    let services: Vec<&Value> = objects
+        .iter()
+        .filter(|object| object["kind"] == "Service")
+        .collect();
+    assert_eq!(services.len(), 1);
+    let service = object(&objects, "Service", "events");
+    let port_names: Vec<&str> = service["spec"]["ports"]
+        .as_array()
+        .expect("service ports")
+        .iter()
+        .map(|port| port["name"].as_str().expect("port name"))
+        .collect();
+    assert_eq!(port_names, ["http", "otlp-grpc"]);
+    assert_eq!(service["spec"]["selector"]["sift.axiom.dev/role"], "all");
+
+    let service_accounts: Vec<&Value> = objects
+        .iter()
+        .filter(|object| object["kind"] == "ServiceAccount")
+        .collect();
+    assert_eq!(service_accounts.len(), 1);
+    object(&objects, "ServiceAccount", "events");
+
+    let policy_names: Vec<&str> = objects
+        .iter()
+        .filter(|object| object["kind"] == "NetworkPolicy")
+        .map(|policy| policy["metadata"]["name"].as_str().expect("policy name"))
+        .collect();
+    assert_eq!(policy_names, ["events-network", "events-all-network"]);
+}
+
+#[test]
+fn single_node_container_env_has_no_peer_or_role_endpoints() {
+    let objects = single_node_resource("off", json!({})).render();
+    let stateful_set = object(&objects, "StatefulSet", "events-all");
+    let env_names: Vec<&str> = stateful_set["spec"]["template"]["spec"]["containers"][0]["env"]
+        .as_array()
+        .expect("Sift env")
+        .iter()
+        .map(|entry| entry["name"].as_str().expect("env name"))
+        .collect();
+
+    for forbidden in [
+        "SIFT_STORE_ENDPOINT",
+        "SIFT_STORE_GRPC_ENDPOINT",
+        "SIFT_QUERY_ENDPOINT",
+        "SIFT_CONTROL_ENDPOINT",
+        "SIFT_PEER_MTLS",
+        "SIFT_RAFT_HEADLESS",
+    ] {
+        assert!(
+            !env_names.contains(&forbidden),
+            "single-node env must not set {forbidden}"
+        );
+    }
+    let volume_names: Vec<&str> = stateful_set["spec"]["template"]["spec"]["volumes"]
+        .as_array()
+        .map(|volumes| {
+            volumes
+                .iter()
+                .map(|volume| volume["name"].as_str().expect("volume name"))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(!volume_names.contains(&"peer-tls"));
+}
+
+#[test]
+fn single_node_with_gcs_archive_renders_the_one_fqdn_policy() {
+    let objects = single_node_resource(
+        "off",
+        json!({"archive": {"destination": "gs://bucket/path"}}),
+    )
+    .render();
+
+    let policies: Vec<&Value> = objects
+        .iter()
+        .filter(|object| object["kind"] == "FQDNNetworkPolicy")
+        .collect();
+    assert_eq!(policies.len(), 1);
+    assert_eq!(policies[0]["metadata"]["name"], "events-all-google-apis");
+
+    let env = object(&objects, "StatefulSet", "events-all")["spec"]["template"]["spec"]
+        ["containers"][0]["env"]
+        .as_array()
+        .expect("Sift env");
+    let archive = env
+        .iter()
+        .find(|entry| entry["name"] == "SIFT_ARCHIVE_DESTINATION")
+        .expect("archive destination env");
+    assert_eq!(archive["value"], "gs://bucket/path");
+}
+
+#[test]
+fn single_node_kubernetes_auth_binds_only_the_instance_account() {
+    let objects = single_node_resource("kubernetes", json!({})).render();
+
+    let binding = object(
+        &objects,
+        "ClusterRoleBinding",
+        "sift.observability.events.auth-delegator",
+    );
+    assert_eq!(
+        binding["subjects"],
+        json!([{"kind": "ServiceAccount", "name": "events", "namespace": "observability"}])
+    );
+}
+
+#[test]
+fn single_node_readiness_and_status() {
+    let sift = single_node_resource("off", json!({}));
+
+    let targets = sift.readiness_targets();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].kind(), "StatefulSet");
+    assert_eq!(targets[0].name(), "events-all");
+
+    let ready = sift.status_patch(&ReadyFacts::new(HashMap::from([(
+        "events-all".to_string(),
+        1,
+    )])));
+    assert_eq!(ready["status"]["phase"], "Ready");
+    assert_eq!(ready["status"]["readyReplicas"], 1);
+
+    let pending = sift.status_patch(&ReadyFacts::new(HashMap::from([(
+        "events-all".to_string(),
+        0,
+    )])));
+    assert_eq!(pending["status"]["phase"], "Pending");
+}
+
+#[test]
+fn ha_render_is_unchanged_by_an_explicit_ha_topology() {
+    let implicit = sift_resource(3, 3).render();
+
+    let explicit: Sift = serde_json::from_value(json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": {
+            "image": "example.invalid/sift:gke-test",
+            "peerTlsSecret": "sift-peer-tls",
+            "replicasPerShard": 3,
+            "voterCount": 3,
+            "dataSize": "1Gi",
+            "topology": "ha",
+            "auth": "kubernetes",
+            "backup": {
+                "schedule": "*/5 * * * *",
+                "destination": "gs://sift-acceptance/backups",
+                "retentionSecs": 3600,
+                "adminTokenSecret": "sift-backup-admin"
+            }
+        }
+    }))
+    .expect("decode explicit Ha Sift resource");
+
+    assert_eq!(explicit.render(), implicit);
+    let stateful_set = object(&implicit, "StatefulSet", "events-store");
+    assert_eq!(stateful_set["spec"]["replicas"], 3);
+}
+
 // HANDWRITE-END
