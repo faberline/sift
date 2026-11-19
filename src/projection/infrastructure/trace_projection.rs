@@ -11,9 +11,10 @@ use serde::Deserialize;
 
 use crate::projection::domain::projection::Projection;
 use crate::projection::domain::trace::{
-    best_path, correlations, detect_cycles, remove_tracked_cursor, trace_key, trace_matches,
-    SpanEventV1, SpanLinkV1, SpanRecordV1, TraceLocation, TracePage, TraceQuery, TraceResultV1,
-    TraceState, DEFAULT_RETAINED_TRACE_SPANS, PROJECTION_TRACE_STORE, TRACE_SCHEMA_VERSION,
+    best_path, correlations, detect_cycles, remove_tracked_cursor, span_memory_bytes, trace_key,
+    trace_matches, SpanEventV1, SpanLinkV1, SpanRecordV1, TraceLocation, TracePage, TraceQuery,
+    TraceResultV1, TraceState, DEFAULT_RETAINED_TRACE_BYTES, DEFAULT_RETAINED_TRACE_SPANS,
+    PROJECTION_TRACE_STORE, TRACE_SCHEMA_VERSION,
 };
 use crate::shared_kernel::sha256_hex::sha256_hex;
 use crate::shared_kernel::stored_event::StoredEvent;
@@ -50,6 +51,7 @@ struct SpanStatusPayload {
 pub struct TraceProjection {
     state: RwLock<TraceState>,
     max_spans: usize,
+    max_bytes: usize,
 }
 
 impl TraceProjection {
@@ -58,13 +60,39 @@ impl TraceProjection {
             .expect("default trace span retention is valid")
     }
 
+    pub fn from_env() -> Result<Self> {
+        let bytes = Self::bytes_from(std::env::var("SIFT_TRACE_RETAINED_BYTES").ok().as_deref())?;
+        Self::with_limits(DEFAULT_RETAINED_TRACE_SPANS, bytes)
+    }
+
+    fn bytes_from(value: Option<&str>) -> Result<usize> {
+        let Some(text) = value else {
+            return Ok(DEFAULT_RETAINED_TRACE_BYTES);
+        };
+        let bytes: usize = text
+            .parse()
+            .context("SIFT_TRACE_RETAINED_BYTES must be a positive integer")?;
+        if bytes == 0 {
+            bail!("SIFT_TRACE_RETAINED_BYTES must be a positive integer");
+        }
+        Ok(bytes)
+    }
+
     pub fn with_max_spans(max_spans: usize) -> Result<Self> {
+        Self::with_limits(max_spans, DEFAULT_RETAINED_TRACE_BYTES)
+    }
+
+    pub fn with_limits(max_spans: usize, max_bytes: usize) -> Result<Self> {
         if max_spans == 0 {
             bail!("trace retention must keep at least one span");
+        }
+        if max_bytes == 0 {
+            bail!("trace retention byte limit must be greater than zero");
         }
         Ok(Self {
             state: RwLock::new(TraceState::default()),
             max_spans,
+            max_bytes,
         })
     }
 
@@ -303,6 +331,7 @@ impl Projection for TraceProjection {
                 .or_default()
                 .insert(span_id.into());
         }
+        let size = span_memory_bytes(&record);
         state
             .traces
             .entry(key.clone())
@@ -315,7 +344,10 @@ impl Projection for TraceProjection {
                 span_id: span_id.into(),
             },
         );
-        while state.location_by_cursor.len() > self.max_spans {
+        state.retained_bytes = state.retained_bytes.saturating_add(size);
+        while state.location_by_cursor.len() > self.max_spans
+            || (state.retained_bytes > self.max_bytes && state.location_by_cursor.len() > 1)
+        {
             let Some(oldest_cursor) = state.location_by_cursor.keys().next().copied() else {
                 break;
             };
@@ -349,6 +381,12 @@ impl Projection for TraceProjection {
             state.projection_cursor = state.projection_cursor.max(cursor);
             state.location_by_cursor.insert(cursor, location);
         }
+        state.retained_bytes = state
+            .traces
+            .values()
+            .flat_map(|trace| trace.values())
+            .map(span_memory_bytes)
+            .sum();
         while state.location_by_cursor.len() > self.max_spans {
             let Some(oldest_cursor) = state.location_by_cursor.keys().next().copied() else {
                 break;
@@ -369,4 +407,111 @@ fn value_as_string(value: &serde_json::Value) -> String {
         .as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| value.to_string())
+}
+
+#[cfg(test)]
+mod byte_limit_tests {
+    use super::*;
+
+    fn span_event(cursor: u64, name: &str, trace: &str, span: &str) -> StoredEvent {
+        let mut event = crate::EventEnvelope::for_project(
+            "p",
+            "prod",
+            format!("e{cursor}"),
+            SignalKind::Span,
+            serde_json::json!({"name": name, "startTimeUnixNano": 1, "endTimeUnixNano": 2}),
+        );
+        event.trace_id = Some(trace.into());
+        event.span_id = Some(span.into());
+        StoredEvent {
+            cursor,
+            acknowledged_at: event.observed_at.clone(),
+            event,
+        }
+    }
+
+    fn big_span(cursor: u64) -> StoredEvent {
+        span_event(
+            cursor,
+            &"x".repeat(1000),
+            &format!("t{cursor}"),
+            &format!("s{cursor}"),
+        )
+    }
+
+    #[test]
+    fn byte_limit_evicts_oldest_spans_before_the_count_limit() {
+        let projection = TraceProjection::with_limits(1000, 4096).unwrap();
+        for cursor in 1..=20 {
+            projection.apply_idempotent(&big_span(cursor)).unwrap();
+        }
+        {
+            let state = projection.state.read().unwrap();
+            assert!(state.location_by_cursor.len() < 20);
+            assert!(state.location_by_cursor.contains_key(&20));
+            assert!(!state.location_by_cursor.contains_key(&1));
+            assert!(state.retained_bytes <= 4096);
+        }
+        assert!(projection.get_trace("p", "t1").unwrap().is_none());
+        assert!(projection.get_trace("p", "t20").unwrap().is_some());
+    }
+
+    #[test]
+    fn one_span_larger_than_the_byte_limit_stays() {
+        let projection = TraceProjection::with_limits(1000, 10).unwrap();
+        for cursor in 1..=3 {
+            projection.apply_idempotent(&big_span(cursor)).unwrap();
+        }
+        let state = projection.state.read().unwrap();
+        assert_eq!(state.location_by_cursor.len(), 1);
+        assert!(state.location_by_cursor.contains_key(&3));
+    }
+
+    #[test]
+    fn retained_bytes_follow_a_replaced_span() {
+        let projection = TraceProjection::with_limits(1000, 1_000_000).unwrap();
+        projection
+            .apply_idempotent(&span_event(1, "first", "t1", "s1"))
+            .unwrap();
+        projection
+            .apply_idempotent(&span_event(2, "second", "t1", "s1"))
+            .unwrap();
+        let only_second = TraceProjection::with_limits(1000, 1_000_000).unwrap();
+        only_second
+            .apply_idempotent(&span_event(2, "second", "t1", "s1"))
+            .unwrap();
+        let replaced = projection.state.read().unwrap().retained_bytes;
+        let single = only_second.state.read().unwrap().retained_bytes;
+        assert!(single > 0);
+        assert_eq!(replaced, single);
+    }
+
+    #[test]
+    fn restore_recomputes_retained_bytes() {
+        let first = TraceProjection::with_limits(1000, 1_000_000).unwrap();
+        for cursor in 1..=5 {
+            first.apply_idempotent(&big_span(cursor)).unwrap();
+        }
+        let second = TraceProjection::with_limits(1000, 1_000_000).unwrap();
+        second.restore(&first.snapshot().unwrap()).unwrap();
+        let before = first.state.read().unwrap().retained_bytes;
+        let after = second.state.read().unwrap().retained_bytes;
+        assert!(after > 0);
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn with_limits_refuses_zero() {
+        assert!(TraceProjection::with_limits(0, 10).is_err());
+        assert!(TraceProjection::with_limits(10, 0).is_err());
+    }
+
+    #[test]
+    fn bytes_from_reads_the_setting() {
+        assert_eq!(TraceProjection::bytes_from(None).unwrap(), 268_435_456);
+        assert_eq!(TraceProjection::bytes_from(Some("4096")).unwrap(), 4096);
+        assert!(TraceProjection::bytes_from(Some("0")).is_err());
+        assert!(TraceProjection::bytes_from(Some("abc")).is_err());
+        assert!(TraceProjection::bytes_from(Some("-1")).is_err());
+    }
 }

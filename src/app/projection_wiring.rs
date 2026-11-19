@@ -33,7 +33,7 @@ impl ProjectionRuntime {
         let metric_data_dir = data_dir.clone();
         let metrics =
             registry.register(move || Ok(Arc::new(MetricProjection::open(&metric_data_dir)?)))?;
-        let traces = registry.register(|| Ok(Arc::new(TraceProjection::new())))?;
+        let traces = registry.register(|| Ok(Arc::new(TraceProjection::from_env()?)))?;
         Ok(Self::new(
             Arc::new(SharedRuntimeBackend {
                 registry,
