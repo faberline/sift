@@ -9,6 +9,7 @@ use thiserror::Error;
 
 pub const TRACE_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_RETAINED_TRACE_SPANS: usize = 100_000;
+pub const DEFAULT_RETAINED_TRACE_BYTES: usize = 256 * 1024 * 1024;
 
 impl SpanRecordV1 {
     fn duration(&self) -> u64 {
@@ -63,6 +64,8 @@ pub(in crate::projection) struct TraceState {
     pub(in crate::projection) conflicts: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub(in crate::projection) projection_cursor: u64,
+    #[serde(skip)]
+    pub(in crate::projection) retained_bytes: usize,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -75,6 +78,13 @@ pub(in crate::projection) fn trace_key(project: &str, trace_id: &str) -> String 
     format!("{project}\u{1f}{trace_id}")
 }
 
+/// The charged size of one retained span: its JSON size.
+pub(in crate::projection) fn span_memory_bytes(record: &SpanRecordV1) -> usize {
+    serde_json::to_vec(record)
+        .map(|bytes| bytes.len())
+        .unwrap_or(0)
+}
+
 pub(in crate::projection) fn remove_tracked_cursor(state: &mut TraceState, cursor: u64) {
     let Some(location) = state.location_by_cursor.remove(&cursor) else {
         return;
@@ -85,7 +95,11 @@ pub(in crate::projection) fn remove_tracked_cursor(state: &mut TraceState, curso
             .get(&location.span_id)
             .is_some_and(|record| record.cursor == cursor)
         {
-            trace.remove(&location.span_id);
+            if let Some(removed) = trace.remove(&location.span_id) {
+                state.retained_bytes = state
+                    .retained_bytes
+                    .saturating_sub(span_memory_bytes(&removed));
+            }
         }
         remove_trace = trace.is_empty();
     }
