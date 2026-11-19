@@ -89,6 +89,7 @@ pub async fn run(config: ScrapeConfig) -> Result<()> {
             let Some(url) = scrape_target(&pod, &config.node) else {
                 continue;
             };
+            let port = url.port_or_known_default();
             let samples = match fetch(&client, url).await {
                 Ok(samples) => samples,
                 Err(error) => {
@@ -96,7 +97,7 @@ pub async fn run(config: ScrapeConfig) -> Result<()> {
                     continue;
                 }
             };
-            let resource = BTreeMap::from([
+            let mut resource = BTreeMap::from([
                 (
                     "service.name".into(),
                     pod.metadata
@@ -121,6 +122,9 @@ pub async fn run(config: ScrapeConfig) -> Result<()> {
                 ("k8s.node.name".into(), config.node.clone()),
                 ("sift.environment".into(), config.environment.clone()),
             ]);
+            if let Some(container) = port.and_then(|p| container_for_port(&pod, p)) {
+                resource.insert("k8s.container.name".into(), container);
+            }
             let now = chrono::Utc::now()
                 .timestamp_nanos_opt()
                 .context("scrape clock outside supported range")?;
@@ -149,6 +153,18 @@ pub async fn run(config: ScrapeConfig) -> Result<()> {
             return Ok(());
         }
     }
+}
+fn container_for_port(pod: &Pod, port: u16) -> Option<String> {
+    pod.spec
+        .as_ref()?
+        .containers
+        .iter()
+        .find(|c| {
+            c.ports
+                .as_ref()
+                .is_some_and(|ports| ports.iter().any(|p| p.container_port == i32::from(port)))
+        })
+        .map(|c| c.name.clone())
 }
 fn scrape_target(pod: &Pod, node: &str) -> Option<url::Url> {
     if pod.metadata.uid.as_deref().is_none_or(str::is_empty) {
@@ -341,20 +357,22 @@ mod tests {
     }
 
     fn two_container_pod() -> Pod {
-        pod(json!({"metadata":{"name":"p","uid":"u1","namespace":"a"},"spec":{"nodeName":"n1","containers":[{"name":"app","ports":[{"containerPort":8080}]},{"name":"metrics","ports":[{"containerPort":9090}]}]}}))
+        pod(
+            json!({"metadata":{"name":"p","uid":"u1","namespace":"a"},"spec":{"nodeName":"n1","containers":[{"name":"app","ports":[{"containerPort":8080}]},{"name":"metrics","ports":[{"containerPort":9090}]}]}}),
+        )
     }
 
     #[test]
     fn container_for_port_returns_the_container_that_owns_the_port() {
-        let pod = two_container_pod();
-        assert_eq!(container_for_port(&pod, 9090), Some("metrics".to_string()));
-        assert_eq!(container_for_port(&pod, 8080), Some("app".to_string()));
+        let two = two_container_pod();
+        assert_eq!(container_for_port(&two, 9090), Some("metrics".to_string()));
+        assert_eq!(container_for_port(&two, 8080), Some("app".to_string()));
     }
 
     #[test]
     fn container_for_port_returns_none_when_no_container_declares_the_port() {
-        let pod = two_container_pod();
-        assert!(container_for_port(&pod, 7000).is_none());
+        let two = two_container_pod();
+        assert!(container_for_port(&two, 7000).is_none());
         let no_ports = pod(base_pod());
         assert!(container_for_port(&no_ports, 8080).is_none());
     }
