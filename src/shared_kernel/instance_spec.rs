@@ -28,6 +28,7 @@ pub(crate) struct InstanceSettings {
     #[allow(dead_code)]
     pub topology: InstanceTopology,
     pub logs: InstanceLogs,
+    pub metrics: InstanceMetrics,
     pub tokens_secret: Option<String>,
     pub backup: Option<InstanceBackup>,
     pub alerting: InstanceAlerting,
@@ -51,6 +52,11 @@ pub(crate) enum InstanceTopology {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct InstanceLogs {
+    pub namespaces: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InstanceMetrics {
     pub namespaces: Vec<String>,
 }
 

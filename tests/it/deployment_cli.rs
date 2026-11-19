@@ -1175,4 +1175,107 @@ fn log_agent_gets_the_namespace_list() {
     assert_eq!(log_agent_namespace_args(&objects), ["team-a,team-b"]);
 }
 
+fn sift_resource_with_metrics(namespaces: &[&str]) -> Sift {
+    serde_json::from_value(json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": {
+            "image": "example.invalid/sift:gke-test",
+            "peerTlsSecret": "sift-peer-tls",
+            "replicasPerShard": 3,
+            "voterCount": 3,
+            "dataSize": "1Gi",
+            "auth": "kubernetes",
+            "metrics": {"namespaces": namespaces},
+            "backup": {
+                "schedule": "*/5 * * * *",
+                "destination": "gs://sift-acceptance/backups",
+                "retentionSecs": 3600,
+                "adminTokenSecret": "sift-backup-admin"
+            }
+        }
+    }))
+    .expect("decode Sift resource with metrics")
+}
+
+fn daemon_args(objects: &[Value], name: &str) -> Vec<Value> {
+    object(objects, "DaemonSet", name)["spec"]["template"]["spec"]["containers"][0]["args"]
+        .as_array()
+        .expect("agent args")
+        .clone()
+}
+
+fn arg_after(args: &[Value], flag: &str) -> String {
+    let position = args
+        .iter()
+        .position(|arg| arg == flag)
+        .unwrap_or_else(|| panic!("missing {flag}"));
+    args[position + 1]
+        .as_str()
+        .expect("argument value")
+        .to_string()
+}
+
+#[test]
+fn metrics_agent_default_namespace_is_the_instance_namespace() {
+    let objects = sift_resource(3, 3).render();
+    let args = daemon_args(&objects, "events-agent-metrics");
+    assert_eq!(arg_after(&args, "--namespace"), "observability");
+}
+
+#[test]
+fn metrics_agent_gets_the_namespace_list() {
+    let objects = sift_resource_with_metrics(&["team-a", "team-b"]).render();
+    let args = daemon_args(&objects, "events-agent-metrics");
+    assert_eq!(arg_after(&args, "--namespace"), "team-a,team-b");
+    assert_eq!(arg_after(&args, "--environment"), "observability");
+}
+
+#[test]
+fn metrics_namespace_list_leaves_the_log_agent_unchanged() {
+    let default_objects = sift_resource(3, 3).render();
+    let listed_objects = sift_resource_with_metrics(&["team-a", "team-b"]).render();
+    assert_eq!(
+        daemon_args(&listed_objects, "events-agent"),
+        daemon_args(&default_objects, "events-agent")
+    );
+}
+
+#[test]
+fn metrics_namespace_list_adds_no_role_or_binding() {
+    fn rbac_objects(objects: &[Value]) -> Vec<(String, String)> {
+        let mut found: Vec<(String, String)> = objects
+            .iter()
+            .filter(|object| {
+                matches!(
+                    object["kind"].as_str(),
+                    Some("Role" | "RoleBinding" | "ClusterRole" | "ClusterRoleBinding")
+                )
+            })
+            .map(|object| {
+                (
+                    object["kind"].as_str().expect("kind").to_string(),
+                    object["metadata"]["name"]
+                        .as_str()
+                        .expect("name")
+                        .to_string(),
+                )
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    let plain = rbac_objects(&sift_resource(3, 3).render());
+    let listed = rbac_objects(&sift_resource_with_metrics(&["team-a", "team-b"]).render());
+    assert!(!plain.is_empty());
+    assert_eq!(listed, plain);
+}
+
 // HANDWRITE-END
