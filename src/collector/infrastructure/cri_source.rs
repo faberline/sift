@@ -2,6 +2,8 @@
 //! partial frames joined, rotation followed by device and inode, and lost bytes
 //! reported as rejections.
 mod state;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
@@ -29,8 +31,22 @@ pub(crate) struct CriSource {
     read_positions: HashMap<String, ReadPosition>,
     pending_losses: VecDeque<SourceRejection>,
     staged_losses: HashSet<String>,
+    held: HashMap<String, HeldFile>,
     start_offset: u64,
 }
+
+/// An open handle to a discovered file. It still reads after the kubelet
+/// unlinks the file, so the bytes that the file held are not lost.
+struct HeldFile {
+    file: File,
+    discovered: DiscoveredFile,
+    idle_refreshes: u32,
+    last_offset: u64,
+}
+
+/// A held file that is gone and stays unfinished for this many refreshes is
+/// released; its unread bytes then end as a `source_lost` rejection.
+const MAX_IDLE_REFRESHES: u32 = 2;
 
 #[derive(Clone, Default)]
 struct ReadPosition {
@@ -82,6 +98,7 @@ impl CriSource {
             read_positions,
             pending_losses: VecDeque::new(),
             staged_losses: HashSet::new(),
+            held: HashMap::new(),
             start_offset,
         };
         source.refresh()?;
@@ -98,12 +115,25 @@ impl CriSource {
             .cloned()
             .unwrap_or_default();
         let (start_offset, start_line) = (position.offset, position.line);
-        let mut file = match File::open(&discovered.path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(ReadOutcome::Pending);
-            }
+        // A path that now names another file (or no file) reads from the handle
+        // this source already holds for the same physical file.
+        let opened = match File::open(&discovered.path) {
+            Ok(file) => file
+                .metadata()
+                .ok()
+                .and_then(|metadata| file_identity(&metadata).ok())
+                .is_some_and(|identity| identity == discovered.physical_identity)
+                .then_some(file),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error).context("open CRI source"),
+        };
+        let mut file = match opened.or_else(|| {
+            self.held
+                .get(&discovered.identity)
+                .and_then(|held| held.file.try_clone().ok())
+        }) {
+            Some(file) => file,
+            None => return Ok(ReadOutcome::Pending),
         };
         let metadata = file.metadata()?;
         if file_identity(&metadata)? != discovered.physical_identity {
