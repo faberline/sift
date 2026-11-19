@@ -11,6 +11,7 @@ use crate::archive::domain::archive_catalog_item::ArchiveCatalogItem;
 use crate::archive::domain::archive_manifest_validator::validate_dedupe_receipt;
 use crate::archive::domain::catalog_decode::decode_archive_catalog_entry;
 use crate::shared_kernel::archive_manifest::ArchiveManifest;
+use crate::shared_kernel::retention_boundary::RetentionDays;
 
 pub(super) fn committed_has_expired_dedupe_receipt(
     services: &ArchiveServices,
@@ -43,6 +44,7 @@ pub(crate) fn retention_due_at(
     services: &ArchiveServices,
     root: &Path,
     now: DateTime<Utc>,
+    retention: RetentionDays,
 ) -> Result<bool> {
     let Some(manifest) = services.fetch_verified_committed_root(root)? else {
         return Ok(false);
@@ -50,9 +52,14 @@ pub(crate) fn retention_due_at(
     if manifest.retention_scan.is_some() {
         return Ok(true);
     }
-    let cutoff_nanos = (now - chrono::Duration::days(180))
+    let cutoff_nanos = (now - chrono::Duration::days(i64::from(retention.days())))
         .timestamp_nanos_opt()
-        .context("180-day retention cutoff is outside the nanosecond range")?;
+        .with_context(|| {
+            format!(
+                "{}-day retention cutoff is outside the nanosecond range",
+                retention.days()
+            )
+        })?;
     if manifest
         .oldest_event_time_unix_nano
         .is_some_and(|oldest| oldest < cutoff_nanos)
