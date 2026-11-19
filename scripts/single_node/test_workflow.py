@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 from pathlib import Path
@@ -76,8 +77,10 @@ class WorkflowTest(unittest.TestCase):
     def test_driver_log_is_kept_when_the_driver_fails(self):
         self.assertIn('set -o pipefail', step_block('name: Run the local load driver'))
 
-    def test_no_result_file_is_committed(self):
-        self.assertFalse((ROOT / 'docs' / 'operations' / 'single-node-capacity-result.json').exists())
+    def test_result_file_is_committed_and_complete(self):
+        path = ROOT / 'docs' / 'operations' / 'single-node-capacity-result.json'
+        self.assertTrue(path.exists())
+        self.assertIs(json.loads(path.read_text(encoding='utf-8'))['complete'], True)
 
 
 if __name__ == '__main__':
