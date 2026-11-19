@@ -6,6 +6,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'production'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from load_client import Api  # noqa: E402
+from load_data import build  # noqa: E402
 import run_local_load as driver  # noqa: E402
 
 STEP_KEYS = {
@@ -76,6 +77,14 @@ class LocalLoad(unittest.TestCase):
     def test_percentile(self):
         self.assertIsNone(driver.percentile([]))
         self.assertEqual(driver.percentile(list(range(1, 101))), 95)
+
+    def test_query_window_is_one_second_and_never_overlaps(self):
+        first = build('run', 'env', 0, 1_000_000_000_000, ['body'], 2500)
+        later = build('run', 'env', 7, 1_000_000_000_000, ['body'], 2500)
+        for block in (first, later):
+            self.assertEqual(block['end_nanos'] - block['start_nanos'], 1_000_000_000)
+        self.assertGreaterEqual(later['start_nanos'], first['end_nanos'])
+        self.assertEqual(later['start_nanos'] - first['start_nanos'], 7_000_000_000)
 
     def test_synthetic_templates(self):
         templates = driver.synthetic_templates()
