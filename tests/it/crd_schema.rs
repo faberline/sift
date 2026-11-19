@@ -89,3 +89,16 @@ fn crd_schema_lists_topology() {
     assert_eq!(topology["enum"], serde_json::json!(["ha", "singleNode"]));
     assert_eq!(topology["default"], "ha");
 }
+
+#[test]
+fn crd_schema_lists_log_namespaces() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let namespaces = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+        ["spec"]["properties"]["logs"]["properties"]["namespaces"];
+    assert_eq!(namespaces["type"], "array");
+    assert_eq!(namespaces["maxItems"], 32);
+    assert_eq!(
+        namespaces["items"]["pattern"],
+        "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    );
+}

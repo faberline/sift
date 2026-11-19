@@ -10,6 +10,16 @@ use crate::operations::infrastructure::k8s::role_workloads::{
 };
 use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
+/// The value of `--namespace`: the listed namespaces joined by commas, or the
+/// instance namespace when the list is empty.
+fn log_namespaces(cx: &RenderCtx<'_>, spec: &SiftSpec) -> String {
+    if spec.logs.namespaces.is_empty() {
+        cx.ns().to_string()
+    } else {
+        spec.logs.namespaces.join(",")
+    }
+}
+
 pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> render::DaemonSetPlan {
     let name = role_name(cx, AGENT_COMPONENT);
     let mut env = vec![
@@ -82,7 +92,7 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
             "--cri-root".into(),
             "/var/log/pods".into(),
             "--namespace".into(),
-            cx.ns().into(),
+            log_namespaces(cx, spec),
             "--data-dir".into(),
             "/var/lib/sift".into(),
             "--checkpoint".into(),
