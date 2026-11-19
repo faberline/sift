@@ -4,7 +4,7 @@ use crate::operations::interfaces::crd::sift_spec::{AuthMode, Sift, Topology};
 use crate::shared_kernel::instance_spec::{
     InstanceAlerting, InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap,
     InstanceIngest, InstanceLogs, InstanceMetrics, InstancePlacement, InstanceSettings,
-    InstanceSpec, InstanceStorage, InstanceTopology,
+    InstanceSpec, InstanceStorage, InstanceToleration, InstanceTopology,
 };
 use kube::ResourceExt;
 
@@ -33,6 +33,7 @@ impl From<&Sift> for InstanceSpec {
                     control_size: spec.storage.control_size.clone(),
                     gateway_size: spec.storage.gateway_size.clone(),
                     query_size: spec.storage.query_size.clone(),
+                    storage_class: spec.storage.storage_class.clone(),
                 },
                 ingest: InstanceIngest {
                     max_items_per_minute: spec.ingest.max_items_per_minute,
@@ -40,6 +41,18 @@ impl From<&Sift> for InstanceSpec {
                 },
                 placement: InstancePlacement {
                     node_selector: spec.placement.node_selector.clone(),
+                    tolerations: spec
+                        .placement
+                        .tolerations
+                        .iter()
+                        .map(|toleration| InstanceToleration {
+                            key: toleration.key.clone(),
+                            operator: toleration.operator.clone(),
+                            value: toleration.value.clone(),
+                            effect: toleration.effect.clone(),
+                            toleration_seconds: toleration.toleration_seconds,
+                        })
+                        .collect(),
                 },
                 auth: match spec.auth {
                     AuthMode::Off => InstanceAuth::Off,
@@ -140,5 +153,20 @@ mod tests {
         .unwrap();
         let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
         assert_eq!(settings.metrics.namespaces, vec!["team-a".to_string()]);
+    }
+
+    #[test]
+    fn toleration_and_storage_class_reach_the_instance_settings() {
+        let spec: SiftSpec = serde_json::from_value(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls",
+            "placement": {"tolerations": [{"key": "k", "operator": "Exists"}]},
+            "storage": {"storageClass": "dynamic-rwo"}
+        }))
+        .unwrap();
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(settings.placement.tolerations.len(), 1);
+        assert_eq!(settings.placement.tolerations[0].key, Some("k".to_string()));
+        assert_eq!(settings.storage.storage_class, "dynamic-rwo");
     }
 }
