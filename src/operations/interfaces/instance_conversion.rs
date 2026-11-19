@@ -136,6 +136,11 @@ mod tests {
             settings.logs.pod_label,
             Some("sift.axiom.dev/logs=true".to_string())
         );
+        assert_eq!(sift(None).spec.logs.pod_label, None);
+        assert_eq!(
+            InstanceSpec::from(&sift(None)).settings.logs.pod_label,
+            None
+        );
     }
 
     #[test]

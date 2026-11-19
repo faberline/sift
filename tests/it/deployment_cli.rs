@@ -1679,7 +1679,7 @@ fn log_agent_mounts_the_token_only_with_a_pod_label() {
 
 #[test]
 fn log_agent_without_a_pod_label_is_unchanged() {
-    let objects = sift_resource_with_logs(&["team-a"]).render();
+    let objects = sift_resource(3, 3).render();
     let args = log_agent_args(&objects);
     assert!(!args.iter().any(|arg| arg == "--pod-label"));
     assert_eq!(
@@ -1687,13 +1687,7 @@ fn log_agent_without_a_pod_label_is_unchanged() {
             ["automountServiceAccountToken"],
         false
     );
-    assert_eq!(
-        args,
-        log_agent_args(&sift_resource_with_pod_label("sift.axiom.dev/logs=true").render())
-            .into_iter()
-            .filter(|arg| arg != "sift.axiom.dev/logs=true" && arg != "--pod-label")
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(args, log_agent_args(&sift_resource_with_logs(&[]).render()));
 }
 
 #[test]
