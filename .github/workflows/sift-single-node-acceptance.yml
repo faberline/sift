@@ -1,0 +1,63 @@
+# Manual dispatch only. A default dispatch (dry_run true) creates no paid resource.
+name: sift-single-node-acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      cost_cap_usd:
+        description: Approved cost cap in USD. The guard stops when the projected cost passes it.
+        required: true
+        type: string
+      cluster:
+        description: GKE cluster name of the run.
+        required: true
+        type: string
+      location:
+        description: GKE cluster location of the run.
+        required: true
+        type: string
+      dry_run:
+        description: When true, only the cost guard runs. No paid resource is created.
+        type: boolean
+        default: true
+
+permissions: {}
+concurrency:
+  group: sift-single-node-acceptance
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: cost guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cost guard
+        env:
+          CAP: ${{ inputs.cost_cap_usd }}
+        run: |
+          set -euo pipefail
+          python3 -B scripts/production/cost_model.py --inputs scripts/production/cost-inputs.single-node.json --format json > "$RUNNER_TEMP/cost.json"
+          hourly=$(jq -r .config_values.estimated_hourly_cost_usd "$RUNNER_TEMP/cost.json")
+          fixed=$(jq -r .config_values.estimated_fixed_cost_usd "$RUNNER_TEMP/cost.json")
+          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$fixed" --hourly-usd "$hourly" --hours-left 5
+
+  live:
+    name: live acceptance
+    needs: guard
+    if: ${{ !inputs.dry_run }}
+    environment: single-node-acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    steps:
+      - name: not set up
+        run: |
+          echo "The single-node acceptance steps are not set up: a person must add GCP sign-in and the install steps after #218 and #220 to #231 merge."
+          exit 1
