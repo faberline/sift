@@ -2,6 +2,15 @@
 use crate::shared_kernel::instance_spec::InstanceSettings;
 use serde_json::{json, Value};
 use service_k8s::render::RenderCtx;
+/// The value of `--namespace`: the listed namespaces joined by commas, or the instance namespace.
+fn scrape_namespaces(cx: &RenderCtx<'_>, spec: &InstanceSettings) -> String {
+    if spec.metrics.namespaces.is_empty() {
+        cx.ns().to_string()
+    } else {
+        spec.metrics.namespaces.join(",")
+    }
+}
+
 pub(super) fn append_metrics_agent(
     children: &mut Vec<Value>,
     cx: &RenderCtx<'_>,
@@ -32,7 +41,7 @@ pub(super) fn append_metrics_agent(
         "--environment",
         cx.ns(),
         "--namespace",
-        cx.ns(),
+        scrape_namespaces(cx, spec),
         "--node",
         "$(NODE_NAME)",
         "--interval-seconds",

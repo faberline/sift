@@ -544,6 +544,8 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.topology` | string | no | `ha` | Instance topology: `ha` or `singleNode`. |
 | `spec.logs` | object | no | none | Log agent settings. |
 | `spec.logs.namespaces` | array | no | none | Namespaces whose Pod logs the log agent collects, as `--namespace a,b`. Empty means the namespace of the instance. |
+| `spec.metrics` | object | no | none | Metrics agent settings. |
+| `spec.metrics.namespaces` | array | no | none | Namespaces whose Pods the metrics agent scrapes, as `--namespace a,b`. Empty means the namespace of the instance. The operator grants Pod read access only in the instance namespace; a cluster admin grants `get` and `list` on `pods` in each other listed namespace. |
 | `spec.voterCount` | integer | no | none | Raft voters per shard. Fixed at 3 in this phase. |
 | `spec.dataSize` | string | no | none | Deprecated. New resources use the role sizes under `spec.storage`. |
 | `spec.archive` | object | no | none | Archive settings. |

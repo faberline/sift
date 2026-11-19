@@ -3,8 +3,8 @@
 use crate::operations::interfaces::crd::sift_spec::{AuthMode, Sift, Topology};
 use crate::shared_kernel::instance_spec::{
     InstanceAlerting, InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap,
-    InstanceIngest, InstanceLogs, InstancePlacement, InstanceSettings, InstanceSpec,
-    InstanceStorage, InstanceTopology,
+    InstanceIngest, InstanceLogs, InstanceMetrics, InstancePlacement, InstanceSettings,
+    InstanceSpec, InstanceStorage, InstanceTopology,
 };
 use kube::ResourceExt;
 
@@ -52,6 +52,9 @@ impl From<&Sift> for InstanceSpec {
                 },
                 logs: InstanceLogs {
                     namespaces: spec.logs.namespaces.clone(),
+                },
+                metrics: InstanceMetrics {
+                    namespaces: spec.metrics.namespaces.clone(),
                 },
                 tokens_secret: spec.tokens_secret.clone(),
                 alerting: InstanceAlerting {
@@ -112,5 +115,17 @@ mod tests {
         .unwrap();
         let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
         assert_eq!(settings.logs.namespaces, vec!["team-a".to_string()]);
+    }
+
+    #[test]
+    fn metrics_namespaces_reach_the_instance_settings() {
+        let spec: SiftSpec = serde_json::from_value(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls",
+            "metrics": {"namespaces": ["team-a"]}
+        }))
+        .unwrap();
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(settings.metrics.namespaces, vec!["team-a".to_string()]);
     }
 }

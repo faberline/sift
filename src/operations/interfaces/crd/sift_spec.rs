@@ -47,6 +47,8 @@ pub struct SiftSpec {
     #[serde(default)]
     pub logs: LogsSpec,
     #[serde(default)]
+    pub metrics: MetricsSpec,
+    #[serde(default)]
     pub tokens_secret: Option<String>,
     #[serde(default)]
     pub backup: Option<BackupSpec>,
@@ -92,6 +94,14 @@ pub struct BackupSpec {
 #[serde(default, rename_all = "camelCase")]
 pub struct LogsSpec {
     /// Kubernetes namespaces whose Pod logs the log agent collects.
+    /// Empty means the namespace of the Sift instance only.
+    pub namespaces: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MetricsSpec {
+    /// Kubernetes namespaces whose Pods the metrics agent scrapes.
     /// Empty means the namespace of the Sift instance only.
     pub namespaces: Vec<String>,
 }
@@ -224,5 +234,16 @@ mod tests {
     fn logs_namespaces_are_read() {
         let spec = spec_with(r#""logs":{"namespaces":["team-a","team-b"]}"#).unwrap();
         assert_eq!(spec.logs.namespaces, ["team-a", "team-b"]);
+    }
+
+    #[test]
+    fn metrics_default_is_empty() {
+        assert!(spec_with("").unwrap().metrics.namespaces.is_empty());
+    }
+
+    #[test]
+    fn metrics_namespaces_are_read() {
+        let spec = spec_with(r#""metrics":{"namespaces":["team-a","team-b"]}"#).unwrap();
+        assert_eq!(spec.metrics.namespaces, ["team-a", "team-b"]);
     }
 }
