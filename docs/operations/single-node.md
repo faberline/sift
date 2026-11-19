@@ -40,6 +40,31 @@ spec:
 `20Gi` is an example value, not a recommendation. The fields of the `ha`
 topology are not set here.
 
+### Run on a tainted node pool
+
+When the Pod must run on a node pool with a taint, set the pool's label in
+`placement.nodeSelector`, a matching toleration in `placement.tolerations` and
+the class of the volume in `storage.storageClass`:
+
+```yaml
+spec:
+  topology: singleNode
+  placement:
+    nodeSelector:
+      faberline.dev/pool: sift-server
+    tolerations:
+      - key: faberline.dev/pool
+        operator: Equal
+        value: sift-server
+        effect: NoSchedule
+  storage:
+    storeSize: 20Gi
+    storageClass: dynamic-rwo
+```
+
+The same `placement` and `storage` fields also apply to the `ha` topology. An
+empty `storageClass` uses the cluster default class.
+
 ## What the operator renders
 
 For `spec.topology: singleNode` the operator renders:
@@ -47,7 +72,8 @@ For `spec.topology: singleNode` the operator renders:
 - one ServiceAccount named `<name>`;
 - one Service named `<name>` with the ports `http` and `otlp-grpc`;
 - one StatefulSet named `<name>-all` with 1 replica and one PVC template named
-  `data`, mounted at `/var/lib/sift`; the container args are
+  `data`, mounted at `/var/lib/sift`, which gets `storageClassName` when
+  `spec.storage.storageClass` is set; the container args are
   `serve --role all --data-dir /var/lib/sift`;
 - two NetworkPolicies, `<name>-network` and `<name>-all-network`.
 

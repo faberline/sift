@@ -126,3 +126,35 @@ fn crd_schema_lists_log_namespaces() {
         "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
     );
 }
+
+#[test]
+fn crd_schema_lists_tolerations_and_storage_class() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let spec = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+        ["properties"];
+
+    let tolerations = &spec["placement"]["properties"]["tolerations"];
+    assert_eq!(tolerations["type"], "array");
+    let item = &tolerations["items"];
+    let mut keys: Vec<&str> = item["properties"]
+        .as_object()
+        .expect("toleration properties")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["effect", "key", "operator", "tolerationSeconds", "value"]
+    );
+    assert!(item.get("x-kubernetes-preserve-unknown-fields").is_none());
+    assert_eq!(
+        item["properties"]["effect"]["enum"],
+        serde_json::json!(["NoSchedule", "PreferNoSchedule", "NoExecute"])
+    );
+
+    assert_eq!(
+        spec["storage"]["properties"]["storageClass"]["type"],
+        "string"
+    );
+}
