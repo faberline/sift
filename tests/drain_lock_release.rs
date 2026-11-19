@@ -1,4 +1,5 @@
-//! Own test binary: no other test runs in this process, so no child process of another case can hold a copy of the data-root lock descriptor. If this test fails, the drain returns before the lock is released.
+//! isolation: no other test runs in this process, so no child process of another case can hold a copy of the data-root lock descriptor.
+//! If this test fails, the drain returns before the lock is released.
 
 use std::sync::Arc;
 
