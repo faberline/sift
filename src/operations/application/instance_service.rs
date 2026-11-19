@@ -1,10 +1,13 @@
 //! Render workloads and report instance state through the platform port.
 
 use crate::operations::domain::instance_names::{
-    APP, AUTH_DELEGATION_COMPONENT, BACKUP_COMPONENT, CONTROL_COMPONENT, STORE_COMPONENT,
+    ALL_COMPONENT, APP, AUTH_DELEGATION_COMPONENT, BACKUP_COMPONENT, CONTROL_COMPONENT,
+    STORE_COMPONENT,
 };
 use crate::operations::domain::instance_renderer::InstanceRenderer;
-use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSpec};
+use crate::shared_kernel::instance_spec::{
+    InstanceAuth as AuthMode, InstanceSpec, InstanceTopology,
+};
 use serde_json::{json, Value};
 use service_k8s::{ReadinessTarget, ReadyFacts};
 use std::collections::BTreeMap;
@@ -48,6 +51,9 @@ impl InstanceService {
 
     pub(crate) fn readiness_targets(&self, instance: &InstanceSpec) -> Vec<ReadinessTarget> {
         let name = instance.name.clone();
+        if instance.settings.topology == InstanceTopology::SingleNode {
+            return vec![ReadinessTarget::new("StatefulSet", format!("{name}-all"))];
+        }
         vec![
             ReadinessTarget::new("StatefulSet", format!("{name}-store")),
             ReadinessTarget::new("StatefulSet", format!("{name}-control")),
@@ -58,6 +64,9 @@ impl InstanceService {
     }
 
     pub(crate) fn status_patch(&self, instance: &InstanceSpec, ready: &ReadyFacts) -> Value {
+        if instance.settings.topology == InstanceTopology::SingleNode {
+            return single_node_status_patch(instance, ready);
+        }
         let name = instance.name.clone();
         let store_ready = ready.get(&format!("{name}-store")).max(0);
         let control_ready = ready.get(&format!("{name}-control")).max(0);
@@ -167,21 +176,33 @@ impl InstanceService {
             .backup
             .as_ref()
             .is_some_and(|backup| backup.destination.starts_with("gs://"));
-        [
-            (STORE_COMPONENT, store_uses_gcs),
-            (CONTROL_COMPONENT, store_uses_gcs),
-            (BACKUP_COMPONENT, backup_uses_gcs),
-        ]
-        .into_iter()
-        .filter(|(_, desired)| !desired)
-        .map(|(role, _)| {
-            service_k8s::service::PruneTarget::new(
-                "networking.gke.io/v1alpha1",
-                "FQDNNetworkPolicy",
-                format!("{name}-{role}-google-apis"),
-            )
-        })
-        .collect()
+        let desired = if instance.settings.topology == InstanceTopology::SingleNode {
+            // A single-node instance renders no store, control or backup
+            // policy, so those must go; only the all-role Pod's policy stays.
+            vec![
+                (STORE_COMPONENT, false),
+                (CONTROL_COMPONENT, false),
+                (BACKUP_COMPONENT, false),
+                (ALL_COMPONENT, store_uses_gcs),
+            ]
+        } else {
+            vec![
+                (STORE_COMPONENT, store_uses_gcs),
+                (CONTROL_COMPONENT, store_uses_gcs),
+                (BACKUP_COMPONENT, backup_uses_gcs),
+            ]
+        };
+        desired
+            .into_iter()
+            .filter(|(_, desired)| !desired)
+            .map(|(role, _)| {
+                service_k8s::service::PruneTarget::new(
+                    "networking.gke.io/v1alpha1",
+                    "FQDNNetworkPolicy",
+                    format!("{name}-{role}-google-apis"),
+                )
+            })
+            .collect()
     }
 
     pub(crate) fn cluster_scoped_children(
@@ -213,4 +234,56 @@ impl InstanceService {
             ),
         ]))]
     }
+}
+
+fn single_node_status_patch(instance: &InstanceSpec, ready: &ReadyFacts) -> Value {
+    let name = instance.name.clone();
+    let all_ready = ready.get(&format!("{name}-all")).max(0);
+    let available = all_ready >= 1;
+    let phase = if available { "Ready" } else { "Pending" };
+    let message = format!("all {all_ready}/1 ready");
+    let (backup_phase, backup_message) = if instance.settings.backup.is_some() {
+        (
+            "Configured",
+            "scheduled live backup is configured; execution evidence is reported by its CronJob and destination",
+        )
+    } else {
+        ("NotConfigured", "no scheduled backup requested")
+    };
+    let archive_phase = if instance.settings.archive.is_some() {
+        "Configured"
+    } else {
+        "NotConfigured"
+    };
+    let (restore_phase, restore_source_manifest) = instance
+        .settings
+        .bootstrap
+        .archive_manifest_uri
+        .as_deref()
+        .map(|uri| {
+            let restore_phase = if available { "Restored" } else { "Requested" };
+            (restore_phase, uri)
+        })
+        .unwrap_or(("NotRequested", ""));
+    json!({
+        "status": {
+            "phase": phase,
+            "observedGeneration": instance.generation,
+            "readyReplicas": all_ready,
+            "desiredShardCount": 1,
+            "currentShardCount": u32::from(available),
+            "desiredReplicasPerShard": 1,
+            "currentReadyReplicasPerShard": all_ready.min(1) as u32,
+            "backupPhase": backup_phase,
+            "backupMessage": backup_message,
+            "archivePhase": archive_phase,
+            "archiveWatermark": 0,
+            "lastArchiveManifest": "",
+            "restorePhase": restore_phase,
+            "restoreSourceManifest": restore_source_manifest,
+            "backpressure": "Healthy",
+            "lastDataError": "",
+            "message": message,
+        }
+    })
 }

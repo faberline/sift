@@ -6,13 +6,15 @@ use std::collections::BTreeMap;
 use service_k8s::render::{self, RenderCtx};
 
 use crate::operations::domain::instance_names::{
-    AGENT_COMPONENT, APP, BACKUP_COMPONENT, CONTROL_COMPONENT, GATEWAY_COMPONENT, HTTP_PORT,
-    OTLP_GRPC_PORT, PEER_MTLS_PORT, QUERY_COMPONENT, STORE_COMPONENT,
+    AGENT_COMPONENT, ALL_COMPONENT, APP, BACKUP_COMPONENT, CONTROL_COMPONENT, GATEWAY_COMPONENT,
+    HTTP_PORT, OTLP_GRPC_PORT, PEER_MTLS_PORT, QUERY_COMPONENT, STORE_COMPONENT,
 };
 use crate::operations::infrastructure::k8s::role_workloads::{
     full_role_selector, role_selector_labels,
 };
-use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
+use crate::shared_kernel::instance_spec::{
+    InstanceAuth as AuthMode, InstanceSettings as SiftSpec, InstanceTopology,
+};
 
 fn dns_egress() -> render::NetworkRulePlan {
     render::NetworkRulePlan::new(
@@ -65,6 +67,11 @@ fn instance_peer(cx: &RenderCtx<'_>) -> render::NetworkPeerPlan {
     ]))
 }
 
+fn default_deny_policy(cx: &RenderCtx<'_>) -> render::NetworkPolicyPlan {
+    render::NetworkPolicyPlan::new(format!("{}-network", cx.name()), "network", BTreeMap::new())
+        .instance_wide()
+}
+
 fn role_network_policy(cx: &RenderCtx<'_>, role: &str) -> render::NetworkPolicyPlan {
     render::NetworkPolicyPlan::new(
         format!("{}-{role}-network", cx.name()),
@@ -80,12 +87,7 @@ pub(super) fn network_policy_plans(
     kubernetes_api_cidrs: &[String],
     kubernetes_api_ports: &[u16],
 ) -> Vec<render::NetworkPolicyPlan> {
-    let default_deny = render::NetworkPolicyPlan::new(
-        format!("{}-network", cx.name()),
-        "network",
-        BTreeMap::new(),
-    )
-    .instance_wide();
+    let default_deny = default_deny_policy(cx);
 
     let mut gateway = role_network_policy(cx, GATEWAY_COMPONENT)
         .with_ingress(render::NetworkRulePlan::new(
@@ -219,16 +221,7 @@ pub(super) fn network_policy_plans(
         ));
     }
 
-    let store_uses_gcs = spec
-        .archive
-        .as_ref()
-        .is_some_and(|archive| archive.destination.starts_with("gs://"))
-        || spec
-            .bootstrap
-            .archive_manifest_uri
-            .as_deref()
-            .is_some_and(|uri| uri.starts_with("gs://"));
-    if store_uses_gcs {
+    if store_uses_gcs(spec) {
         store = store.with_egress(metadata_server_egress());
         control = control.with_egress(metadata_server_egress());
     }
@@ -243,11 +236,61 @@ pub(super) fn network_policy_plans(
     vec![default_deny, gateway, query, store, control, agent, backup]
 }
 
+/// The policies of a single-node instance: default deny, and one policy for
+/// the all-role Pod with the client ingress and the egress it needs.
+pub(super) fn single_node_network_policy_plans(
+    cx: &RenderCtx<'_>,
+    spec: &SiftSpec,
+    kubernetes_api_cidrs: &[String],
+    kubernetes_api_ports: &[u16],
+) -> Vec<render::NetworkPolicyPlan> {
+    let default_deny = default_deny_policy(cx);
+
+    let mut all =
+        role_network_policy(cx, ALL_COMPONENT).with_ingress(render::NetworkRulePlan::new(
+            vec![render::NetworkPeerPlan::any()],
+            vec![
+                render::NetworkPortPlan::tcp(HTTP_PORT),
+                render::NetworkPortPlan::tcp(OTLP_GRPC_PORT),
+            ],
+        ));
+    if store_uses_gcs(spec) {
+        all = all.with_egress(metadata_server_egress());
+    }
+    if matches!(spec.auth, AuthMode::Kubernetes) && !kubernetes_api_cidrs.is_empty() {
+        all = all.with_egress(kubernetes_api_egress(
+            kubernetes_api_cidrs,
+            kubernetes_api_ports,
+        ));
+    }
+
+    vec![default_deny, all]
+}
+
+fn store_uses_gcs(spec: &SiftSpec) -> bool {
+    spec.archive
+        .as_ref()
+        .is_some_and(|archive| archive.destination.starts_with("gs://"))
+        || spec
+            .bootstrap
+            .archive_manifest_uri
+            .as_deref()
+            .is_some_and(|uri| uri.starts_with("gs://"))
+}
+
 pub(super) fn fqdn_network_policy_plans(
     cx: &RenderCtx<'_>,
     spec: &SiftSpec,
 ) -> Vec<render::FqdnNetworkPolicyPlan> {
     let mut policies = Vec::new();
+    if spec.topology == InstanceTopology::SingleNode {
+        // A single-node instance has only the all-role Pod: a gs:// archive
+        // is the one reason for an FQDN policy.
+        if store_uses_gcs(spec) {
+            policies.push(google_apis_policy(cx, ALL_COMPONENT));
+        }
+        return policies;
+    }
     if !spec.alerting.allowed_hosts.is_empty() {
         let mut policy = render::FqdnNetworkPolicyPlan::new(
             format!("{}-control-webhooks", cx.name()),
@@ -260,16 +303,7 @@ pub(super) fn fqdn_network_policy_plans(
         }
         policies.push(policy);
     }
-    let store_uses_gcs = spec
-        .archive
-        .as_ref()
-        .is_some_and(|archive| archive.destination.starts_with("gs://"))
-        || spec
-            .bootstrap
-            .archive_manifest_uri
-            .as_deref()
-            .is_some_and(|uri| uri.starts_with("gs://"));
-    if store_uses_gcs {
+    if store_uses_gcs(spec) {
         policies.push(google_apis_policy(cx, STORE_COMPONENT));
         policies.push(google_apis_policy(cx, CONTROL_COMPONENT));
     }
