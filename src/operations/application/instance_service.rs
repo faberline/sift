@@ -1,10 +1,13 @@
 //! Render workloads and report instance state through the platform port.
 
 use crate::operations::domain::instance_names::{
-    APP, AUTH_DELEGATION_COMPONENT, BACKUP_COMPONENT, CONTROL_COMPONENT, STORE_COMPONENT,
+    ALL_COMPONENT, APP, AUTH_DELEGATION_COMPONENT, BACKUP_COMPONENT, CONTROL_COMPONENT,
+    STORE_COMPONENT,
 };
 use crate::operations::domain::instance_renderer::InstanceRenderer;
-use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSpec};
+use crate::shared_kernel::instance_spec::{
+    InstanceAuth as AuthMode, InstanceSpec, InstanceTopology,
+};
 use serde_json::{json, Value};
 use service_k8s::{ReadinessTarget, ReadyFacts};
 use std::collections::BTreeMap;
@@ -48,6 +51,9 @@ impl InstanceService {
 
     pub(crate) fn readiness_targets(&self, instance: &InstanceSpec) -> Vec<ReadinessTarget> {
         let name = instance.name.clone();
+        if instance.settings.topology == InstanceTopology::SingleNode {
+            return vec![ReadinessTarget::new("StatefulSet", format!("{name}-all"))];
+        }
         vec![
             ReadinessTarget::new("StatefulSet", format!("{name}-store")),
             ReadinessTarget::new("StatefulSet", format!("{name}-control")),
@@ -64,12 +70,31 @@ impl InstanceService {
         let gateway_ready = ready.get(&format!("{name}-gateway")).max(0);
         let query_ready = ready.get(&format!("{name}-query")).max(0);
         let agent_ready = ready.get(&format!("{name}-agent")).max(0);
-        let ready_replicas =
-            store_ready + control_ready + gateway_ready + query_ready + agent_ready;
-        let desired_replicas_per_shard = instance.settings.replicas_per_shard;
+        let single_node = instance.settings.topology == InstanceTopology::SingleNode;
+        let all_ready = ready.get(&format!("{name}-all")).max(0);
+        let ready_replicas = if single_node {
+            all_ready
+        } else {
+            store_ready + control_ready + gateway_ready + query_ready + agent_ready
+        };
+        let desired_replicas_per_shard = if single_node {
+            1
+        } else {
+            instance.settings.replicas_per_shard
+        };
         let supported_topology =
             desired_replicas_per_shard == 3 && instance.settings.voter_count == 3;
-        let (phase, message) = if !supported_topology {
+        let (current_shards, current_replicas_per_shard) = if single_node {
+            (u32::from(all_ready >= 1), all_ready.min(1) as u32)
+        } else {
+            (u32::from(store_ready >= 2), store_ready.min(3) as u32)
+        };
+        let (phase, message) = if single_node {
+            (
+                if all_ready >= 1 { "Ready" } else { "Pending" },
+                format!("all {all_ready}/1 ready"),
+            )
+        } else if !supported_topology {
             (
                 "UnsupportedTopology",
                 format!(
@@ -116,7 +141,13 @@ impl InstanceService {
             .archive_manifest_uri
             .as_deref()
             .map(|uri| {
-                let restore_phase = if store_ready >= 3 {
+                let restore_phase = if single_node {
+                    if all_ready >= 1 {
+                        "Restored"
+                    } else {
+                        "Requested"
+                    }
+                } else if store_ready >= 3 {
                     "Restored"
                 } else if store_ready > 0 {
                     "Restoring"
@@ -132,9 +163,9 @@ impl InstanceService {
                 "observedGeneration": instance.generation,
                 "readyReplicas": ready_replicas,
                 "desiredShardCount": 1,
-                "currentShardCount": u32::from(store_ready >= 2),
+                "currentShardCount": current_shards,
                 "desiredReplicasPerShard": desired_replicas_per_shard,
-                "currentReadyReplicasPerShard": store_ready.min(3) as u32,
+                "currentReadyReplicasPerShard": current_replicas_per_shard,
                 "backupPhase": backup_phase,
                 "backupMessage": backup_message,
                 "archivePhase": archive_phase,
@@ -167,21 +198,34 @@ impl InstanceService {
             .backup
             .as_ref()
             .is_some_and(|backup| backup.destination.starts_with("gs://"));
-        [
-            (STORE_COMPONENT, store_uses_gcs),
-            (CONTROL_COMPONENT, store_uses_gcs),
-            (BACKUP_COMPONENT, backup_uses_gcs),
-        ]
-        .into_iter()
-        .filter(|(_, desired)| !desired)
-        .map(|(role, _)| {
-            service_k8s::service::PruneTarget::new(
-                "networking.gke.io/v1alpha1",
-                "FQDNNetworkPolicy",
-                format!("{name}-{role}-google-apis"),
-            )
-        })
-        .collect()
+        // Each entry is (role, wanted). A single-node instance has no store,
+        // control or backup Pod, so their policies go; its one Pod keeps the
+        // policy only while the archive is a `gs://` destination.
+        let roles = if instance.settings.topology == InstanceTopology::SingleNode {
+            vec![
+                (STORE_COMPONENT, false),
+                (CONTROL_COMPONENT, false),
+                (BACKUP_COMPONENT, false),
+                (ALL_COMPONENT, store_uses_gcs),
+            ]
+        } else {
+            vec![
+                (STORE_COMPONENT, store_uses_gcs),
+                (CONTROL_COMPONENT, store_uses_gcs),
+                (BACKUP_COMPONENT, backup_uses_gcs),
+            ]
+        };
+        roles
+            .into_iter()
+            .filter(|(_, desired)| !desired)
+            .map(|(role, _)| {
+                service_k8s::service::PruneTarget::new(
+                    "networking.gke.io/v1alpha1",
+                    "FQDNNetworkPolicy",
+                    format!("{name}-{role}-google-apis"),
+                )
+            })
+            .collect()
     }
 
     pub(crate) fn cluster_scoped_children(

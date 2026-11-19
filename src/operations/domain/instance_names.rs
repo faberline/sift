@@ -10,6 +10,7 @@ pub(in crate::operations) const STORE_COMPONENT: &str = "store";
 pub(in crate::operations) const CONTROL_COMPONENT: &str = "control";
 pub(in crate::operations) const AGENT_COMPONENT: &str = "agent";
 pub(in crate::operations) const BACKUP_COMPONENT: &str = "backup";
+pub(in crate::operations) const ALL_COMPONENT: &str = "all";
 pub(in crate::operations) const AUTH_DELEGATION_COMPONENT: &str = "auth-delegation";
 pub(in crate::operations) const AUTH_DELEGATOR_ROLE: &str = "system:auth-delegator";
 pub(in crate::operations) const HTTP_PORT: i32 = 7380;

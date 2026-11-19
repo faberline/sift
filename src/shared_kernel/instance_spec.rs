@@ -24,8 +24,6 @@ pub(crate) struct InstanceSettings {
     pub ingest: InstanceIngest,
     pub placement: InstancePlacement,
     pub auth: InstanceAuth,
-    // Read by the single-node renderer of #221; no non-test code reads it yet.
-    #[allow(dead_code)]
     pub topology: InstanceTopology,
     pub logs: InstanceLogs,
     pub tokens_secret: Option<String>,
