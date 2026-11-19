@@ -11,7 +11,7 @@ STEP_KEYS = {
     'rate', 'seconds', 'offered_items', 'accepted_items', 'rejected_items', 'error_items',
     'ingest_latency_p50_seconds', 'ingest_latency_p95_seconds', 'log_query_p95_seconds',
     'metric_query_p95_seconds', 'query_errors', 'cpu_seconds', 'peak_rss_bytes',
-    'disk_bytes_added', 'disk_bytes_per_accepted_item',
+    'disk_bytes_added', 'disk_bytes_per_accepted_item', 'queries_skipped',
 }
 
 
@@ -20,6 +20,8 @@ class Fake:
 
     def __init__(self):
         self.reject = False
+        self.endless_logs = False
+        self.query_calls = 0
         fake = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -28,7 +30,7 @@ class Fake:
 
             def do_POST(self):
                 length = int(self.headers.get('Content-Length', 0))
-                self.rfile.read(length)
+                data = self.rfile.read(length)
                 if self.path in ('/v1/logs', '/v1/metrics', '/v1/traces'):
                     if fake.reject:
                         self.send_response(429)
@@ -38,7 +40,12 @@ class Fake:
                     body = b'{}'
                 elif self.path == '/api/v1/query':
                     self.send_response(200)
-                    body = b'{"data":{"records":[],"series":[]}}'
+                    if fake.endless_logs and b'"kind":"logs"' in data:
+                        fake.query_calls += 1
+                        body = json.dumps({'data': {'records': [], 'series': []},
+                                           'next_cursor': str(fake.query_calls)}).encode()
+                    else:
+                        body = b'{"data":{"records":[],"series":[]}}'
                 else:
                     self.send_response(404)
                     body = b'{}'
@@ -97,6 +104,66 @@ class LocalLoad(unittest.TestCase):
         self.assertIsNone(step['cpu_seconds'])
         self.assertIsNone(step['peak_rss_bytes'])
         self.assertIsInstance(step['ingest_latency_p95_seconds'], float)
+
+    def test_log_query_stops_at_page_cap(self):
+        fake = Fake()
+        fake.endless_logs = True
+        api = Api(fake.endpoint, 'p')
+        try:
+            failed = driver._queries(api, 0, 10 ** 9, 'r')
+        finally:
+            api.close()
+            fake.close()
+        self.assertGreaterEqual(failed, 1)
+        self.assertLessEqual(fake.query_calls, driver.MAX_LOG_PAGES)
+
+    def test_busy_query_worker_skips_queries(self):
+        from unittest.mock import patch
+        fake = Fake()
+        api = Api(fake.endpoint, 'p')
+
+        def slow_queries(api, start, end, run):
+            time.sleep(7)
+            return 0
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(driver, '_queries', new=slow_queries):
+                step = driver.run_step(api, 'r' * 32, 'e', 10, 10, driver.synthetic_templates(),
+                                       time.time_ns(), None, Path(tmp))
+        finally:
+            api.close()
+            fake.close()
+        self.assertEqual(step['queries_skipped'], 1)
+
+    def test_step_prints_phase_lines(self):
+        fake = Fake()
+        api = Api(fake.endpoint, 'p')
+        out = io.StringIO()
+        try:
+            with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(out):
+                driver.run_step(api, 'r' * 32, 'e', 10, 2, driver.synthetic_templates(),
+                                time.time_ns(), None, Path(tmp))
+        finally:
+            api.close()
+            fake.close()
+        text = out.getvalue()
+        for line in ('step start rate=10', 'drain start rate=10', 'drain end rate=10', 'step end rate=10'):
+            self.assertIn(line, text)
+
+    def test_designed_run_time_fits_the_job_limit(self):
+        self.assertEqual(driver.designed_seconds(5, 180), 1125)
+        self.assertLess(driver.designed_seconds(5, 180), 45 * 60)
+
+    def test_partial_result_says_it_is_not_complete(self):
+        result = driver.build_result('sift', 180, Path('/nonexistent'), [], False, 'step 2 of 5 done')
+        self.assertIs(result['complete'], False)
+        self.assertEqual(result['last_phase'], 'step 2 of 5 done')
+        self.assertIn('not a GKE claim', result['claim'])
+
+    def test_max_seconds_stops_before_the_next_step(self):
+        self.assertTrue(driver.over_budget(2300, 180, 2400))
+        self.assertFalse(driver.over_budget(0, 180, 2400))
 
     def test_rejection_is_counted_as_rejected_not_accepted(self):
         fake = Fake()

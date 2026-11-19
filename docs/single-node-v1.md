@@ -17,6 +17,7 @@ The profile is one `all`-role Pod on one PVC on Standard GKE, installed by the o
 - No quorum and no failover.
 - Recovery only from the PVC, or from GCS when a `gs://` destination is set.
 - No three-voter availability claim.
+- A new Pod that starts while the old Pod still holds the data root lock does not wait. Its start fails with the error "another Sift process may be using it" and the process exits with an error.
 
 ## Acceptance gates
 
