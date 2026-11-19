@@ -8,6 +8,7 @@ and [`llms.txt`](../llms.txt).
 |----------|-----------------|
 | [production-v1.md](production-v1.md) | The 0.2.0 inputs, control state, query, load, recovery, and cutover contract. |
 | [single-node-v1.md](single-node-v1.md) | The single-node profile contract: promises, limits and acceptance gates. |
+| [operations/release-profiles.md](operations/release-profiles.md) | Proposal: the production and single-node release profiles, the version and the workflow design. |
 | [architecture.md](architecture.md) | How the source is cut into bounded contexts and layers, ports, shared service ownership and the dependency rules. |
 | [public-api.md](public-api.md) | Public Rust paths and the unchanged CLI, API and persisted byte contracts. |
 | [glossary.md](glossary.md) | The terms Sift's code and docs use, and the ones that mean something different in other repos. |
