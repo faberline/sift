@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context, Result};
 
@@ -45,7 +45,7 @@ pub struct SegmentStore {
     pub(super) manifests_root: PathBuf,
     pub(super) max_segment_events: usize,
     pub(super) max_segment_bytes: usize,
-    pub(super) inner: Mutex<SegmentStateData>,
+    pub(super) inner: Arc<Mutex<SegmentStateData>>,
 }
 
 impl SegmentStore {
@@ -69,7 +69,7 @@ impl SegmentStore {
             manifests_root,
             max_segment_events,
             max_segment_bytes,
-            inner: Mutex::new(SegmentStateData::default()),
+            inner: Arc::new(Mutex::new(SegmentStateData::default())),
         };
         store.load()?;
         Ok(store)
