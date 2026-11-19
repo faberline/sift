@@ -82,6 +82,26 @@ class WorkflowTest(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertIs(json.loads(path.read_text(encoding='utf-8'))['complete'], True)
 
+    def test_soak_inputs_exist_and_default_to_empty(self):
+        block = on_block()
+        for name in ('soak_rate', 'soak_seconds'):
+            match = re.search(r'(?m)^      %s:\n((?:        .*\n)+)' % name, block + '\n')
+            self.assertIsNotNone(match, name)
+            self.assertIn('default: ""', match.group(1))
+            self.assertIn('type: string', match.group(1))
+
+    def test_soak_inputs_reach_the_script_only_through_env(self):
+        self.assertEqual(TEXT.count('${{ inputs.soak_rate }}'), 1)
+        self.assertEqual(TEXT.count('${{ inputs.soak_seconds }}'), 1)
+        self.assertIn('SOAK_RATE: ${{ inputs.soak_rate }}', TEXT)
+        self.assertIn('SOAK_SECONDS: ${{ inputs.soak_seconds }}', TEXT)
+
+    def test_default_dispatch_adds_no_soak_argument(self):
+        self.assertEqual(TEXT.count('--soak-rate'), 1)
+        line = next(line for line in TEXT.splitlines() if '--soak-rate' in line)
+        self.assertIn('if [ -n "$SOAK_RATE" ]', line)
+        self.assertIn('"${SOAK_ARGS[@]}"', step_block('name: Run the local load driver'))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -308,5 +308,126 @@ class LocalLoad(unittest.TestCase):
             self.assertNotIn('/root', text)
 
 
+class StoppedProcess:
+    pid = None
+
+    def terminate(self):
+        pass
+
+    def wait(self, timeout=None):
+        pass
+
+
+SOAK_KEYS = {'soak_rate', 'soak_seconds', 'sample_seconds', 'quiet_seconds',
+             'rss_samples', 'rss_after_quiet_bytes'}
+
+
+class SoakMode(unittest.TestCase):
+    def run_main(self, argv, fake_run_step):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'out'
+            with mock.patch.object(driver, 'start_server', return_value=(StoppedProcess(), 1234)), \
+                    mock.patch.object(driver, 'run_step', side_effect=fake_run_step) as run_step, \
+                    mock.patch.object(driver, 'read_rss_bytes', return_value=777), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = driver.main(['--sift-bin', 'x', '--output-dir', str(out)] + argv)
+            self.assertEqual(code, 0)
+            return json.loads((out / 'result.json').read_text()), run_step
+
+    def test_read_rss_bytes_reads_vmrss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / '42').mkdir()
+            (Path(tmp) / '42' / 'status').write_text('Name:\tsift\nVmRSS:\t  2048 kB\n')
+            self.assertEqual(driver.read_rss_bytes(42, tmp), 2048 * 1024)
+            self.assertIsNone(driver.read_rss_bytes(43, tmp))
+        self.assertIsNone(driver.read_rss_bytes(None))
+
+    def test_sampler_records_about_every_sample_seconds(self):
+        values = iter([1, 2, 3, 4])
+        sampler = driver.SoakSampler(lambda: next(values), 30)
+        for elapsed in range(1, 96):
+            sampler.tick(elapsed)
+        self.assertEqual(sampler.samples, [[30, 1], [60, 2], [90, 3]])
+
+    def test_sampler_skips_an_unreadable_value(self):
+        sampler = driver.SoakSampler(lambda: None, 30)
+        for elapsed in range(1, 61):
+            sampler.tick(elapsed)
+        self.assertEqual(sampler.samples, [])
+
+    def test_quiet_rss_waits_before_it_reads(self):
+        events = []
+        value = driver.quiet_rss(7, 120, read_rss=lambda pid: events.append(('read', pid)) or 99,
+                                 sleep=lambda seconds: events.append(('sleep', seconds)))
+        self.assertEqual(value, 99)
+        self.assertEqual(events, [('sleep', 120), ('read', 7)])
+
+    def test_designed_soak_time(self):
+        self.assertEqual(driver.designed_soak_seconds(1800, 120), 2005)
+        self.assertLess(driver.designed_soak_seconds(1800, 120), driver.JOB_LIMIT_SECONDS)
+        self.assertGreaterEqual(driver.designed_soak_seconds(2600, 120), driver.JOB_LIMIT_SECONDS)
+
+    def test_build_result_without_soak_has_no_soak_keys(self):
+        result = driver.build_result('sift', 180, Path('/nonexistent'), [], True, 'all steps done')
+        self.assertTrue(SOAK_KEYS.isdisjoint(result))
+
+    def test_build_result_with_soak_has_the_soak_keys(self):
+        soak = {'soak_rate': 100, 'soak_seconds': 60, 'sample_seconds': 30, 'quiet_seconds': 0,
+                'rss_samples': [[30, 1]], 'rss_after_quiet_bytes': 2}
+        result = driver.build_result('sift', 60, Path('/nonexistent'), [], True, 'x', soak=soak)
+        self.assertTrue(SOAK_KEYS <= set(result))
+        self.assertEqual(result['rss_samples'], [[30, 1]])
+
+    def test_run_step_calls_on_second_for_each_second(self):
+        fake = Fake()
+        api = Api(fake.endpoint, 'p')
+        seen = []
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                driver.run_step(api, 'r' * 32, 'e', 10, 3, driver.synthetic_templates(),
+                                time.time_ns(), None, Path(tmp), on_second=seen.append)
+        finally:
+            api.close()
+            fake.close()
+        self.assertEqual(seen, [0, 1, 2])
+
+    def test_main_in_soak_mode_writes_samples_and_the_quiet_value(self):
+        def fake_run_step(api, run, environment, rate, seconds, templates, base_nanos, pid,
+                          data_dir, on_second=None):
+            for second in range(seconds):
+                on_second(second)
+            return {'rate': rate, 'seconds': seconds}
+
+        result, _run_step = self.run_main(
+            ['--soak-rate', '100', '--soak-seconds', '60', '--sample-seconds', '30',
+             '--quiet-seconds', '0'], fake_run_step)
+        self.assertEqual(result['rss_samples'], [[30, 777], [60, 777]])
+        self.assertEqual(result['rss_after_quiet_bytes'], 777)
+        self.assertEqual(result['soak_rate'], 100)
+        self.assertEqual(result['steps'], [{'rate': 100, 'seconds': 60}])
+        self.assertIs(result['complete'], True)
+
+    def test_main_without_soak_rate_has_no_rss_samples(self):
+        result, run_step = self.run_main(
+            ['--rates', '100', '--step-seconds', '1'],
+            lambda api, run, environment, rate, *args, **kwargs: {'rate': rate})
+        self.assertTrue(SOAK_KEYS.isdisjoint(result))
+        self.assertNotIn('on_second', run_step.call_args.kwargs)
+
+    def test_soak_run_longer_than_the_job_limit_is_a_usage_error(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                driver.main(['--sift-bin', 'x', '--output-dir', str(Path(tmp) / 'out'),
+                             '--soak-rate', '100', '--soak-seconds', '2600'])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_soak_rate_must_be_a_multiple_of_ten(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                driver.main(['--sift-bin', 'x', '--output-dir', str(Path(tmp) / 'out'),
+                             '--soak-rate', '15'])
+        self.assertEqual(raised.exception.code, 2)
+
+
 if __name__ == '__main__':
     unittest.main()
