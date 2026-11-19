@@ -77,6 +77,9 @@ pub(super) struct CollectArgs {
     /// Continue watching a regular file or refreshing CRI discovery after EOF.
     #[arg(long)]
     follow: bool,
+    /// Collect CRI logs only from Pods that carry this label (`key=value`). Needs --cri-root and --follow. A Pod that gets the label is collected from the start of its current log file; a Pod that loses it stops.
+    #[arg(long = "pod-label", value_parser = parse_pod_label, requires = "follow")]
+    pod_label: Option<sift::collector::PodLabelSelector>,
     #[arg(long, default_value_t = 250)]
     follow_poll_ms: u64,
     /// Input format: auto, structured, json, or text.
@@ -93,6 +96,9 @@ pub(super) struct CollectArgs {
 }
 
 pub(super) async fn collect(args: CollectArgs) -> Result<()> {
+    if args.pod_label.is_some() && args.cri_root.is_none() {
+        anyhow::bail!("--pod-label needs --cri-root");
+    }
     let (source, default_source_id) = if let Some(root) = args.cri_root {
         let canonical = std::fs::canonicalize(&root)
             .with_context(|| format!("resolve CRI root {}", root.display()))?;
@@ -112,6 +118,13 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
             sorted.dedup();
             format!("{source_id}:namespace:{}", sorted.join(","))
         };
+        let pod_labels = match args.pod_label {
+            Some(selector) => Some(
+                sift::collector::watch_pod_labels(&args.namespaces, selector, args.node.clone())
+                    .await?,
+            ),
+            None => None,
+        };
         (
             SourceSpec::Cri(CriSourceConfig {
                 root: canonical,
@@ -122,6 +135,7 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
                     node: args.node,
                 },
                 namespaces: args.namespaces,
+                pod_labels,
             }),
             source_id,
         )
@@ -203,9 +217,44 @@ pub(super) async fn collect(args: CollectArgs) -> Result<()> {
     print_json_terminal(summary)
 }
 
+fn parse_pod_label(text: &str) -> Result<sift::collector::PodLabelSelector, String> {
+    sift::collector::PodLabelSelector::parse(text)
+}
+
 fn agent_checkpoint_path(data_dir: &std::path::Path, source_id: &str) -> PathBuf {
     let digest = Sha256::digest(source_id.as_bytes());
     data_dir
         .join("agent")
         .join(format!("{}.checkpoint.json", hex::encode(&digest[..16])))
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::CollectArgs;
+
+    #[derive(Parser)]
+    struct Wrapper {
+        #[command(flatten)]
+        args: CollectArgs,
+    }
+
+    #[test]
+    fn pod_label_needs_follow() {
+        let without_follow =
+            Wrapper::try_parse_from(["collect", "--cri-root", "/tmp", "--pod-label", "a=b"]);
+        assert!(without_follow.is_err());
+
+        let with_follow = Wrapper::try_parse_from([
+            "collect",
+            "--cri-root",
+            "/tmp",
+            "--pod-label",
+            "a=b",
+            "--follow",
+        ])
+        .unwrap();
+        assert!(with_follow.args.pod_label.is_some());
+    }
 }

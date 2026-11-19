@@ -38,6 +38,7 @@ Collect structured logs, JSON, or text from a file, stdin, or Kubernetes CRI log
 | `--source` | - | - | JSONL source path, or `-` for stdin |
 | `--cri-root` | - | - | Kubernetes node CRI pod-log root, normally /var/log/pods |
 | `--namespace` | - | - | Collect CRI logs only from this Kubernetes namespace |
+| `--pod-label` | - | - | Collect CRI logs only from Pods that carry this label (`key=value`) |
 | `--source-id` | - | - | Stable identity used with byte offsets to derive idempotency keys |
 | `--endpoint` | `SIFT_URL` | `http://127.0.0.1:7380` | Sift service base URL |
 | `--token` | `SIFT_TOKEN` | - | Optional Sift bearer token |

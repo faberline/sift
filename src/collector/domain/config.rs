@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::collector::domain::pod_labels::PodLabelSet;
+
 pub const DEFAULT_BATCH_SIZE: usize = 100;
 pub const MAX_BATCH_SIZE: usize = 1000;
 pub const DEFAULT_MAX_LINE_BYTES: usize = 512 * 1024;
@@ -26,6 +28,8 @@ pub struct CriSourceConfig {
     pub metadata: CriMetadata,
     /// Collect only these namespaces. An empty list keeps the explicit node-wide mode.
     pub namespaces: Vec<String>,
+    /// Collect only Pods whose UID is in this set. None keeps every Pod of the namespaces.
+    pub pod_labels: Option<PodLabelSet>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,6 +202,7 @@ mod tests {
                 node: None,
             },
             namespaces,
+            pod_labels: None,
         })
     }
 
