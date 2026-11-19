@@ -5,7 +5,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use sift::{openapi, router, DurableJournal, EventQuery, ServiceState};
+use sift::{openapi, router, EventQuery, ServiceState};
 use tower::ServiceExt;
 
 fn log_record(sequence: usize) -> serde_json::Value {
@@ -72,7 +72,10 @@ async fn bounded_ingest_burst_survives_drain_and_journal_reopen() {
     drop(readiness);
     drop(app);
     drop(state);
-    let reopened = DurableJournal::open(data_dir.path()).expect("reopen journal after drain");
+    // A test in this binary can hold a copy of the lock descriptor for a few ms; see tests/drain_lock_release.rs for the in-process proof.
+    let reopened = crate::support::reopen_journal(data_dir.path(), crate::support::REOPEN_TIMEOUT)
+        .await
+        .expect("reopen journal after drain");
     let rows = reopened
         .query(EventQuery {
             limit: 128,
