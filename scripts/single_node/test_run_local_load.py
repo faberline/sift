@@ -1,6 +1,7 @@
 """Tests for the one-process local load driver. Standard library only."""
 import contextlib, http.server, io, json, os, shutil, sys, tempfile, threading, time, unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'production'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -62,6 +63,13 @@ class Fake:
     def close(self):
         self.server.shutdown()
         self.server.server_close()
+
+
+class TimeoutApi(Api):
+    """An Api whose log query raises a socket timeout, as a stalled server does."""
+    def log_pages(self, start, end, run):
+        raise TimeoutError('timed out')
+        yield  # makes this a generator, like Api.log_pages
 
 
 class LocalLoad(unittest.TestCase):
@@ -231,6 +239,58 @@ class LocalLoad(unittest.TestCase):
             fs_type = driver.machine_shape(Path(tmp))['fs_type']
         self.assertIsInstance(fs_type, str)
         self.assertTrue(fs_type)
+
+    def test_query_timeout_counts_as_query_error(self):
+        fake = Fake()
+        api = TimeoutApi(fake.endpoint, 'p')
+        try:
+            failed = driver._queries(api, 0, 10 ** 9, 'r')
+        finally:
+            api.close()
+            fake.close()
+        self.assertEqual(failed, 1)
+
+    def test_step_with_query_timeout_still_returns_a_result(self):
+        fake = Fake()
+        api = TimeoutApi(fake.endpoint, 'p')
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                step = driver.run_step(api, 'r' * 32, 'e', 10, 5, driver.synthetic_templates(),
+                                       time.time_ns(), None, Path(tmp))
+        finally:
+            api.close()
+            fake.close()
+        self.assertGreaterEqual(step['query_errors'], 1)
+        self.assertEqual(step['accepted_items'], 50)
+        self.assertEqual(set(step), STEP_KEYS)
+
+    def test_failed_step_keeps_finished_steps_in_the_result(self):
+        class StoppedProcess:
+            pid = None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+        def fake_run_step(api, run, environment, rate, *args):
+            if rate == 100:
+                return {'rate': rate}
+            raise TimeoutError('timed out')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'out'
+            with mock.patch.object(driver, 'start_server', return_value=(StoppedProcess(), 1234)), \
+                    mock.patch.object(driver, 'run_step', side_effect=fake_run_step), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = driver.main(['--sift-bin', 'x', '--output-dir', str(out),
+                                    '--rates', '100,200', '--step-seconds', '1'])
+            self.assertEqual(code, 0)
+            result = json.loads((out / 'result.json').read_text())
+        self.assertEqual(result['steps'], [{'rate': 100}])
+        self.assertIs(result['complete'], False)
+        self.assertEqual(result['last_phase'], 'stopped at rate 200: TimeoutError')
 
     @unittest.skipUnless(os.environ.get('SIFT_BIN'), 'set SIFT_BIN to the built sift binary')
     def test_real_binary_short_run(self):

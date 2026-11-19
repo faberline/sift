@@ -14,6 +14,7 @@ QUERY_DEADLINE_SECONDS = 30
 MAX_LOG_PAGES = 20
 STARTUP_SECONDS = 30
 SHUTDOWN_SECONDS = 20
+QUERY_ERRORS = (ValueError, OSError, http.client.HTTPException)
 
 
 def say(message):
@@ -192,11 +193,11 @@ def _queries(api, start, end, run):
             if pages >= MAX_LOG_PAGES or time.monotonic() > deadline:
                 failed += 1
                 break
-    except ValueError:
+    except QUERY_ERRORS:
         failed += 1
     try:
         api.query('metrics', start, end, name='sift_acceptance_requests_' + run)
-    except ValueError:
+    except QUERY_ERRORS:
         failed += 1
     return failed
 
@@ -298,6 +299,10 @@ def main(argv=None):
             try:
                 steps.append(run_step(api, run, 'single-node-load', rate, args.step_seconds,
                                       templates, base_nanos, process.pid, data_dir))
+            except Exception as exc:
+                say('stop at rate=%d: %s' % (rate, type(exc).__name__))
+                stopped_phase = 'stopped at rate %d: %s' % (rate, type(exc).__name__)
+                break
             finally:
                 api.close()
                 api = None
