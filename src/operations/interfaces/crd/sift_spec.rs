@@ -45,6 +45,8 @@ pub struct SiftSpec {
     #[serde(default)]
     pub topology: Topology,
     #[serde(default)]
+    pub logs: LogsSpec,
+    #[serde(default)]
     pub tokens_secret: Option<String>,
     #[serde(default)]
     pub backup: Option<BackupSpec>,
@@ -84,6 +86,14 @@ pub struct BackupSpec {
     pub retention_secs: Option<u64>,
     #[serde(default)]
     pub admin_token_secret: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LogsSpec {
+    /// Kubernetes namespaces whose Pod logs the log agent collects.
+    /// Empty means the namespace of the Sift instance only.
+    pub namespaces: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -203,5 +213,16 @@ mod tests {
     #[test]
     fn topology_unknown_value_is_refused() {
         assert!(spec_with(r#""topology":"cluster""#).is_err());
+    }
+
+    #[test]
+    fn logs_default_is_empty() {
+        assert!(spec_with("").unwrap().logs.namespaces.is_empty());
+    }
+
+    #[test]
+    fn logs_namespaces_are_read() {
+        let spec = spec_with(r#""logs":{"namespaces":["team-a","team-b"]}"#).unwrap();
+        assert_eq!(spec.logs.namespaces, ["team-a", "team-b"]);
     }
 }

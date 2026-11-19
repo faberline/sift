@@ -1119,4 +1119,60 @@ fn removing_gcs_prunes_every_google_apis_policy() {
     }
 }
 
+fn sift_resource_with_logs(namespaces: &[&str]) -> Sift {
+    serde_json::from_value(json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": {
+            "image": "example.invalid/sift:gke-test",
+            "peerTlsSecret": "sift-peer-tls",
+            "replicasPerShard": 3,
+            "voterCount": 3,
+            "dataSize": "1Gi",
+            "auth": "kubernetes",
+            "logs": {"namespaces": namespaces},
+            "backup": {
+                "schedule": "*/5 * * * *",
+                "destination": "gs://sift-acceptance/backups",
+                "retentionSecs": 3600,
+                "adminTokenSecret": "sift-backup-admin"
+            }
+        }
+    }))
+    .expect("decode Sift resource with logs")
+}
+
+fn log_agent_namespace_args(objects: &[Value]) -> Vec<String> {
+    let args = object(objects, "DaemonSet", "events-agent")["spec"]["template"]["spec"]
+        ["containers"][0]["args"]
+        .as_array()
+        .expect("log agent args");
+    let position = args
+        .iter()
+        .position(|arg| arg == "--namespace")
+        .expect("--namespace argument");
+    vec![args[position + 1]
+        .as_str()
+        .expect("namespace value")
+        .to_string()]
+}
+
+#[test]
+fn log_agent_default_namespace_is_the_instance_namespace() {
+    let objects = sift_resource(3, 3).render();
+    assert_eq!(log_agent_namespace_args(&objects), ["observability"]);
+}
+
+#[test]
+fn log_agent_gets_the_namespace_list() {
+    let objects = sift_resource_with_logs(&["team-a", "team-b"]).render();
+    assert_eq!(log_agent_namespace_args(&objects), ["team-a,team-b"]);
+}
+
 // HANDWRITE-END

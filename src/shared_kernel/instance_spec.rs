@@ -27,6 +27,7 @@ pub(crate) struct InstanceSettings {
     // Read by the single-node renderer of #221; no non-test code reads it yet.
     #[allow(dead_code)]
     pub topology: InstanceTopology,
+    pub logs: InstanceLogs,
     pub tokens_secret: Option<String>,
     pub backup: Option<InstanceBackup>,
     pub alerting: InstanceAlerting,
@@ -46,6 +47,11 @@ pub(crate) enum InstanceAuth {
 pub(crate) enum InstanceTopology {
     Ha,
     SingleNode,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InstanceLogs {
+    pub namespaces: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
