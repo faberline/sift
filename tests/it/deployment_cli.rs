@@ -1330,7 +1330,15 @@ fn single_node_renders_one_all_role_statefulset() {
     );
     assert_eq!(
         stateful_set["spec"]["template"]["spec"]["containers"][0]["args"],
-        json!(["serve", "--role", "all", "--data-dir", "/var/lib/sift"])
+        json!([
+            "serve",
+            "--role",
+            "all",
+            "--data-dir",
+            "/var/lib/sift",
+            "--retention-days",
+            "180"
+        ])
     );
 
     for kind in [
@@ -1513,6 +1521,95 @@ fn ha_render_is_unchanged_by_an_explicit_ha_topology() {
     assert_eq!(explicit.render(), implicit);
     let stateful_set = object(&implicit, "StatefulSet", "events-store");
     assert_eq!(stateful_set["spec"]["replicas"], 3);
+}
+
+fn sift_resource_with_retention(days: u32) -> Sift {
+    serde_json::from_value(json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": {
+            "image": "example.invalid/sift:gke-test",
+            "peerTlsSecret": "sift-peer-tls",
+            "replicasPerShard": 3,
+            "voterCount": 3,
+            "dataSize": "1Gi",
+            "auth": "kubernetes",
+            "retentionDays": days,
+            "backup": {
+                "schedule": "*/5 * * * *",
+                "destination": "gs://sift-acceptance/backups",
+                "retentionSecs": 3600,
+                "adminTokenSecret": "sift-backup-admin"
+            }
+        }
+    }))
+    .expect("decode Sift resource with retention")
+}
+
+fn retention_args(objects: &[Value], kind: &str, name: &str) -> Vec<String> {
+    let args = object(objects, kind, name)["spec"]["template"]["spec"]["containers"][0]["args"]
+        .as_array()
+        .expect("container args");
+    let position = args
+        .iter()
+        .position(|arg| arg == "--retention-days")
+        .expect("--retention-days argument");
+    vec![args[position + 1]
+        .as_str()
+        .expect("retention value")
+        .to_string()]
+}
+
+#[test]
+fn store_gets_the_retention_days() {
+    let objects = sift_resource_with_retention(30).render();
+    assert_eq!(
+        retention_args(&objects, "StatefulSet", "events-store"),
+        ["30"]
+    );
+    assert_eq!(
+        retention_args(&objects, "StatefulSet", "events-control"),
+        ["30"]
+    );
+}
+
+#[test]
+fn retention_days_default_renders_180() {
+    let objects = sift_resource(3, 3).render();
+    assert_eq!(
+        retention_args(&objects, "StatefulSet", "events-store"),
+        ["180"]
+    );
+}
+
+#[test]
+fn single_node_gets_the_retention_days() {
+    let objects = single_node_resource("off", json!({"retentionDays": 30})).render();
+    assert_eq!(
+        retention_args(&objects, "StatefulSet", "events-all"),
+        ["30"]
+    );
+}
+
+#[test]
+fn gateway_and_query_get_no_retention_days() {
+    let objects = sift_resource(3, 3).render();
+    for name in ["events-gateway", "events-query"] {
+        let args = object(&objects, "Deployment", name)["spec"]["template"]["spec"]["containers"]
+            [0]["args"]
+            .as_array()
+            .expect("container args");
+        assert!(
+            !args.iter().any(|arg| arg == "--retention-days"),
+            "{name} must not get --retention-days"
+        );
+    }
 }
 
 // HANDWRITE-END
