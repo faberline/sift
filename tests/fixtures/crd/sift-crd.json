@@ -155,6 +155,12 @@
                       }
                     }
                   },
+                  "retentionDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 180,
+                    "default": 180
+                  },
                   "metrics": {
                     "type": "object",
                     "properties": {
