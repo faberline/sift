@@ -29,7 +29,7 @@ impl ProjectionRuntime {
             PROJECTION_RETRY_AFTER_SECONDS,
         );
         let mut registry = service_projection::ProjectionRegistry::new(&data_dir, source, config)?;
-        let logging = registry.register(|| Ok(Arc::new(LoggingProjection::new()?)))?;
+        let logging = registry.register(|| Ok(Arc::new(LoggingProjection::from_env()?)))?;
         let metric_data_dir = data_dir.clone();
         let metrics =
             registry.register(move || Ok(Arc::new(MetricProjection::open(&metric_data_dir)?)))?;

@@ -9,6 +9,7 @@ use thiserror::Error;
 
 pub const LOGGING_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_RETAINED_LOG_RECORDS: usize = 100_000;
+pub const DEFAULT_RETAINED_LOG_BYTES: usize = 256 * 1024 * 1024;
 
 pub(in crate::projection) const RESOURCE_TYPE: &str = "gcp.resource.type";
 pub(in crate::projection) const SERVICE_NAME: &str = "service.name";
@@ -35,6 +36,7 @@ pub(in crate::projection) struct LoggingState {
     pub(in crate::projection) records: BTreeMap<u64, LogRecordV1>,
     pub(in crate::projection) projection_cursor: u64,
     pub(in crate::projection) retention_boundary: Option<LogRetentionBoundary>,
+    pub(in crate::projection) retained_bytes: usize,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

@@ -445,6 +445,7 @@ Variables are read at run time unless the row says otherwise. A name in backtick
 | `SIFT_MAX_DECODED_BODY_BYTES` | `sift serve` | 8388608 | Largest request body after decompression, in bytes. |
 | `SIFT_MAX_EVENT_BYTES` | `sift serve` | 262144 | Largest single event, in bytes. |
 | `SIFT_MAX_EVENTS_PER_BATCH` | `sift serve` | 1000 | Most events in one batch. |
+| `SIFT_LOG_RETAINED_BYTES` | `sift serve` | 268435456 | Most bytes of log records that the logging projection keeps in memory (the JSON size of each record). The oldest records go first, after the record-count limit of 100,000. The newest record always stays. |
 | `SIFT_TRACE_RETAINED_BYTES` | `sift serve` | 268435456 | Most bytes of spans that the trace projection keeps in memory (the JSON size of each span). The oldest spans go first, after the span-count limit of 100,000. The newest span always stays. |
 | `SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT` | `sift serve`; CRD `spec.ingest.maxConcurrentRequests` | 32 | Ingest requests that run at once per project. |
 | `SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW` | `sift serve`; CRD `spec.ingest.maxItemsPerMinute` | 720000 | Items one project may send in one quota window. |
