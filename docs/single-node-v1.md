@@ -61,6 +61,49 @@ Every gate is **not run**. No live GKE evidence exists yet.
 
 This issue makes no change to the code.
 
+## Capacity
+
+The numbers come from `docs/operations/single-node-capacity-result.json` (run 44511577882 of the workflow `sift-single-node-load`; each step lasted 180 s). The run was measured on linux, 4 CPUs, 16758398976 bytes of memory, ext4, not a GKE claim. An item is one item that `accepted_items` counts in `scripts/single_node/run_local_load.py`.
+
+| Offered items per second | Accepted items | Rejected items | Ingest p95 (s) | Log query p95 (s) | Metric query p95 (s) | Peak RSS (GB) | Disk bytes per accepted item |
+|---|---|---|---|---|---|---|---|
+| 500 | 90000 | 0 | 0.05 | 0.08 | 0.04 | 1.4 | 2326 |
+| 1000 | 180000 | 0 | 0.11 | 0.26 | 0.09 | 5.2 | 4275 |
+| 2500 | 450000 | 0 | 0.52 | 6.14 | 0.46 | 7.2 | 2056 |
+| 5000 | 900000 | 0 | 1.37 | 10.08 | 3.03 | 8.6 | 2277 |
+| 10000 | 1089000 | 711000 | 1.67 | 12.62 | 8.81 | 11.3 | 2462 |
+
+The measured limit is 5000 items per second: the highest step with 0 rejected and 0 error items. At 10000 offered the run accepted 1089000 and rejected 711000 items.
+
+The data root grew by 2056 to 4275 bytes for each accepted item.
+
+Use this formula to size the PVC:
+
+```
+PVC bytes = items per second x 86400 x retentionDays x 4275 x 1.3
+```
+
+86400 is the number of seconds in a day. `retentionDays` is the setting `spec.retentionDays` (an integer from 1 to 180, default 180; see `k8s/crd/sift.yaml` and `docs/operations/configuration.md`). 4275 is the highest measured number of bytes for each item. 1.3 is the 30 percent margin. Worked example: 100 items per second for 30 days needs about 1441 GB. The disk bytes are `disk_bytes_added` of the whole data root; this section makes no claim for more than that.
+
+The rates for each Pod (1, 5 and 20 items per second) are an assumption, the owner has not given the real log volume. Fit means ingest only: the offered rate is at most 70 percent of the measured limit (3500 items per second).
+
+| Pods | Items per second for each Pod | Items per second in all | Fit |
+|---|---|---|---|
+| 100 | 1 | 100 | fit |
+| 100 | 5 | 500 | fit |
+| 100 | 20 | 2000 | fit |
+| 300 | 1 | 300 | fit |
+| 300 | 5 | 1500 | fit |
+| 300 | 20 | 6000 | not fit |
+| 500 | 1 | 500 | fit |
+| 500 | 5 | 2500 | fit |
+| 500 | 20 | 10000 | not fit |
+
+- Fit does not mean a good query: at 2500 items per second the log query p95 is 6.14 s (#279) and the peak RSS is 7.2 GB on a 16 GB machine. What holds the memory: #280, #281, #282, #283.
+- Not measured: GKE, a run longer than 180 s for each step, and memory growth over time.
+
+Above the measured limit, or when the profile needs quorum and failover, use the three-voter topology in [production-v1.md](production-v1.md).
+
 ## Relation to production-v1
 
 [production-v1.md](production-v1.md) and its 13-gate acceptance are not changed and are not run for this profile. This profile makes no claim for the three-voter topology.
