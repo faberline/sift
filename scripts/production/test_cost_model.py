@@ -64,5 +64,28 @@ class CostModel(unittest.TestCase):
             sys.argv = argv
         self.assertIn('Figure for approval', out.getvalue())
 
+class SingleNodeCostModel(unittest.TestCase):
+    SINGLE = Path(__file__).resolve().parent / 'cost-inputs.single-node.json'
+    DOC = Path(__file__).resolve().parents[2] / 'docs/operations/single-node-acceptance-cost.md'
+    PROD = INPUTS
+
+    def test_inputs_are_accepted(self):
+        cost_model.estimate(json.loads(self.SINGLE.read_text()))
+
+    def test_one_node_and_one_replica(self):
+        inputs = json.loads(self.SINGLE.read_text())
+        self.assertEqual(inputs['node_count'], 1)
+        self.assertEqual(inputs['store_replicas'], 1)
+        self.assertEqual(inputs['control_replicas'], 1)
+
+    def test_doc_figure_matches_the_model(self):
+        inputs = json.loads(self.SINGLE.read_text())
+        expected = next(line for line in cost_model.render_table(cost_model.estimate(inputs)).splitlines()
+                        if line.startswith('Figure for approval:'))
+        self.assertIn(expected, self.DOC.read_text().splitlines())
+
+    def test_production_inputs_unchanged(self):
+        self.assertEqual(cost_model.estimate(json.loads(self.PROD.read_text()))['store_pvc_gib'], 48280)
+
 if __name__ == '__main__':
     unittest.main()
