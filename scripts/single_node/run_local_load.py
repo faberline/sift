@@ -14,6 +14,7 @@ QUERY_DEADLINE_SECONDS = 30
 MAX_LOG_PAGES = 20
 STARTUP_SECONDS = 30
 SHUTDOWN_SECONDS = 20
+JOB_LIMIT_SECONDS = 45 * 60
 QUERY_ERRORS = (ValueError, OSError, http.client.HTTPException)
 
 
@@ -24,6 +25,11 @@ def say(message):
 
 def designed_seconds(step_count, step_seconds):
     return step_count * (step_seconds + QUERY_DEADLINE_SECONDS + 5) + STARTUP_SECONDS + SHUTDOWN_SECONDS
+
+
+def designed_soak_seconds(soak_seconds, quiet_seconds):
+    return (soak_seconds + QUERY_DEADLINE_SECONDS + 5 + quiet_seconds
+            + STARTUP_SECONDS + SHUTDOWN_SECONDS)
 
 
 def over_budget(elapsed, step_seconds, max_seconds):
@@ -90,6 +96,43 @@ def process_usage(pid):
         return empty
 
 
+def read_rss_bytes(pid, proc_root='/proc'):
+    """The resident set size now (field VmRSS), or None when it cannot be read."""
+    if pid is None:
+        return None
+    try:
+        for line in (Path(proc_root) / str(pid) / 'status').read_text().splitlines():
+            if line.startswith('VmRSS:'):
+                return int(line.split()[1]) * 1024
+    except (OSError, IndexError, ValueError):
+        return None
+    return None
+
+
+class SoakSampler:
+    """Collect [seconds since start, rss bytes] about every `sample_seconds`."""
+
+    def __init__(self, read_rss, sample_seconds):
+        self.read_rss = read_rss
+        self.sample_seconds = sample_seconds
+        self.next_due = sample_seconds
+        self.samples = []
+
+    def tick(self, elapsed_seconds):
+        if elapsed_seconds < self.next_due:
+            return
+        self.next_due += self.sample_seconds
+        rss = self.read_rss()
+        if rss is not None:
+            self.samples.append([elapsed_seconds, rss])
+
+
+def quiet_rss(pid, quiet_seconds, read_rss=None, sleep=time.sleep):
+    """Wait `quiet_seconds` with no load, then read the resident set size once."""
+    sleep(quiet_seconds)
+    return (read_rss or read_rss_bytes)(pid)
+
+
 def directory_bytes(path):
     total = 0
     for root, _dirs, files in os.walk(path):
@@ -101,7 +144,8 @@ def directory_bytes(path):
     return total
 
 
-def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, data_dir):
+def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, data_dir,
+             on_second=None):
     api.timings['logs'].clear()
     api.timings['metrics'].clear()
     before = directory_bytes(data_dir)
@@ -141,6 +185,8 @@ def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, d
                     rejected += count
                 else:
                     errored += count
+            if on_second is not None:
+                on_second(second)
             if second % 5 == 4:
                 if query_future is None or query_future.done():
                     if query_future is not None:
@@ -230,8 +276,8 @@ def start_server(sift_bin, data_dir, log_path):
         time.sleep(0.2)
 
 
-def build_result(sift_bin_name, step_seconds, data_dir, steps, complete, last_phase):
-    return {
+def build_result(sift_bin_name, step_seconds, data_dir, steps, complete, last_phase, soak=None):
+    result = {
         'kind': 'single-node-local-load',
         'claim': 'measured on this machine, not a GKE claim',
         'machine': machine_shape(data_dir),
@@ -241,6 +287,9 @@ def build_result(sift_bin_name, step_seconds, data_dir, steps, complete, last_ph
         'complete': complete,
         'last_phase': last_phase,
     }
+    if soak is not None:
+        result.update(soak)
+    return result
 
 
 def _rates(text):
@@ -256,6 +305,10 @@ def main(argv=None):
     parser.add_argument('--step-seconds', type=int, default=180)
     parser.add_argument('--templates', type=Path)
     parser.add_argument('--max-seconds', type=int, default=2400)
+    parser.add_argument('--soak-rate', type=int, default=None)
+    parser.add_argument('--soak-seconds', type=int, default=600)
+    parser.add_argument('--sample-seconds', type=int, default=30)
+    parser.add_argument('--quiet-seconds', type=int, default=120)
     args = parser.parse_args(argv)
 
     try:
@@ -266,6 +319,20 @@ def main(argv=None):
         parser.error('each rate must be a multiple of 10 from 10 through 10000')
     if args.step_seconds < 1:
         parser.error('--step-seconds must be at least 1')
+    step_seconds = args.step_seconds
+    max_seconds = args.max_seconds
+    soak = args.soak_rate is not None
+    if soak:
+        if args.soak_rate % 10 or args.soak_rate < 10 or args.soak_rate > 10000:
+            parser.error('--soak-rate must be a multiple of 10 from 10 through 10000')
+        if args.soak_seconds < 1 or args.sample_seconds < 1 or args.quiet_seconds < 0:
+            parser.error('--soak-seconds and --sample-seconds must be at least 1 '
+                         'and --quiet-seconds at least 0')
+        if designed_soak_seconds(args.soak_seconds, args.quiet_seconds) >= JOB_LIMIT_SECONDS:
+            parser.error('the soak run does not fit the 45 minute job limit')
+        rates = [args.soak_rate]
+        step_seconds = args.soak_seconds
+        max_seconds = JOB_LIMIT_SECONDS
 
     if args.output_dir.exists():
         print('output directory must be new', file=sys.stderr)
@@ -284,12 +351,25 @@ def main(argv=None):
     steps = []
     stopped_phase = 'no step done'
     started = time.monotonic()
+    sampler = None
+    rss_after_quiet = None
+
+    def soak_fields():
+        if not soak:
+            return None
+        return {'soak_rate': args.soak_rate, 'soak_seconds': args.soak_seconds,
+                'sample_seconds': args.sample_seconds, 'quiet_seconds': args.quiet_seconds,
+                'rss_samples': sampler.samples if sampler else [],
+                'rss_after_quiet_bytes': rss_after_quiet}
+
     try:
         say('server start')
         process, port = start_server(args.sift_bin, data_dir, log_path)
         say('server ready port=%d' % port)
+        if soak:
+            sampler = SoakSampler(lambda: read_rss_bytes(process.pid), args.sample_seconds)
         for rate in rates:
-            if over_budget(time.monotonic() - started, args.step_seconds, args.max_seconds):
+            if over_budget(time.monotonic() - started, step_seconds, max_seconds):
                 say('stop before rate=%d: time budget' % rate)
                 stopped_phase = 'stopped before rate %d: time budget' % rate
                 break
@@ -297,8 +377,11 @@ def main(argv=None):
             base_nanos = time.time_ns()
             api = Api('http://127.0.0.1:%d' % port, 'single-node-load')
             try:
-                steps.append(run_step(api, run, 'single-node-load', rate, args.step_seconds,
-                                      templates, base_nanos, process.pid, data_dir))
+                extra = {}
+                if soak:
+                    extra['on_second'] = lambda second: sampler.tick(second + 1)
+                steps.append(run_step(api, run, 'single-node-load', rate, step_seconds,
+                                      templates, base_nanos, process.pid, data_dir, **extra))
             except Exception as exc:
                 say('stop at rate=%d: %s' % (rate, type(exc).__name__))
                 stopped_phase = 'stopped at rate %d: %s' % (rate, type(exc).__name__)
@@ -306,9 +389,13 @@ def main(argv=None):
             finally:
                 api.close()
                 api = None
-            partial = build_result(args.sift_bin.name, args.step_seconds, data_dir, steps, False,
-                                   'step %d of %d done' % (len(steps), len(rates)))
+            partial = build_result(args.sift_bin.name, step_seconds, data_dir, steps, False,
+                                   'step %d of %d done' % (len(steps), len(rates)),
+                                   soak=soak_fields())
             (args.output_dir / 'result.json').write_text(json.dumps(partial, indent=2) + '\n')
+        if soak and len(steps) == len(rates):
+            say('quiet time %d seconds' % args.quiet_seconds)
+            rss_after_quiet = quiet_rss(process.pid, args.quiet_seconds)
     finally:
         if process is not None:
             process.terminate()
@@ -321,8 +408,8 @@ def main(argv=None):
             api.close()
 
     complete = len(steps) == len(rates)
-    result = build_result(args.sift_bin.name, args.step_seconds, data_dir, steps, complete,
-                          'all steps done' if complete else stopped_phase)
+    result = build_result(args.sift_bin.name, step_seconds, data_dir, steps, complete,
+                          'all steps done' if complete else stopped_phase, soak=soak_fields())
     path = args.output_dir / 'result.json'
     path.write_text(json.dumps(result, indent=2) + '\n')
     say('result written')

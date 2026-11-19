@@ -8,6 +8,16 @@ on:
         required: false
         default: "180"
         type: string
+      soak_rate:
+        description: "Soak mode: items per second held constant (empty: normal rate steps)."
+        required: false
+        default: ""
+        type: string
+      soak_seconds:
+        description: "Soak mode: seconds to hold the rate (empty: 600). Needs soak_rate."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -34,10 +44,14 @@ jobs:
       - name: Run the local load driver
         env:
           STEP_SECONDS: ${{ inputs.step_seconds }}
+          SOAK_RATE: ${{ inputs.soak_rate }}
+          SOAK_SECONDS: ${{ inputs.soak_seconds }}
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/single-node-logs"
-          python3 -u -B scripts/single_node/run_local_load.py --sift-bin target/release/sift --output-dir "$RUNNER_TEMP/single-node-load" --step-seconds "$STEP_SECONDS" 2>&1 | tee "$RUNNER_TEMP/single-node-logs/driver.log"
+          SOAK_ARGS=()
+          if [ -n "$SOAK_RATE" ]; then SOAK_ARGS+=(--soak-rate "$SOAK_RATE" --soak-seconds "${SOAK_SECONDS:-600}"); fi
+          python3 -u -B scripts/single_node/run_local_load.py --sift-bin target/release/sift --output-dir "$RUNNER_TEMP/single-node-load" --step-seconds "$STEP_SECONDS" "${SOAK_ARGS[@]}" 2>&1 | tee "$RUNNER_TEMP/single-node-logs/driver.log"
       - name: Collect the Sift server log
         if: always()
         run: |
