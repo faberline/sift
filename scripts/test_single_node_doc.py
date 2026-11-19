@@ -22,6 +22,7 @@ class SingleNodeDocTest(unittest.TestCase):
                 "## Promises",
                 "## Does not promise",
                 "## Acceptance gates",
+                "## Senders",
                 "## Relation to production-v1",
             ],
         )
