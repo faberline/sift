@@ -1,6 +1,6 @@
 # Configuration reference
 
-This page lists every `sift` command-line flag, every `SIFT_*` environment variable that the product code reads, and every field of the `Sift` custom resource. Each default is the default in the code, the help text or the CRD. A script, `scripts/verify-configuration-doc.py`, checks this page in CI. The hidden commands `acceptance-payload`, `acceptance-build-info` and `acceptance-grpc` are internal and not documented here.
+This page lists every `sift` command-line flag, every `SIFT_*` environment variable that the product code reads, and every field of the `Sift` custom resource. Each default is the default in the code, the help text or the CRD. A script, `scripts/verify-configuration-doc.py`, checks this page in CI. The hidden commands `acceptance-payload`, `acceptance-build-info` and `acceptance-grpc` are internal and not documented here. For the Pod label and annotations that the metric agent reads, see [metrics-scrape.md](metrics-scrape.md).
 
 ## Command line
 

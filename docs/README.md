@@ -19,6 +19,7 @@ and [`llms.txt`](../llms.txt).
 | [operations/runbook.md](operations/runbook.md) | Data-plane runbook: health, metrics, voter loss, restore, collector replay, rejected data. |
 | [operations/install.md](operations/install.md) | The four install paths (install.sh, container image, Compose, Kubernetes) and how each command is tested. |
 | [operations/configuration.md](operations/configuration.md) | Every CLI flag, environment variable and CRD field with default and meaning. |
+| [operations/metrics-scrape.md](operations/metrics-scrape.md) | Pod label and annotations that the metric agent scrapes, and how they map from a GMP PodMonitoring. |
 | [operations/limits.md](operations/limits.md) | Every limit with its value and where the code enforces it, and the known limits of this release. |
 | [operations/structured-stdout.md](operations/structured-stdout.md) | Structured stdout observability: what the application and the collector each own. |
 | [security/threat-model.md](security/threat-model.md) | Trust boundaries of Sift, the control at each one and the test or CI job that proves it. |
