@@ -34,7 +34,9 @@ FACTS = [
     ('src/app/projection_wiring.rs', 'MetricProjection::open(&metric_data_dir)'),
     # Log projection.
     ('src/projection/domain/log.rs', 'DEFAULT_RETAINED_LOG_RECORDS: usize = 100_000'),
-    ('src/projection/infrastructure/logging_projection.rs', 'while state.records.len() > self.max_records {'),
+    ('src/projection/domain/log.rs', 'DEFAULT_RETAINED_LOG_BYTES: usize = 256 * 1024 * 1024'),
+    ('src/projection/infrastructure/logging_projection.rs', 'while state.records.len() > self.max_records'),
+    ('src/projection/infrastructure/logging_projection.rs', 'state.retained_bytes > self.max_bytes'),
     ('src/projection/infrastructure/logging_projection.rs', 'state.records.remove(&oldest)'),
     ('src/projection/infrastructure/logging_projection.rs', '.delete(&DocumentId::new(projection_row_key(oldest)), None)?;'),
     ('src/ingest/domain/governance_policy.rs', 'const DEFAULT_MAX_STRING_BYTES: usize = 4_096;'),
