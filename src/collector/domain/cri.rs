@@ -29,6 +29,10 @@ impl WorkloadIdentity {
         namespaces.is_empty() || namespaces.contains(&self.namespace)
     }
 
+    pub(in crate::collector) fn pod_uid(&self) -> &str {
+        &self.pod_uid
+    }
+
     pub(in crate::collector) fn source_key(&self) -> String {
         format!(
             "{}:{}:{}:{}:{}",

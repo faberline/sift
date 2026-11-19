@@ -20,6 +20,8 @@ pub use domain::config::{
     MAX_LINE_BYTES,
 };
 pub use domain::log_format::{LogFormat, LogOptions};
+pub use domain::pod_labels::{PodLabelSelector, PodLabelSet};
 pub use domain::quarantine::QuarantineEntry;
 pub use infrastructure::checkpoint::CollectorCheckpoint;
+pub use infrastructure::pod_label_watch::watch_pod_labels;
 pub use infrastructure::service_log_mapper::decode_service_log;

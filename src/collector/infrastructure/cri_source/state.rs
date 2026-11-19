@@ -1,6 +1,18 @@
 //! Durable file positions, generations, and source loss accounting.
 use super::*;
 
+use crate::collector::domain::cri::WorkloadIdentity;
+
+/// Whether a CRI file of this workload is collected: its namespace is listed
+/// and, with `--pod-label`, its Pod is in the label set.
+fn wants(config: &CriSourceConfig, workload: &WorkloadIdentity) -> bool {
+    workload.in_namespaces(&config.namespaces)
+        && config
+            .pod_labels
+            .as_ref()
+            .is_none_or(|set| set.contains(workload.pod_uid()))
+}
+
 impl CriSource {
     pub(super) fn commit_cursors(
         &mut self,
@@ -93,7 +105,7 @@ impl CriSource {
 
     pub(super) fn refresh_files(&mut self) -> Result<()> {
         let mut discovered = discover(&self.root, &self.checkpoint.files)?;
-        discovered.retain(|file| file.workload.in_namespaces(&self.config.namespaces));
+        discovered.retain(|file| wants(&self.config, &file.workload));
         let present: HashSet<_> = discovered
             .iter()
             .map(|file| file.identity.clone())
@@ -168,7 +180,7 @@ impl CriSource {
                 self.held.remove(&identity);
                 continue;
             };
-            if file.retired || !file.workload.in_namespaces(&self.config.namespaces) {
+            if file.retired || !wants(&self.config, &file.workload) {
                 self.held.remove(&identity);
                 continue;
             }
@@ -201,7 +213,7 @@ impl CriSource {
         }
 
         for (identity, file) in &mut self.checkpoint.files {
-            if !file.workload.in_namespaces(&self.config.namespaces) {
+            if !wants(&self.config, &file.workload) {
                 continue;
             }
             if present.contains(identity)
