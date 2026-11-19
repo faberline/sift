@@ -136,6 +136,7 @@ pub struct StorageSpec {
     pub control_size: String,
     pub gateway_size: String,
     pub query_size: String,
+    pub storage_class: String,
 }
 
 impl Default for StorageSpec {
@@ -145,6 +146,7 @@ impl Default for StorageSpec {
             control_size: "5Gi".to_string(),
             gateway_size: "2Gi".to_string(),
             query_size: "2Gi".to_string(),
+            storage_class: String::new(),
         }
     }
 }
@@ -169,6 +171,17 @@ impl Default for IngestSpec {
 #[serde(default, rename_all = "camelCase")]
 pub struct PlacementSpec {
     pub node_selector: BTreeMap<String, String>,
+    pub tolerations: Vec<TolerationSpec>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct TolerationSpec {
+    pub key: Option<String>,
+    pub operator: Option<String>,
+    pub value: Option<String>,
+    pub effect: Option<String>,
+    pub toleration_seconds: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -257,6 +270,36 @@ mod tests {
     #[test]
     fn retention_days_default_is_180() {
         assert_eq!(spec_with("").unwrap().retention_days, 180);
+    }
+
+    #[test]
+    fn placement_tolerations_are_read() {
+        let spec = spec_with(
+            r#""placement":{"tolerations":[{"key":"faberline.dev/pool","operator":"Equal","value":"sift-server","effect":"NoSchedule"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.placement.tolerations.len(), 1);
+        let toleration = &spec.placement.tolerations[0];
+        assert_eq!(toleration.key.as_deref(), Some("faberline.dev/pool"));
+        assert_eq!(toleration.effect.as_deref(), Some("NoSchedule"));
+        assert_eq!(toleration.toleration_seconds, None);
+    }
+
+    #[test]
+    fn placement_tolerations_default_is_empty() {
+        assert!(spec_with("").unwrap().placement.tolerations.is_empty());
+    }
+
+    #[test]
+    fn placement_toleration_unknown_field_is_refused() {
+        assert!(spec_with(r#""placement":{"tolerations":[{"key":"a","foo":"b"}]}"#).is_err());
+    }
+
+    #[test]
+    fn storage_class_is_read_and_defaults_to_empty() {
+        let spec = spec_with(r#""storage":{"storageClass":"dynamic-rwo"}"#).unwrap();
+        assert_eq!(spec.storage.storage_class, "dynamic-rwo");
+        assert_eq!(spec_with("").unwrap().storage.storage_class, "");
     }
 
     #[test]

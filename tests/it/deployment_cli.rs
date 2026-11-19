@@ -1612,4 +1612,94 @@ fn gateway_and_query_get_no_retention_days() {
     }
 }
 
+#[test]
+fn single_node_renders_toleration_and_storage_class() {
+    let objects = single_node_resource(
+        "off",
+        json!({
+            "placement": {
+                "nodeSelector": {"faberline.dev/pool": "sift-server"},
+                "tolerations": [{
+                    "key": "faberline.dev/pool",
+                    "operator": "Equal",
+                    "value": "sift-server",
+                    "effect": "NoSchedule"
+                }]
+            },
+            "storage": {"storageClass": "dynamic-rwo"}
+        }),
+    )
+    .render();
+
+    let stateful_set = object(&objects, "StatefulSet", "events-all");
+    assert_eq!(
+        stateful_set["spec"]["template"]["spec"]["nodeSelector"]["faberline.dev/pool"],
+        "sift-server"
+    );
+    assert_eq!(
+        stateful_set["spec"]["template"]["spec"]["tolerations"],
+        json!([{
+            "key": "faberline.dev/pool",
+            "operator": "Equal",
+            "value": "sift-server",
+            "effect": "NoSchedule"
+        }])
+    );
+    assert_eq!(
+        stateful_set["spec"]["volumeClaimTemplates"][0]["spec"]["storageClassName"],
+        "dynamic-rwo"
+    );
+}
+
+#[test]
+fn single_node_without_the_fields_renders_no_toleration_or_class() {
+    let objects = single_node_resource("off", json!({})).render();
+
+    let stateful_set = object(&objects, "StatefulSet", "events-all");
+    assert!(stateful_set["spec"]["template"]["spec"]
+        .get("tolerations")
+        .is_none());
+    assert!(stateful_set["spec"]["volumeClaimTemplates"][0]["spec"]
+        .get("storageClassName")
+        .is_none());
+}
+
+#[test]
+fn ha_renders_toleration_and_storage_class() {
+    let mut value = serde_json::to_value(sift_resource(3, 3)).expect("encode Sift resource");
+    value["spec"]["placement"] = json!({
+        "tolerations": [{"key": "k", "operator": "Exists"}]
+    });
+    value["spec"]["storage"] = json!({"storageClass": "dynamic-rwo"});
+    let sift: Sift = serde_json::from_value(value).expect("decode Sift resource");
+    let objects = sift.render();
+
+    for name in ["events-store", "events-control"] {
+        let stateful_set = object(&objects, "StatefulSet", name);
+        assert_eq!(
+            stateful_set["spec"]["template"]["spec"]["tolerations"],
+            json!([{"key": "k", "operator": "Exists"}]),
+            "{name} tolerations"
+        );
+        assert_eq!(
+            stateful_set["spec"]["volumeClaimTemplates"][0]["spec"]["storageClassName"],
+            "dynamic-rwo",
+            "{name} storage class"
+        );
+    }
+
+    let claims: Vec<&Value> = objects
+        .iter()
+        .filter(|object| object["kind"] == "PersistentVolumeClaim")
+        .collect();
+    assert!(!claims.is_empty(), "the HA render has standalone claims");
+    for claim in claims {
+        assert_eq!(
+            claim["spec"]["storageClassName"], "dynamic-rwo",
+            "{} storage class",
+            claim["metadata"]["name"]
+        );
+    }
+}
+
 // HANDWRITE-END

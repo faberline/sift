@@ -1,7 +1,7 @@
 //! The managed-service adapter: how service_k8s renders a Sift resource's
 //! children, reads its readiness, and reports its status.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use service_k8s::render::{self, RenderCtx};
 
 use crate::operations::domain::instance_names::{
@@ -84,8 +84,34 @@ fn render_single_node(
     for policy in fqdn_network_policy_plans(cx, &instance.settings) {
         plan.add_fqdn_network_policy(policy);
     }
-    plan.render()
-        .expect("Sift typed Kubernetes workload plan must be valid")
+    let mut children = plan
+        .render()
+        .expect("Sift typed Kubernetes workload plan must be valid");
+    apply_storage_class(&mut children, &instance.settings.storage.storage_class);
+    children
+}
+
+/// Sets `storageClassName` on the claims of the StatefulSets and on the
+/// standalone claims. An empty class leaves every claim on the cluster default.
+fn apply_storage_class(children: &mut [Value], class: &str) {
+    if class.is_empty() {
+        return;
+    }
+    for child in children.iter_mut() {
+        match child["kind"].as_str() {
+            Some("StatefulSet") => {
+                if let Some(claims) = child["spec"]["volumeClaimTemplates"].as_array_mut() {
+                    for claim in claims {
+                        claim["spec"]["storageClassName"] = json!(class);
+                    }
+                }
+            }
+            Some("PersistentVolumeClaim") => {
+                child["spec"]["storageClassName"] = json!(class);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn render_children(
@@ -205,6 +231,7 @@ fn render_children(
         .render()
         .expect("Sift typed Kubernetes workload plan must be valid");
     super::metrics_agent::append_metrics_agent(&mut children, &cx, &instance.settings);
+    apply_storage_class(&mut children, &instance.settings.storage.storage_class);
     children
 }
 
