@@ -84,6 +84,12 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
         }
     })])
     .with_volumes(agent_volumes);
+    // The selector lists Pods through the Kubernetes API, so the agent needs a token.
+    let runtime = if spec.logs.pod_label.is_some() {
+        runtime.with_automount_service_account_token(true)
+    } else {
+        runtime
+    };
     let mut container = render::ContainerPlan::new(
         "sift",
         &spec.image,
@@ -114,6 +120,9 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
             "--follow".into(),
         ],
     );
+    if let Some(label) = &spec.logs.pod_label {
+        container.args.extend(["--pod-label".into(), label.clone()]);
+    }
     container.env = env;
     container.volume_mounts = agent_mounts;
     container.security_context = Some(json!({

@@ -1612,4 +1612,100 @@ fn gateway_and_query_get_no_retention_days() {
     }
 }
 
+fn sift_resource_with_pod_label(label: &str) -> Sift {
+    serde_json::from_value(json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": {
+            "image": "example.invalid/sift:gke-test",
+            "peerTlsSecret": "sift-peer-tls",
+            "replicasPerShard": 3,
+            "voterCount": 3,
+            "dataSize": "1Gi",
+            "auth": "kubernetes",
+            "logs": {"namespaces": ["team-a"], "podLabel": label},
+            "backup": {
+                "schedule": "*/5 * * * *",
+                "destination": "gs://sift-acceptance/backups",
+                "retentionSecs": 3600,
+                "adminTokenSecret": "sift-backup-admin"
+            }
+        }
+    }))
+    .expect("decode Sift resource with a pod label")
+}
+
+fn log_agent_args(objects: &[Value]) -> Vec<String> {
+    object(objects, "DaemonSet", "events-agent")["spec"]["template"]["spec"]["containers"][0]
+        ["args"]
+        .as_array()
+        .expect("log agent args")
+        .iter()
+        .map(|arg| arg.as_str().expect("log agent arg").to_string())
+        .collect()
+}
+
+#[test]
+fn log_agent_gets_the_pod_label() {
+    let args = log_agent_args(&sift_resource_with_pod_label("sift.axiom.dev/logs=true").render());
+    let position = args
+        .iter()
+        .position(|arg| arg == "--pod-label")
+        .expect("--pod-label argument");
+    assert_eq!(args[position + 1], "sift.axiom.dev/logs=true");
+    let namespace = args
+        .iter()
+        .position(|arg| arg == "--namespace")
+        .expect("--namespace argument");
+    assert_eq!(args[namespace + 1], "team-a");
+    assert!(args.iter().any(|arg| arg == "--follow"));
+}
+
+#[test]
+fn log_agent_mounts_the_token_only_with_a_pod_label() {
+    let objects = sift_resource_with_pod_label("sift.axiom.dev/logs=true").render();
+    assert_eq!(
+        object(&objects, "DaemonSet", "events-agent")["spec"]["template"]["spec"]
+            ["automountServiceAccountToken"],
+        true
+    );
+}
+
+#[test]
+fn log_agent_without_a_pod_label_is_unchanged() {
+    let objects = sift_resource_with_logs(&["team-a"]).render();
+    let args = log_agent_args(&objects);
+    assert!(!args.iter().any(|arg| arg == "--pod-label"));
+    assert_eq!(
+        object(&objects, "DaemonSet", "events-agent")["spec"]["template"]["spec"]
+            ["automountServiceAccountToken"],
+        false
+    );
+    assert_eq!(
+        args,
+        log_agent_args(&sift_resource_with_pod_label("sift.axiom.dev/logs=true").render())
+            .into_iter()
+            .filter(|arg| arg != "sift.axiom.dev/logs=true" && arg != "--pod-label")
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn pod_label_leaves_the_metrics_agent_unchanged() {
+    let plain = sift_resource_with_logs(&["team-a"]).render();
+    let labelled = sift_resource_with_pod_label("sift.axiom.dev/logs=true").render();
+    assert_eq!(
+        object(&labelled, "DaemonSet", "events-agent-metrics")["spec"]["template"]["spec"]
+            ["containers"][0]["args"],
+        object(&plain, "DaemonSet", "events-agent-metrics")["spec"]["template"]["spec"]
+            ["containers"][0]["args"]
+    );
+}
+
 // HANDWRITE-END

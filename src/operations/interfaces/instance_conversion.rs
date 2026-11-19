@@ -52,6 +52,11 @@ impl From<&Sift> for InstanceSpec {
                 },
                 logs: InstanceLogs {
                     namespaces: spec.logs.namespaces.clone(),
+                    pod_label: spec
+                        .logs
+                        .pod_label
+                        .clone()
+                        .filter(|label| !label.is_empty()),
                 },
                 retention_days: spec.retention_days,
                 metrics: InstanceMetrics {
@@ -116,6 +121,21 @@ mod tests {
         .unwrap();
         let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
         assert_eq!(settings.logs.namespaces, vec!["team-a".to_string()]);
+    }
+
+    #[test]
+    fn logs_pod_label_reaches_the_instance_settings() {
+        let spec: SiftSpec = serde_json::from_value(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls",
+            "logs": {"podLabel": "sift.axiom.dev/logs=true"}
+        }))
+        .unwrap();
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(
+            settings.logs.pod_label,
+            Some("sift.axiom.dev/logs=true".to_string())
+        );
     }
 
     #[test]
