@@ -115,7 +115,7 @@ class LocalLoad(unittest.TestCase):
             api.close()
             fake.close()
         self.assertGreaterEqual(failed, 1)
-        self.assertLessEqual(fake.query_calls, driver.MAX_LOG_PAGES + 1)
+        self.assertLessEqual(fake.query_calls, driver.MAX_LOG_PAGES)
 
     def test_busy_query_worker_skips_queries(self):
         from unittest.mock import patch
@@ -161,7 +161,7 @@ class LocalLoad(unittest.TestCase):
         self.assertEqual(result['last_phase'], 'step 2 of 5 done')
         self.assertIn('not a GKE claim', result['claim'])
 
-    def test_over_budget_is_checked_before_each_step(self):
+    def test_max_seconds_stops_before_the_next_step(self):
         self.assertTrue(driver.over_budget(2300, 180, 2400))
         self.assertFalse(driver.over_budget(0, 180, 2400))
 

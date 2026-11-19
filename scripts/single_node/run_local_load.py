@@ -189,7 +189,7 @@ def _queries(api, start, end, run):
         pages = 0
         for _page in api.log_pages(start, end, run):
             pages += 1
-            if pages > MAX_LOG_PAGES or time.monotonic() > deadline:
+            if pages >= MAX_LOG_PAGES or time.monotonic() > deadline:
                 failed += 1
                 break
     except ValueError:
