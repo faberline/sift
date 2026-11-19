@@ -542,6 +542,8 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.peerTlsSecret` | string | yes | none | Secret with the peer mTLS certificate, key and CA. |
 | `spec.replicasPerShard` | integer | no | none | Replicas per shard. Fixed at 3 in this phase. |
 | `spec.topology` | string | no | `ha` | Instance topology: `ha` or `singleNode`. |
+| `spec.logs` | object | no | none | Log agent settings. |
+| `spec.logs.namespaces` | array | no | none | Namespaces whose Pod logs the log agent collects, as `--namespace a,b`. Empty means the namespace of the instance. |
 | `spec.voterCount` | integer | no | none | Raft voters per shard. Fixed at 3 in this phase. |
 | `spec.dataSize` | string | no | none | Deprecated. New resources use the role sizes under `spec.storage`. |
 | `spec.archive` | object | no | none | Archive settings. |
