@@ -111,6 +111,7 @@ impl ArchiveLifecycleService {
             &self.services,
             journal,
             now,
+            crate::shared_kernel::retention_boundary::RetentionDays::configured(),
         )
     }
 

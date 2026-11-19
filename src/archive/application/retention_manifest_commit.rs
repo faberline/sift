@@ -11,6 +11,7 @@ use crate::archive::domain::control_values::ArchiveCommitState;
 use crate::archive::domain::event_set_digest::decode_event_content_digest;
 use crate::shared_kernel::archive_manifest::ArchiveManifest;
 use crate::shared_kernel::archive_receipts::{ArchiveReceipt, ExpirationReceipt};
+use crate::shared_kernel::retention_boundary::RetentionDays;
 
 pub(super) fn validate_retention_receipt_source(
     receipt: &ArchiveReceipt,
@@ -40,6 +41,7 @@ pub(super) fn finish_bounded_retention_commit(
     journal: &crate::journal::application::journal_service::JournalService<'_>,
     source: &ArchiveManifest,
     receipt: ArchiveReceipt,
+    retention: RetentionDays,
 ) -> Result<ExpirationReceipt> {
     let delta = receipt
         .manifest
@@ -63,7 +65,11 @@ pub(super) fn finish_bounded_retention_commit(
         false,
     )?;
     resume_local_blob_gc_batch(services, journal, 128, 1_280_000)?;
-    evict_committed_cold_segments_at(services, journal, cutoff + chrono::Duration::days(180))?;
+    evict_committed_cold_segments_at(
+        services,
+        journal,
+        cutoff + chrono::Duration::days(i64::from(retention.days())),
+    )?;
     Ok(ExpirationReceipt {
         manifest_uri: receipt.manifest_uri,
         retained_events: receipt.manifest.event_count,

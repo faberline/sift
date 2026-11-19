@@ -68,11 +68,13 @@ pub(in crate::archive) async fn prepare_retention_fence(
     let evaluate_at = Utc::now();
     let check_services = services.clone();
     let check_root = journal.storage().root().to_owned();
+    let retention = crate::shared_kernel::retention_boundary::RetentionDays::configured();
     let due = tokio::task::spawn_blocking(move || {
         crate::archive::application::retention_due::retention_due_at(
             &check_services,
             &check_root,
             evaluate_at,
+            retention,
         )
     })
     .await??;
