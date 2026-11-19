@@ -35,8 +35,9 @@ jobs:
         env:
           STEP_SECONDS: ${{ inputs.step_seconds }}
         run: |
+          set -o pipefail
           mkdir -p "$RUNNER_TEMP/single-node-logs"
-          python3 -B scripts/single_node/run_local_load.py --sift-bin target/release/sift --output-dir "$RUNNER_TEMP/single-node-load" --step-seconds "$STEP_SECONDS" 2>&1 | tee "$RUNNER_TEMP/single-node-logs/driver.log"
+          python3 -u -B scripts/single_node/run_local_load.py --sift-bin target/release/sift --output-dir "$RUNNER_TEMP/single-node-load" --step-seconds "$STEP_SECONDS" 2>&1 | tee "$RUNNER_TEMP/single-node-logs/driver.log"
       - name: Collect the Sift server log
         if: always()
         run: |

@@ -70,6 +70,12 @@ class WorkflowTest(unittest.TestCase):
         self.assertNotIn('single-node-load/data', TEXT)
         self.assertIsNone(re.search(r'path:.*data', TEXT))
 
+    def test_driver_output_is_unbuffered(self):
+        self.assertIn('python3 -u', TEXT)
+
+    def test_driver_log_is_kept_when_the_driver_fails(self):
+        self.assertIn('set -o pipefail', step_block('name: Run the local load driver'))
+
     def test_no_result_file_is_committed(self):
         self.assertFalse((ROOT / 'docs' / 'operations' / 'single-node-capacity-result.json').exists())
 
