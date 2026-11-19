@@ -255,7 +255,7 @@ The one Sift binary supports these roles:
 
 | Role | Work |
 |---|---|
-| `all` | Run a persistent single-process product for local use, Docker, and small installations. |
+| `all` | Run a persistent single-process product for local use, Docker, and small installations. On Kubernetes, `spec.topology: singleNode` runs it as one Pod on one PVC; see [Single-node operations](docs/operations/single-node.md). |
 | `agent` | Collect local files, standard input, or Kubernetes CRI logs and keep checkpoints. |
 | `gateway` | Authenticate and forward HTTP and OTLP/gRPC ingest, query, and MCP traffic. |
 | `query` | Serve query traffic from the durable store source of truth. |
@@ -283,7 +283,7 @@ The store and control roles use one fixed three-voter topology. Their dedicated
 Raft listener is port `7381` and requires mutual TLS. The Secret named by
 `spec.peerTlsSecret` must contain `tls.crt`, `tls.key`, and `ca.crt`. Its server
 certificate must cover the pod DNS names below the store and control headless
-Services.
+Services. A `singleNode` instance has no store or control roles and no Raft group; see [Single-node operations](docs/operations/single-node.md).
 
 Kubernetes delegated authentication has two cluster prerequisites. The Sift
 operator creates one per-instance `system:auth-delegator` ClusterRoleBinding.
