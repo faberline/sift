@@ -1302,7 +1302,10 @@ fn single_node_kubernetes_auth_binds_only_the_instance_account() {
 #[test]
 fn single_node_readiness_and_status() {
     let sift = single_node_resource("off", json!({}));
-    assert_eq!(sift.readiness_targets().len(), 1);
+    let targets = sift.readiness_targets();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].kind(), "StatefulSet");
+    assert_eq!(targets[0].name(), "events-all");
 
     let ready = sift.status_patch(&ReadyFacts::new(HashMap::from([(
         "events-all".to_string(),

@@ -64,46 +64,81 @@ impl InstanceService {
     }
 
     pub(crate) fn status_patch(&self, instance: &InstanceSpec, ready: &ReadyFacts) -> Value {
-        if instance.settings.topology == InstanceTopology::SingleNode {
-            return single_node_status_patch(instance, ready);
-        }
         let name = instance.name.clone();
-        let store_ready = ready.get(&format!("{name}-store")).max(0);
-        let control_ready = ready.get(&format!("{name}-control")).max(0);
-        let gateway_ready = ready.get(&format!("{name}-gateway")).max(0);
-        let query_ready = ready.get(&format!("{name}-query")).max(0);
-        let agent_ready = ready.get(&format!("{name}-agent")).max(0);
-        let ready_replicas =
-            store_ready + control_ready + gateway_ready + query_ready + agent_ready;
-        let desired_replicas_per_shard = instance.settings.replicas_per_shard;
-        let supported_topology =
-            desired_replicas_per_shard == 3 && instance.settings.voter_count == 3;
-        let (phase, message) = if !supported_topology {
+        let (
+            phase,
+            message,
+            ready_replicas,
+            desired_replicas_per_shard,
+            current_shards,
+            current_per_shard,
+            restored_phase,
+        ) = if instance.settings.topology == InstanceTopology::SingleNode {
+            let all_ready = ready.get(&format!("{name}-all")).max(0);
+            let available = all_ready >= 1;
             (
-                "UnsupportedTopology",
-                format!(
-                    "requested 1 shard x {desired_replicas_per_shard} replicas with {} voters; Sift requires exactly three durable voters",
-                    instance.settings.voter_count
-                ),
-            )
-        } else if store_ready >= 3
-            && control_ready >= 3
-            && gateway_ready >= 1
-            && query_ready >= 1
-            && agent_ready >= 1
-        {
-            (
-                "Ready",
-                format!(
-                    "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, agent {agent_ready} ready"
-                ),
+                if available { "Ready" } else { "Pending" },
+                format!("all {all_ready}/1 ready"),
+                all_ready,
+                1,
+                u32::from(available),
+                all_ready.min(1) as u32,
+                if available { "Restored" } else { "Requested" },
             )
         } else {
+            let store_ready = ready.get(&format!("{name}-store")).max(0);
+            let control_ready = ready.get(&format!("{name}-control")).max(0);
+            let gateway_ready = ready.get(&format!("{name}-gateway")).max(0);
+            let query_ready = ready.get(&format!("{name}-query")).max(0);
+            let agent_ready = ready.get(&format!("{name}-agent")).max(0);
+            let ready_replicas =
+                store_ready + control_ready + gateway_ready + query_ready + agent_ready;
+            let desired_replicas_per_shard = instance.settings.replicas_per_shard;
+            let supported_topology =
+                desired_replicas_per_shard == 3 && instance.settings.voter_count == 3;
+            let (phase, message) = if !supported_topology {
+                (
+                    "UnsupportedTopology",
+                    format!(
+                        "requested 1 shard x {desired_replicas_per_shard} replicas with {} voters; Sift requires exactly three durable voters",
+                        instance.settings.voter_count
+                    ),
+                )
+            } else if store_ready >= 3
+                && control_ready >= 3
+                && gateway_ready >= 1
+                && query_ready >= 1
+                && agent_ready >= 1
+            {
+                (
+                    "Ready",
+                    format!(
+                        "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, agent {agent_ready} ready"
+                    ),
+                )
+            } else {
+                (
+                    "Pending",
+                    format!(
+                        "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, agent {agent_ready} ready"
+                    ),
+                )
+            };
+            let restored_phase = if store_ready >= 3 {
+                "Restored"
+            } else if store_ready > 0 {
+                "Restoring"
+            } else {
+                "Requested"
+            };
             (
-                "Pending",
-                format!(
-                    "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, agent {agent_ready} ready"
-                ),
+                phase,
+                message,
+                ready_replicas,
+                desired_replicas_per_shard,
+                u32::from(store_ready >= 2),
+                store_ready.min(3) as u32,
+                restored_phase,
             )
         };
         let (backup_phase, backup_message) = if instance.settings.backup.is_some() {
@@ -124,16 +159,7 @@ impl InstanceService {
             .bootstrap
             .archive_manifest_uri
             .as_deref()
-            .map(|uri| {
-                let restore_phase = if store_ready >= 3 {
-                    "Restored"
-                } else if store_ready > 0 {
-                    "Restoring"
-                } else {
-                    "Requested"
-                };
-                (restore_phase, uri)
-            })
+            .map(|uri| (restored_phase, uri))
             .unwrap_or(("NotRequested", ""));
         json!({
             "status": {
@@ -141,9 +167,9 @@ impl InstanceService {
                 "observedGeneration": instance.generation,
                 "readyReplicas": ready_replicas,
                 "desiredShardCount": 1,
-                "currentShardCount": u32::from(store_ready >= 2),
+                "currentShardCount": current_shards,
                 "desiredReplicasPerShard": desired_replicas_per_shard,
-                "currentReadyReplicasPerShard": store_ready.min(3) as u32,
+                "currentReadyReplicasPerShard": current_per_shard,
                 "backupPhase": backup_phase,
                 "backupMessage": backup_message,
                 "archivePhase": archive_phase,
@@ -234,56 +260,4 @@ impl InstanceService {
             ),
         ]))]
     }
-}
-
-fn single_node_status_patch(instance: &InstanceSpec, ready: &ReadyFacts) -> Value {
-    let name = instance.name.clone();
-    let all_ready = ready.get(&format!("{name}-all")).max(0);
-    let available = all_ready >= 1;
-    let phase = if available { "Ready" } else { "Pending" };
-    let message = format!("all {all_ready}/1 ready");
-    let (backup_phase, backup_message) = if instance.settings.backup.is_some() {
-        (
-            "Configured",
-            "scheduled live backup is configured; execution evidence is reported by its CronJob and destination",
-        )
-    } else {
-        ("NotConfigured", "no scheduled backup requested")
-    };
-    let archive_phase = if instance.settings.archive.is_some() {
-        "Configured"
-    } else {
-        "NotConfigured"
-    };
-    let (restore_phase, restore_source_manifest) = instance
-        .settings
-        .bootstrap
-        .archive_manifest_uri
-        .as_deref()
-        .map(|uri| {
-            let restore_phase = if available { "Restored" } else { "Requested" };
-            (restore_phase, uri)
-        })
-        .unwrap_or(("NotRequested", ""));
-    json!({
-        "status": {
-            "phase": phase,
-            "observedGeneration": instance.generation,
-            "readyReplicas": all_ready,
-            "desiredShardCount": 1,
-            "currentShardCount": u32::from(available),
-            "desiredReplicasPerShard": 1,
-            "currentReadyReplicasPerShard": all_ready.min(1) as u32,
-            "backupPhase": backup_phase,
-            "backupMessage": backup_message,
-            "archivePhase": archive_phase,
-            "archiveWatermark": 0,
-            "lastArchiveManifest": "",
-            "restorePhase": restore_phase,
-            "restoreSourceManifest": restore_source_manifest,
-            "backpressure": "Healthy",
-            "lastDataError": "",
-            "message": message,
-        }
-    })
 }
