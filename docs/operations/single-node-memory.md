@@ -1,0 +1,57 @@
+# Single-node memory: what holds it
+
+Source: the code on `main`, read at the time of this page. The finding that started this page is the load run of #278: peak RSS 1.4 GB at 500 items/s, up to 11.3 GB at 10000 items/s offered, on the GitHub runner, in steps of 180 s. This page is not a GKE claim. No live GKE evidence exists yet.
+
+## Holders
+
+One row per long-lived holder of data in one `serve --role all` process. `Bounded` is `yes` (a byte or fixed-size limit), `count only` (a count of records with no byte bound), or `no`.
+
+| Holder | Bounded | Setting or constant | Where (file:line) |
+|---|---|---|---|
+| Metric memtable, resident chunks | yes | `DEFAULT_METRIC_MEMTABLE_BYTES` = 256 MiB. It is not read from an environment variable or a setting; the only call is `MetricProjection::open` in `src/app/projection_wiring.rs:35`. The charged size is an estimate (see below). | `src/projection/domain/metric.rs:15`; enforced in `src/projection/infrastructure/metric_projection_maintenance.rs:70` |
+| Metric series count | yes | `DEFAULT_METRIC_CARDINALITY_LIMIT` = 10,000 series | `src/projection/domain/metric.rs:16`; checked in `src/projection/infrastructure/metric_projection_apply.rs:105` |
+| Retained points per series | yes | `DEFAULT_RETAINED_POINTS_PER_SERIES` = 100,000 points per series | `src/projection/domain/metric.rs:17`; evicted in `src/projection/infrastructure/metric_projection_maintenance.rs:37` |
+| Sealed chunk metadata, `sealed_chunks` | yes (through the two rows above) | Per series, the retained points limit; per projection, the series count limit | `src/projection/domain/metric_series.rs:33`; removed in `src/projection/infrastructure/metric_projection_maintenance.rs:43` |
+| Rollups in the series state, `rollups` | yes (empty) | No constant. The stored field is created empty (`metric_projection_apply.rs:166`) and cleared on apply. No code adds to the stored field; `rollups.push` builds a local vector for a query. | `src/projection/domain/metric_series.rs:37` |
+| Log records, `records` | count only | `DEFAULT_RETAINED_LOG_RECORDS` = 100,000 records in `src/projection/domain/log.rs:11`. One record's strings are capped by `DEFAULT_MAX_STRING_BYTES` = 4,096 bytes in `src/ingest/domain/governance_policy.rs:15`. The count does not bound bytes; the governance policy truncates each string value to 4,096 bytes (`src/ingest/domain/governance_policy.rs:136`), and I did not trace every record through it. | `src/projection/domain/log.rs:11`; evicted in `src/projection/infrastructure/logging_projection.rs:151` |
+| Log text index, `text_index` | count only | Same count as the log records. Each evicted record is also deleted from the index. | `src/projection/infrastructure/logging_projection.rs:156` |
+| Trace spans, `location_by_cursor` | count only | `DEFAULT_RETAINED_TRACE_SPANS` = 100,000 spans. No byte bound. | `src/projection/domain/trace.rs:11`; evicted in `src/projection/infrastructure/trace_projection.rs:318` |
+| Resident journal events, `recent_events` | count only | `DEFAULT_RESIDENT_JOURNAL_EVENTS` = 100,000 events (`resident_limit`). No byte bound. | `src/journal/domain/journal_limits.rs:3`; evicted in `src/journal/application/recover_journal.rs:238` |
+| WAL events in memory, `events` | count only | Each signal file keeps one decoded batch at most. The byte limit `RAFT_BATCH_MAX_BYTES` applies to the encoded batch (`src/journal/infrastructure/raft/command_codec.rs:61`), not to the decoded events. | `src/journal/infrastructure/storage/wal.rs:38` |
+| Dedupe pending entries | yes | `MAX_PENDING_ENTRIES` = 2 x `BACKGROUND_FLUSH_ENTRIES` = 200,000 entries; each entry is `ENTRY_BYTES` = 48 bytes in `src/journal/infrastructure/storage/dedupe_shard_file.rs:19`. Ingest is refused above the limit (`src/journal/infrastructure/storage/dedupe_append.rs:47`). | `src/journal/infrastructure/storage/dedupe_index.rs:31` |
+| Dedupe generation pending map, `pending` | yes | Bounded by `MAX_PENDING_ENTRIES` (row above) | `src/journal/infrastructure/storage/dedupe_generation_store.rs:34` |
+| Bloom filter | yes | `MAX_BLOOM_BYTES` = 64 MiB | `src/journal/domain/bloom_filter.rs:5` |
+| Raft batch (encoded) | yes | `RAFT_BATCH_MAX_BYTES` = 1,048,576 bytes, on the encoded batch | `src/shared_kernel/raft_batch_limits.rs:5` |
+| Recovery page | yes | `RECOVERY_PAGE_BYTES` = 16 MiB; `RECOVERY_PAGE_EVENTS` = 10,000 events | `src/journal/domain/journal_limits.rs:7` |
+| Segment reader paths, `paths` | no | No constant. One entry for each segment file in the store when the reader opens. | `src/journal/infrastructure/storage/segment_read.rs:16` |
+| One ingest request | yes | `max_compressed_body_bytes` = 1 MiB; `max_decoded_body_bytes` = 8 MiB; `max_event_bytes` = 256 KiB; `max_events_per_batch` = 1,000. Environment variables: `SIFT_MAX_COMPRESSED_BODY_BYTES`, `SIFT_MAX_DECODED_BODY_BYTES`, `SIFT_MAX_EVENT_BYTES`, `SIFT_MAX_EVENTS_PER_BATCH`. | `src/ingest/domain/ingest_limits.rs:21` |
+| Per-project admission state | yes | 65,536 project keys; 32 concurrent requests per project; 720,000 items per 60 s window per project. Environment variables: `SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT`, `SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW`, `SIFT_INGEST_QUOTA_WINDOW_SECS`. | `src/ingest/application/admission_controller.rs:12`; key limit refused at `src/ingest/application/admission_controller.rs:118` |
+| Prometheus series per selector | yes | `PROM_MAX_SERIES` = 1,000 series; a selector that matches more is refused | `src/query/domain/prom_models.rs:6` |
+| `query_range` work | yes | `PROM_MAX_RANGE_WORK_SAMPLES` = 1,000,000 samples (series x evaluation steps); a larger query is refused | `src/query/domain/promql_evaluator.rs:93` |
+| Metric query source bytes | yes | `MAX_METRIC_QUERY_SOURCE_BYTES` = 64 MiB per query | `src/projection/domain/metric.rs:19` |
+| Archive segment cache (disk, not RAM) | yes | `ARCHIVE_CACHE_MAX_BYTES` = 2 GiB of files in the `archive-cache` directory. Older files are removed first. | `src/archive/infrastructure/archive_segment_cache.rs:13`; pruned in `src/archive/infrastructure/archive_segment_cache.rs:87` |
+
+Metric memtable size: `metric_point_memory_bytes` (`src/projection/domain/metric_memory_size.rs:51`) charges the JSON-encoded size of a point (`serde_json::to_vec`, line 56), plus `size_of` terms for exemplars and histogram buckets (lines 59 to 88). It is an estimate, not the allocator's resident size.
+
+The local collections in `src/ingest`, `src/journal`, `src/app` and `src/query` (`Vec::with_capacity`, `HashMap::new`, `BTreeMap::new` and similar) live for one call, one request or one page. Their size is bounded by a limit that already has a row above, so they have no row of their own.
+
+## Does memory go down after ingest stops
+
+No. Nothing in the code releases the holders below when ingest stops. The code keeps what it holds until a later write pushes it over a limit, or until a time-based eviction runs.
+
+- **Metric memtable and series state.** `enforce_memtable_limit` (`src/projection/infrastructure/metric_projection_maintenance.rs:63`) is the only code that writes a resident chunk out to the chunk store. It is called only from the two apply paths (`src/projection/infrastructure/metric_projection_apply.rs:234` and `:315`). `evict_series_to_limit` is called only from the apply path (`src/projection/infrastructure/metric_projection_apply.rs:190`). There is no timer, flush or compaction task for the memtable: the grep `enforce_memtable_limit|fn maintain|interval|tokio::time` in `src/projection` finds only the apply calls and the projection worker tick. The projection worker wakes every 100 ms (`src/projection/interfaces/projection_worker.rs:62`), but a memtable trim needs an apply. With no new events, the resident chunks stay in memory.
+- **Log records and text index.** Records are evicted only in `apply_idempotent`, when a new record makes the count go over `DEFAULT_RETAINED_LOG_RECORDS` (`src/projection/infrastructure/logging_projection.rs:151`). Nothing removes them when ingest stops. I did not trace what a restart does to them.
+- **Trace spans.** Spans are evicted only when a new span makes the count go over `DEFAULT_RETAINED_TRACE_SPANS` (`src/projection/infrastructure/trace_projection.rs:318`), and on snapshot restore (`src/projection/infrastructure/trace_projection.rs:352`). Nothing removes them when ingest stops.
+- **Resident journal events.** A new event evicts the oldest resident event once the count is over the limit (`src/journal/application/recover_journal.rs:238`). A time-based eviction exists: `evict_resident_before` (`src/journal/application/apply_retention_expiration.rs:16`) is called by the archive cold-segment eviction (`src/archive/application/evict_cold_segments.rs:93`), which runs with the archive lifecycle (`src/archive/application/lifecycle_service.rs:98`). I did not read how often that lifecycle runs. It does not run because ingest stopped.
+- **Allocator.** The grep `malloc_trim|jemalloc|mimalloc|shrink_to_fit` over `src`, `Cargo.toml` and `Dockerfile*` finds nothing. The code does not ask the allocator to return freed memory. This page makes no claim about RSS, only about what the code keeps.
+
+## Unbounded holders
+
+- Log records (`src/projection/domain/log.rs:11`) — count only
+- Log text index (`src/projection/infrastructure/logging_projection.rs:156`) — count only
+- Trace spans (`src/projection/domain/trace.rs:11`) — count only
+- Resident journal events (`src/journal/domain/journal_limits.rs:3`) — count only
+- WAL events in memory (`src/journal/infrastructure/storage/wal.rs:38`) — count only
+- Segment reader paths (`src/journal/infrastructure/storage/segment_read.rs:16`) — unbounded. No constant caps the number of segment files.
+- In-flight request bodies over all projects — unbounded. The per-project limits are in the admission row above. No limit caps the total over all projects; `grep -rn "max_concurrent" src` finds only the per-project setting.
+- Concurrent queries — unbounded. `grep -rn "Semaphore\|ConcurrencyLimit\|max_in_flight\|concurrency_limit" src` finds no query concurrency limit.

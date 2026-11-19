@@ -4,6 +4,8 @@
 
 The profile is one `all`-role Pod on one PVC on Standard GKE, installed by the operator with `topology: singleNode` (issues #220 to #222 of #214). It is a small-volume profile for one team. The acceptance run waits for #218 and #220 to #231.
 
+[What holds the memory of one process, and whether it goes down after ingest stops](operations/single-node-memory.md)
+
 ## Promises
 
 - One `all`-role Pod on one PVC on Standard GKE.
