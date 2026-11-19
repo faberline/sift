@@ -14,5 +14,6 @@ pub(crate) mod generic_log_decoder;
 pub(crate) mod metric_queue;
 pub(crate) mod metric_scraper;
 pub(crate) mod multiline_source;
+pub(crate) mod pod_label_watch;
 pub(crate) mod service_log_mapper;
 pub(crate) mod source;
