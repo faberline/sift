@@ -12,6 +12,8 @@ The `all` role is one failure domain. A process restart recovers its WAL and
 projections, but one lost volume loses the local copy. Use GCS archives and
 backups when the recovery point must survive a lost node or disk.
 
+On Kubernetes, `spec.topology: singleNode` runs the `all` role as one Pod on one PVC. See [Single-node operations](single-node.md) for the install, the PVC size and what is lost against the three-voter topology.
+
 ## GKE role topology
 
 One `Sift` resource renders these workloads:
