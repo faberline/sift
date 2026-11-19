@@ -339,4 +339,23 @@ mod tests {
         double_slash["metadata"]["annotations"]["prometheus.io/path"] = json!("//x");
         assert!(scrape_target(&pod(double_slash), "n1").is_none());
     }
+
+    fn two_container_pod() -> Pod {
+        pod(json!({"metadata":{"name":"p","uid":"u1","namespace":"a"},"spec":{"nodeName":"n1","containers":[{"name":"app","ports":[{"containerPort":8080}]},{"name":"metrics","ports":[{"containerPort":9090}]}]}}))
+    }
+
+    #[test]
+    fn container_for_port_returns_the_container_that_owns_the_port() {
+        let pod = two_container_pod();
+        assert_eq!(container_for_port(&pod, 9090), Some("metrics".to_string()));
+        assert_eq!(container_for_port(&pod, 8080), Some("app".to_string()));
+    }
+
+    #[test]
+    fn container_for_port_returns_none_when_no_container_declares_the_port() {
+        let pod = two_container_pod();
+        assert!(container_for_port(&pod, 7000).is_none());
+        let no_ports = pod(base_pod());
+        assert!(container_for_port(&no_ports, 8080).is_none());
+    }
 }
