@@ -192,6 +192,7 @@ jobs:
         run: |
           python3 -B scripts/test_single_node_operations_doc.py -v
           python3 -B scripts/test_single_node_doc.py -v
+          python3 -B scripts/test_release_profiles_doc.py -v
 
   test-coverage:
     name: "test: workspace, coverage"
