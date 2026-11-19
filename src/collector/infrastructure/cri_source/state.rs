@@ -124,6 +124,26 @@ impl CriSource {
             entry.workload = file.workload.clone();
             entry.birth_nanos = file.birth_nanos;
             entry.retired = false;
+            if let Some(held) = self.held.get_mut(&file.identity) {
+                held.idle_refreshes = 0;
+                held.discovered = file.clone();
+            } else if let Some(handle) = File::open(&file.path).ok().filter(|handle| {
+                handle
+                    .metadata()
+                    .ok()
+                    .and_then(|metadata| file_identity(&metadata).ok())
+                    .is_some_and(|identity| identity == file.physical_identity)
+            }) {
+                self.held.insert(
+                    file.identity.clone(),
+                    HeldFile {
+                        file: handle,
+                        discovered: file.clone(),
+                        idle_refreshes: 0,
+                        last_offset: entry.offset,
+                    },
+                );
+            }
             self.read_positions
                 .entry(file.identity.clone())
                 .or_insert_with(|| ReadPosition {
@@ -134,11 +154,61 @@ impl CriSource {
                 });
         }
 
+        // A file that is gone but still held is read through its handle. It is
+        // retired once the handle has no unread bytes, and released after
+        // MAX_IDLE_REFRESHES refreshes without progress.
+        let vanished: Vec<String> = self
+            .held
+            .keys()
+            .filter(|identity| !present.contains(*identity))
+            .cloned()
+            .collect();
+        for identity in vanished {
+            let Some(file) = self.checkpoint.files.get_mut(&identity) else {
+                self.held.remove(&identity);
+                continue;
+            };
+            if file.retired || !file.workload.in_namespaces(&self.config.namespaces) {
+                self.held.remove(&identity);
+                continue;
+            }
+            let Some(held) = self.held.get_mut(&identity) else {
+                continue;
+            };
+            file.observed_len = file.observed_len.max(held.file.metadata()?.len());
+            if file.offset >= file.observed_len {
+                file.retired = true;
+                self.held.remove(&identity);
+                continue;
+            }
+            if file.offset == held.last_offset {
+                held.idle_refreshes += 1;
+            } else {
+                held.last_offset = file.offset;
+                held.idle_refreshes = 0;
+            }
+            if held.idle_refreshes >= MAX_IDLE_REFRESHES {
+                self.held.remove(&identity);
+            }
+            self.read_positions
+                .entry(identity.clone())
+                .or_insert_with(|| ReadPosition {
+                    offset: file.offset,
+                    line: file.line,
+                    anchor: file.anchor.clone(),
+                    generation: file.generation,
+                });
+        }
+
         for (identity, file) in &mut self.checkpoint.files {
             if !file.workload.in_namespaces(&self.config.namespaces) {
                 continue;
             }
-            if present.contains(identity) || file.retired || self.staged_losses.contains(identity) {
+            if present.contains(identity)
+                || file.retired
+                || self.staged_losses.contains(identity)
+                || self.held.contains_key(identity)
+            {
                 continue;
             }
             let lost_bytes = file.observed_len.saturating_sub(file.offset);
@@ -173,6 +243,20 @@ impl CriSource {
                 &right.identity,
             ))
         });
+        // Held files that are gone come after the present ones, in a fixed order.
+        let mut vanished_held: Vec<DiscoveredFile> = self
+            .held
+            .iter()
+            .filter(|(identity, _)| !present.contains(*identity))
+            .map(|(_, held)| DiscoveredFile {
+                known_before: true,
+                ..held.discovered.clone()
+            })
+            .collect();
+        vanished_held.sort_by(|left, right| {
+            (&left.relative_path, &left.identity).cmp(&(&right.relative_path, &right.identity))
+        });
+        discovered.extend(vanished_held);
         self.discovered = discovered;
         self.checkpoint.save(&self.checkpoint_path)
     }
