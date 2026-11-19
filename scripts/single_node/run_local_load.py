@@ -2,7 +2,7 @@
 
 This measures one machine. It is not a GKE or production claim.
 """
-import argparse, concurrent.futures, http.client, json, math, os, socket, subprocess, sys, time, uuid
+import argparse, concurrent.futures, datetime, http.client, json, math, os, socket, subprocess, sys, time, uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'production'))
@@ -10,6 +10,23 @@ from load_data import build  # noqa: E402
 from load_client import Api  # noqa: E402
 
 DEFAULT_RATES = '500,1000,2500,5000,10000'
+QUERY_DEADLINE_SECONDS = 30
+MAX_LOG_PAGES = 20
+STARTUP_SECONDS = 30
+SHUTDOWN_SECONDS = 20
+
+
+def say(message):
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%SZ')
+    print(stamp + ' ' + message, flush=True)
+
+
+def designed_seconds(step_count, step_seconds):
+    return step_count * (step_seconds + QUERY_DEADLINE_SECONDS + 5) + STARTUP_SECONDS + SHUTDOWN_SECONDS
+
+
+def over_budget(elapsed, step_seconds, max_seconds):
+    return elapsed + step_seconds + QUERY_DEADLINE_SECONDS + 5 > max_seconds
 
 
 def percentile(values):
@@ -89,8 +106,10 @@ def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, d
     before = directory_bytes(data_dir)
     cpu0 = process_usage(pid)['cpu_seconds']
     start = time.monotonic()
-    accepted = rejected = errored = query_errors = 0
+    accepted = rejected = errored = query_errors = queries_skipped = 0
     send_times = []
+    query_future = None
+    say('step start rate=%d seconds=%d' % (rate, seconds))
 
     def send_one(batch):
         began = time.monotonic()
@@ -106,7 +125,6 @@ def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, d
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as query_pool, \
             concurrent.futures.ThreadPoolExecutor(max_workers=12) as send_pool:
-        pending_queries = []
         for second in range(seconds):
             delay = start + second - time.monotonic()
             if delay > 0:
@@ -123,10 +141,17 @@ def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, d
                 else:
                     errored += count
             if second % 5 == 4:
-                pending_queries.append(query_pool.submit(
-                    _queries, api, block['start_nanos'], block['end_nanos'], run))
-        for future in pending_queries:
-            query_errors += future.result()
+                if query_future is None or query_future.done():
+                    if query_future is not None:
+                        query_errors += query_future.result()
+                    query_future = query_pool.submit(
+                        _queries, api, block['start_nanos'], block['end_nanos'], run)
+                else:
+                    queries_skipped += 1
+        say('drain start rate=%d' % rate)
+        if query_future is not None:
+            query_errors += query_future.result()
+        say('drain end rate=%d' % rate)
 
     after = directory_bytes(data_dir)
     usage = process_usage(pid)
@@ -135,6 +160,7 @@ def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, d
         cpu_seconds = usage['cpu_seconds'] - cpu0
     ordered = sorted(send_times)
     p50 = ordered[len(ordered) // 2] if ordered else None
+    say('step end rate=%d accepted=%d rejected=%d errors=%d' % (rate, accepted, rejected, errored))
     return {
         'rate': rate,
         'seconds': seconds,
@@ -147,6 +173,7 @@ def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, d
         'log_query_p95_seconds': percentile(api.timings['logs']),
         'metric_query_p95_seconds': percentile(api.timings['metrics']),
         'query_errors': query_errors,
+        'queries_skipped': queries_skipped,
         'cpu_seconds': cpu_seconds,
         'peak_rss_bytes': usage['peak_rss_bytes'],
         'disk_bytes_added': after - before,
@@ -157,8 +184,14 @@ def run_step(api, run, environment, rate, seconds, templates, base_nanos, pid, d
 def _queries(api, start, end, run):
     """Run one log query and one metric query for a second; return how many failed."""
     failed = 0
+    deadline = time.monotonic() + QUERY_DEADLINE_SECONDS
     try:
-        api.query('logs', start, end, run=run)
+        pages = 0
+        for _page in api.log_pages(start, end, run):
+            pages += 1
+            if pages > MAX_LOG_PAGES or time.monotonic() > deadline:
+                failed += 1
+                break
     except ValueError:
         failed += 1
     try:
@@ -196,6 +229,19 @@ def start_server(sift_bin, data_dir, log_path):
         time.sleep(0.2)
 
 
+def build_result(sift_bin_name, step_seconds, data_dir, steps, complete, last_phase):
+    return {
+        'kind': 'single-node-local-load',
+        'claim': 'measured on this machine, not a GKE claim',
+        'machine': machine_shape(data_dir),
+        'sift_bin': sift_bin_name,
+        'step_seconds': step_seconds,
+        'steps': steps,
+        'complete': complete,
+        'last_phase': last_phase,
+    }
+
+
 def _rates(text):
     rates = [int(part) for part in text.split(',') if part.strip()]
     return rates
@@ -208,6 +254,7 @@ def main(argv=None):
     parser.add_argument('--rates', default=DEFAULT_RATES)
     parser.add_argument('--step-seconds', type=int, default=180)
     parser.add_argument('--templates', type=Path)
+    parser.add_argument('--max-seconds', type=int, default=2400)
     args = parser.parse_args(argv)
 
     try:
@@ -234,9 +281,17 @@ def main(argv=None):
     process = None
     api = None
     steps = []
+    stopped_phase = 'no step done'
+    started = time.monotonic()
     try:
+        say('server start')
         process, port = start_server(args.sift_bin, data_dir, log_path)
+        say('server ready port=%d' % port)
         for rate in rates:
+            if over_budget(time.monotonic() - started, args.step_seconds, args.max_seconds):
+                say('stop before rate=%d: time budget' % rate)
+                stopped_phase = 'stopped before rate %d: time budget' % rate
+                break
             run = uuid.uuid4().hex
             base_nanos = time.time_ns()
             api = Api('http://127.0.0.1:%d' % port, 'single-node-load')
@@ -246,6 +301,9 @@ def main(argv=None):
             finally:
                 api.close()
                 api = None
+            partial = build_result(args.sift_bin.name, args.step_seconds, data_dir, steps, False,
+                                   'step %d of %d done' % (len(steps), len(rates)))
+            (args.output_dir / 'result.json').write_text(json.dumps(partial, indent=2) + '\n')
     finally:
         if process is not None:
             process.terminate()
@@ -257,16 +315,12 @@ def main(argv=None):
         if api is not None:
             api.close()
 
-    result = {
-        'kind': 'single-node-local-load',
-        'claim': 'measured on this machine, not a GKE claim',
-        'machine': machine_shape(data_dir),
-        'sift_bin': args.sift_bin.name,
-        'step_seconds': args.step_seconds,
-        'steps': steps,
-    }
+    complete = len(steps) == len(rates)
+    result = build_result(args.sift_bin.name, args.step_seconds, data_dir, steps, complete,
+                          'all steps done' if complete else stopped_phase)
     path = args.output_dir / 'result.json'
     path.write_text(json.dumps(result, indent=2) + '\n')
+    say('result written')
     print(path)
     return 0
 
