@@ -91,6 +91,19 @@ fn crd_schema_lists_topology() {
 }
 
 #[test]
+fn crd_schema_lists_metrics_namespaces() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let namespaces = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+        ["spec"]["properties"]["metrics"]["properties"]["namespaces"];
+    assert_eq!(namespaces["type"], "array");
+    assert_eq!(namespaces["maxItems"], 32);
+    assert_eq!(
+        namespaces["items"]["pattern"],
+        "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    );
+}
+
+#[test]
 fn crd_schema_lists_log_namespaces() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let namespaces = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
