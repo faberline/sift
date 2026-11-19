@@ -40,7 +40,7 @@ spec:
 `20Gi` is an example value, not a recommendation. The fields of the `ha`
 topology are not set here.
 
-## Run on a tainted node pool
+### Run on a tainted node pool
 
 When the Pod must run on a node pool with a taint, set the pool's label in
 `placement.nodeSelector`, a matching toleration in `placement.tolerations` and
