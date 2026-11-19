@@ -53,6 +53,7 @@ impl From<&Sift> for InstanceSpec {
                 logs: InstanceLogs {
                     namespaces: spec.logs.namespaces.clone(),
                 },
+                retention_days: spec.retention_days,
                 metrics: InstanceMetrics {
                     namespaces: spec.metrics.namespaces.clone(),
                 },
@@ -115,6 +116,18 @@ mod tests {
         .unwrap();
         let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
         assert_eq!(settings.logs.namespaces, vec!["team-a".to_string()]);
+    }
+
+    #[test]
+    fn retention_days_reaches_the_instance_settings() {
+        let spec: SiftSpec = serde_json::from_value(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls",
+            "retentionDays": 30
+        }))
+        .unwrap();
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(settings.retention_days, 30);
     }
 
     #[test]

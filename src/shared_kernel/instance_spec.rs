@@ -26,6 +26,7 @@ pub(crate) struct InstanceSettings {
     pub auth: InstanceAuth,
     pub topology: InstanceTopology,
     pub logs: InstanceLogs,
+    pub retention_days: u32,
     pub metrics: InstanceMetrics,
     pub tokens_secret: Option<String>,
     pub backup: Option<InstanceBackup>,

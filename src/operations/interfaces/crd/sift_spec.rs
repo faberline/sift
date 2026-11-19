@@ -46,6 +46,9 @@ pub struct SiftSpec {
     pub topology: Topology,
     #[serde(default)]
     pub logs: LogsSpec,
+    /// Days of events Sift keeps and accepts, 1 to 180. The CRD schema enforces the range.
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
     #[serde(default)]
     pub metrics: MetricsSpec,
     #[serde(default)]
@@ -194,6 +197,10 @@ fn three() -> u32 {
     3
 }
 
+fn default_retention_days() -> u32 {
+    180
+}
+
 #[cfg(test)]
 mod tests {
     use super::{SiftSpec, Topology};
@@ -245,5 +252,16 @@ mod tests {
     fn metrics_namespaces_are_read() {
         let spec = spec_with(r#""metrics":{"namespaces":["team-a","team-b"]}"#).unwrap();
         assert_eq!(spec.metrics.namespaces, ["team-a", "team-b"]);
+    }
+
+    #[test]
+    fn retention_days_default_is_180() {
+        assert_eq!(spec_with("").unwrap().retention_days, 180);
+    }
+
+    #[test]
+    fn retention_days_is_read() {
+        let spec = spec_with(r#""retentionDays":30"#).unwrap();
+        assert_eq!(spec.retention_days, 30);
     }
 }

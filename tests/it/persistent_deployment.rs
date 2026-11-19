@@ -178,10 +178,20 @@ fn every_operator_role_uses_the_common_private_persistent_root() {
         assert!(script.contains("chmod 0700 /var/lib/sift"));
         let container = &pod["containers"][0];
         assert_eq!(container["volumeMounts"][0]["mountPath"], "/var/lib/sift");
-        assert_eq!(
-            container["args"],
+        let expected_args = if matches!(role, "store" | "control") {
+            json!([
+                "serve",
+                "--role",
+                role,
+                "--data-dir",
+                "/var/lib/sift",
+                "--retention-days",
+                "180"
+            ])
+        } else {
             json!(["serve", "--role", role, "--data-dir", "/var/lib/sift"])
-        );
+        };
+        assert_eq!(container["args"], expected_args);
         if kind == "StatefulSet" {
             assert_eq!(
                 workload["spec"]["volumeClaimTemplates"][0]["metadata"]["name"],
