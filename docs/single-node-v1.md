@@ -52,7 +52,7 @@ Every gate is **not run**. No live GKE evidence exists yet.
 
 **Hundreds of Pods in several namespaces: is anything needed beyond the namespace lists?** **Yes**, with this evidence:
 
-- The render passes one namespace, the namespace of the `Sift` object (`cx.ns()`), to both agents (`src/operations/infrastructure/k8s/agent_workloads.rs` and `src/operations/infrastructure/k8s/metrics_agent.rs`). Both agents already take a comma-separated list (`value_delimiter = ','` in `src/bin/sift/collect.rs` and `src/bin/sift/scrape.rs`), but the render does not pass a list on `main`; #224 and #227 add it.
+- The log agent render passes the list `spec.logs.namespaces` (`log_namespaces(cx, spec)` in `src/operations/infrastructure/k8s/agent_workloads.rs`); an empty list keeps the namespace of the `Sift` object. The metric agent render still passes one namespace, `cx.ns()` (`src/operations/infrastructure/k8s/metrics_agent.rs`); #227 adds the list. Both agents already take a comma-separated list (`value_delimiter = ','` in `src/bin/sift/collect.rs` and `src/bin/sift/scrape.rs`).
 - The metric agent scrapes the Pods of its node one after another (`src/collector/infrastructure/metric_scraper.rs`), so one round takes the sum of the Pod scrape times. For many Pods on one node that sum can exceed the 30 s interval. This follows from the loop; no number is given.
 - A Pod needs both the annotation `prometheus.io/scrape` = `true` and the label `sift.axiom.dev/scrape` = `true` (`src/collector/infrastructure/metric_scraper.rs`), so a namespace list alone does not select Pods.
 

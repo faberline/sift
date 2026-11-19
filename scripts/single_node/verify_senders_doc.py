@@ -62,6 +62,7 @@ FACTS = [
     (SCRAPER, 'config.interval.min(Duration::from_secs(30))'),
     (METRIC_QUEUE, '64 * 1024 * 1024'),
     (AGENT, '"--namespace".into()'),
+    (AGENT, 'log_namespaces(cx, spec)'),
     (METRICS_AGENT, '"--namespace",'),
     (COLLECT, "value_delimiter = ','"),
     (SCRAPE, "value_delimiter = ','"),
