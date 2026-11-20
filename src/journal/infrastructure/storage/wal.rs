@@ -20,11 +20,13 @@ pub struct SignalWal {
     logs: WalFile,
     metrics: WalFile,
     traces: WalFile,
+    max_decoded_bytes: usize,
 }
 
 /// Stateful, globally ordered reader over the three signal WAL files.
 ///
-/// Each file keeps one decoded Raft batch at most. Repeated pages continue
+/// Each file keeps one decoded Raft batch at most. A batch whose decoded events
+/// pass SIFT_WAL_DECODED_BYTES is refused. Repeated pages continue
 /// from the current byte offsets instead of rescanning the WAL prefix.
 pub struct SignalWalReader {
     streams: Vec<WalEventStream>,
@@ -37,6 +39,7 @@ struct WalEventStream {
     frames: storage_durable::FramedLogCursor,
     events: VecDeque<StoredEvent>,
     after: u64,
+    max_decoded_bytes: usize,
 }
 
 struct WalFile {
@@ -46,6 +49,8 @@ struct WalFile {
 }
 
 const WAL_BATCH_FORMAT_VERSION: u16 = 1;
+
+pub(crate) const DEFAULT_WAL_DECODED_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -59,11 +64,22 @@ struct WalBatch {
 impl SignalWal {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().join("wal");
+        let max_decoded_bytes = decoded_bytes_from_env()?;
         Ok(Self {
             logs: WalFile::open(&root, "logs", SignalKind::Log)?,
             metrics: WalFile::open(&root, "metrics", SignalKind::Metric)?,
             traces: WalFile::open(&root, "traces", SignalKind::Span)?,
+            max_decoded_bytes,
         })
+    }
+
+    #[cfg(test)]
+    fn with_max_decoded_bytes(mut self, bytes: usize) -> Result<Self> {
+        if bytes == 0 {
+            bail!("SIFT_WAL_DECODED_BYTES must be a positive integer");
+        }
+        self.max_decoded_bytes = bytes;
+        Ok(self)
     }
 
     pub fn append(&self, event: &StoredEvent) -> Result<()> {
@@ -105,7 +121,14 @@ impl SignalWal {
     pub fn reader(&self, after: u64) -> Result<SignalWalReader> {
         let streams = [&self.logs, &self.metrics, &self.traces]
             .into_iter()
-            .map(|file| WalEventStream::open(file.signal, file.path.clone(), after))
+            .map(|file| {
+                WalEventStream::open(
+                    file.signal,
+                    file.path.clone(),
+                    after,
+                    self.max_decoded_bytes,
+                )
+            })
             .collect::<Result<Vec<_>>>()?;
         Ok(SignalWalReader {
             peeked: vec![None; streams.len()],
@@ -193,13 +216,19 @@ impl SignalWalReader {
 }
 
 impl WalEventStream {
-    fn open(signal: SignalKind, path: PathBuf, after: u64) -> Result<Self> {
+    fn open(
+        signal: SignalKind,
+        path: PathBuf,
+        after: u64,
+        max_decoded_bytes: usize,
+    ) -> Result<Self> {
         Ok(Self {
             signal,
             frames: storage_durable::FramedLogCursor::open(&path)?,
             path,
             events: VecDeque::new(),
             after,
+            max_decoded_bytes,
         })
     }
 
@@ -218,6 +247,15 @@ impl WalEventStream {
             let batch: WalBatch = serde_json::from_slice(frame.payload())
                 .with_context(|| format!("decode signal WAL batch frame {}", frame.seq()))?;
             validate_batch(self.signal, &self.path, frame.seq(), &batch)?;
+            let decoded = decoded_batch_bytes(&batch.events);
+            if decoded > self.max_decoded_bytes {
+                bail!(
+                    "signal WAL batch {}..{} decodes to {decoded} bytes, over SIFT_WAL_DECODED_BYTES = {}",
+                    batch.first_cursor,
+                    batch.last_cursor,
+                    self.max_decoded_bytes
+                );
+            }
             self.events = batch.events.into();
         }
     }
@@ -336,6 +374,34 @@ impl WalFile {
     }
 }
 
+/// The JSON size of the events of one decoded batch: what the byte bound counts.
+fn decoded_batch_bytes(events: &[StoredEvent]) -> usize {
+    events.iter().fold(0_usize, |total, event| {
+        total.saturating_add(
+            serde_json::to_vec(event)
+                .map(|bytes| bytes.len())
+                .unwrap_or(0),
+        )
+    })
+}
+
+fn decoded_bytes_from_env() -> Result<usize> {
+    bytes_from(std::env::var("SIFT_WAL_DECODED_BYTES").ok().as_deref())
+}
+
+fn bytes_from(value: Option<&str>) -> Result<usize> {
+    let Some(text) = value else {
+        return Ok(DEFAULT_WAL_DECODED_BYTES);
+    };
+    let bytes: usize = text
+        .parse()
+        .context("SIFT_WAL_DECODED_BYTES must be a positive integer")?;
+    if bytes == 0 {
+        bail!("SIFT_WAL_DECODED_BYTES must be a positive integer");
+    }
+    Ok(bytes)
+}
+
 fn validate_batch(
     signal: SignalKind,
     path: &Path,
@@ -378,4 +444,114 @@ fn validate_batch(
         bail!("signal WAL {} contains the wrong signal", path.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod wal_decoded_tests {
+    use super::*;
+
+    fn stored(cursor: u64, pad: usize) -> StoredEvent {
+        let mut event = crate::EventEnvelope::for_project(
+            "p",
+            "prod",
+            format!("e{cursor}"),
+            SignalKind::Log,
+            serde_json::json!({"message": "x".repeat(pad)}),
+        );
+        event.resource =
+            std::collections::BTreeMap::from([("service.name".to_string(), "svc".to_string())]);
+        StoredEvent {
+            cursor,
+            acknowledged_at: event.observed_at.clone(),
+            event,
+        }
+    }
+
+    fn three_events() -> Vec<StoredEvent> {
+        vec![stored(1, 1000), stored(2, 1000), stored(3, 1000)]
+    }
+
+    #[test]
+    fn batch_over_the_bound_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = three_events();
+        let size = decoded_batch_bytes(&events);
+        let wal = SignalWal::open(dir.path())
+            .unwrap()
+            .with_max_decoded_bytes(size - 1)
+            .unwrap();
+        wal.append_batch(&events).unwrap();
+        let mut reader = wal.reader(0).unwrap();
+        let error = reader.read_page(10, 1 << 20).unwrap_err().to_string();
+        assert!(error.contains("SIFT_WAL_DECODED_BYTES"), "{error}");
+        assert!(error.contains("1..3"), "{error}");
+        assert!(error.contains(&size.to_string()), "{error}");
+        assert!(error.contains(&(size - 1).to_string()), "{error}");
+    }
+
+    #[test]
+    fn batch_at_the_bound_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = three_events();
+        let size = decoded_batch_bytes(&events);
+        let wal = SignalWal::open(dir.path())
+            .unwrap()
+            .with_max_decoded_bytes(size)
+            .unwrap();
+        wal.append_batch(&events).unwrap();
+        let mut reader = wal.reader(0).unwrap();
+        let page = reader.read_page(10, 1 << 20).unwrap();
+        let cursors: Vec<u64> = page.iter().map(|event| event.cursor).collect();
+        assert_eq!(cursors, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn batch_reads_with_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = three_events();
+        let wal = SignalWal::open(dir.path()).unwrap();
+        wal.append_batch(&events).unwrap();
+        let mut reader = wal.reader(0).unwrap();
+        let page = reader.read_page(10, 1 << 20).unwrap();
+        assert_eq!(page.len(), 3);
+    }
+
+    #[test]
+    fn one_event_batches_are_each_charged() {
+        let dir = tempfile::tempdir().unwrap();
+        let limit = decoded_batch_bytes(&[stored(1, 1000)]);
+        let wal = SignalWal::open(dir.path())
+            .unwrap()
+            .with_max_decoded_bytes(limit)
+            .unwrap();
+        for cursor in 1..=3 {
+            wal.append_batch(&[stored(cursor, 1000)]).unwrap();
+        }
+        let mut reader = wal.reader(0).unwrap();
+        let page = reader.read_page(10, 1 << 20).unwrap();
+        assert_eq!(page.len(), 3);
+    }
+
+    #[test]
+    fn zero_bound_is_refused_by_the_builder() {
+        let dir = tempfile::tempdir().unwrap();
+        let wal = SignalWal::open(dir.path()).unwrap();
+        assert!(wal.with_max_decoded_bytes(0).is_err());
+    }
+
+    #[test]
+    fn bytes_from_reads_the_setting() {
+        assert_eq!(bytes_from(None).unwrap(), 67_108_864);
+        assert_eq!(bytes_from(Some("4096")).unwrap(), 4096);
+        assert!(bytes_from(Some("0")).is_err());
+        assert!(bytes_from(Some("abc")).is_err());
+        assert!(bytes_from(Some("-1")).is_err());
+    }
+
+    #[test]
+    fn decoded_bytes_from_env_defaults_without_the_variable() {
+        if std::env::var("SIFT_WAL_DECODED_BYTES").is_err() {
+            assert_eq!(decoded_bytes_from_env().unwrap(), DEFAULT_WAL_DECODED_BYTES);
+        }
+    }
 }

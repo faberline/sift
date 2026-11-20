@@ -453,6 +453,7 @@ Variables are read at run time unless the row says otherwise. A name in backtick
 | `SIFT_MAX_CONCURRENT_QUERIES` | `sift serve` | 64 | Queries on the data-plane query routes that run at once; a query over the limit gets 429. |
 | `SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW` | `sift serve`; CRD `spec.ingest.maxItemsPerMinute` | 720000 | Items one project may send in one quota window. |
 | `SIFT_INGEST_QUOTA_WINDOW_SECS` | `sift serve` | 60 | Length of the quota window, in seconds. |
+| `SIFT_WAL_DECODED_BYTES` | `sift serve` | 67108864 | Most bytes of events (the JSON size of each event) in one decoded signal WAL batch. A batch over the limit is refused when the WAL is read, and the journal does not open until the limit is raised. The encoded limit of one replicated batch is 1048576 bytes (RAFT_BATCH_MAX_BYTES); a restore page can be larger, up to 16 MiB plus one event. |
 | `SIFT_MAX_LOCAL_STORAGE_BYTES` | `sift serve` | 53687091200 | Local storage limit, in bytes (50 GiB). |
 | `SIFT_MIN_LOCAL_FREE_BYTES` | `sift serve` | 1073741824 | Free disk space that must remain, in bytes (1 GiB). |
 
