@@ -26,6 +26,8 @@ One row per long-lived holder of data in one `serve --role all` process. `Bounde
 | Segment reader paths, `paths` | yes | `SEGMENT_READER_MAX_PATHS` = 1,024 paths held at once. The reader loads the next page of paths when its queue is empty (`next_page`). `query_events` and `recovered_events` still collect every path during one call, and are not counted here. | `src/journal/infrastructure/storage/segment_read.rs:21` |
 | One ingest request | yes | `max_compressed_body_bytes` = 1 MiB; `max_decoded_body_bytes` = 8 MiB; `max_event_bytes` = 256 KiB; `max_events_per_batch` = 1,000. Environment variables: `SIFT_MAX_COMPRESSED_BODY_BYTES`, `SIFT_MAX_DECODED_BODY_BYTES`, `SIFT_MAX_EVENT_BYTES`, `SIFT_MAX_EVENTS_PER_BATCH`. | `src/ingest/domain/ingest_limits.rs:21` |
 | Per-project admission state | yes | 65,536 project keys; 32 concurrent requests per project; 720,000 items per 60 s window per project. Environment variables: `SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT`, `SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW`, `SIFT_INGEST_QUOTA_WINDOW_SECS`. | `src/ingest/application/admission_controller.rs:12`; key limit refused at `src/ingest/application/admission_controller.rs:118` |
+| In-flight request bodies over all projects | yes | `max_inflight_body_bytes` = 128 MiB, counted on the decoded body of OTLP/HTTP and remote write requests; the OTLP/gRPC path is not counted. Environment variable: `SIFT_MAX_INFLIGHT_BODY_BYTES`. | `src/ingest/application/admission_controller.rs:38` |
+| Concurrent queries | yes | `max_concurrent_queries` = 64 on the data-plane query routes. Environment variable: `SIFT_MAX_CONCURRENT_QUERIES`. | `src/app/interfaces/http/query_limit.rs:11` |
 | Prometheus series per selector | yes | `PROM_MAX_SERIES` = 1,000 series; a selector that matches more is refused | `src/query/domain/prom_models.rs:6` |
 | `query_range` work | yes | `PROM_MAX_RANGE_WORK_SAMPLES` = 1,000,000 samples (series x evaluation steps); a larger query is refused | `src/query/domain/promql_evaluator.rs:93` |
 | Metric query source bytes | yes | `MAX_METRIC_QUERY_SOURCE_BYTES` = 64 MiB per query | `src/projection/domain/metric.rs:19` |
@@ -49,5 +51,3 @@ No. Nothing in the code releases the holders below when ingest stops. The code k
 
 - Resident journal events (`src/journal/domain/journal_limits.rs:3`) — count only
 - WAL events in memory (`src/journal/infrastructure/storage/wal.rs:38`) — count only
-- In-flight request bodies over all projects — unbounded. The per-project limits are in the admission row above. No limit caps the total over all projects; `grep -rn "max_concurrent" src` finds only the per-project setting.
-- Concurrent queries — unbounded. `grep -rn "Semaphore\|ConcurrencyLimit\|max_in_flight\|concurrency_limit" src` finds no query concurrency limit.

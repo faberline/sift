@@ -27,12 +27,32 @@ use crate::query::interfaces::mcp::mcp_transport::http_router;
 /// Build Sift's data-plane routes. Probe/admin routes are intentionally added
 /// by `service-http` so all k8s-native services have the same shape.
 pub fn router(state: Arc<ServiceState>) -> Router {
-    Router::new()
+    // The query routes share one concurrency limit; ingest and admin routes do not.
+    let queries = Router::new()
         .route("/api/v1/query", post(query_v1))
         .route(
             "/api/v2/query",
             post(crate::query::interfaces::http::query_v2::query_v2),
         )
+        .route("/api/v1/logs/tail", post(tail_logs_v1))
+        .route("/api/v1/traces/{trace_id}", get(get_trace))
+        .route("/v1/traces/{id}", get(get_trace))
+        .route("/api/v1/correlate", post(correlate_v1))
+        .route("/api/v1/services", get(list_services_v1))
+        .route("/api/v1/queries/{query_id}", get(get_query_job_v1))
+        .route(
+            "/prometheus/api/v1/query",
+            get(prometheus_instant_query).post(prometheus_instant_query),
+        )
+        .route(
+            "/prometheus/api/v1/query_range",
+            get(prometheus_range_query).post(prometheus_range_query),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            super::query_limit::limit_queries,
+        ));
+    Router::new()
         .route("/api/v1/recovery/data", post(super::recovery::capture))
         .route(
             "/api/v1/saved-queries",
@@ -68,26 +88,13 @@ pub fn router(state: Arc<ServiceState>) -> Router {
             axum::routing::put(crate::control::interfaces::http::put_saved_query)
                 .delete(crate::control::interfaces::http::delete_saved_query),
         )
-        .route("/api/v1/logs/tail", post(tail_logs_v1))
-        .route("/api/v1/traces/{trace_id}", get(get_trace))
-        .route("/v1/traces/{id}", get(get_trace))
-        .route("/api/v1/correlate", post(correlate_v1))
-        .route("/api/v1/services", get(list_services_v1))
-        .route("/api/v1/queries/{query_id}", get(get_query_job_v1))
         .route("/prometheus/api/v1/write", post(prometheus_remote_write))
-        .route(
-            "/prometheus/api/v1/query",
-            get(prometheus_instant_query).post(prometheus_instant_query),
-        )
-        .route(
-            "/prometheus/api/v1/query_range",
-            get(prometheus_range_query).post(prometheus_range_query),
-        )
         .route("/v1/logs", post(ingest_logs))
         .route("/v1/traces", post(ingest_traces))
         .route("/v1/metrics", post(ingest_metrics))
         .route("/admin/backup", get(admin_backup))
         .route("/admin/integrity", get(admin_integrity))
+        .merge(queries)
         .with_state(state)
 }
 
