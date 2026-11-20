@@ -141,6 +141,9 @@ class SingleNodeWorkflowTest(unittest.TestCase):
             "data-sift-all-0",
             "ProvisioningFailed",
             "sift-all-0",
+            "phases.py",
+            "timeout",
+            "EVIDENCE_DIR",
         ]:
             self.assertIn(needle, text)
         self.assertNotIn("gcloud", text)
@@ -148,6 +151,12 @@ class SingleNodeWorkflowTest(unittest.TestCase):
             self.skipTest("bash is not installed")
         result = subprocess.run(["bash", "-n", str(ROOT / path)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_phases_script_exists_and_is_stdlib(self):
+        text = self.read("scripts/single_node/acceptance/phases.py")
+        self.assertIn("PHASES = ('load_30m', 'load_24h', 'faults', 'comparison')", text)
+        self.assertNotIn("import requests", text)
+        self.assertNotIn("import yaml", text)
 
     def test_ci_runs_this_test(self):
         self.assertIn(
