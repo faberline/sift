@@ -47,3 +47,5 @@ kubectl get pod <pod> --show-labels
 ```
 
 For the query endpoint and how to check that metrics arrive, see [install.md](install.md).
+
+To collect the logs of the same Deployment too, see [log-and-metrics-labels.md](log-and-metrics-labels.md).
