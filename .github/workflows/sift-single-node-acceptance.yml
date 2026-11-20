@@ -33,6 +33,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      cap_usd: ${{ steps.cap.outputs.cap_usd }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,6 +48,13 @@ jobs:
           hourly=$(jq -r .config_values.estimated_hourly_cost_usd "$RUNNER_TEMP/cost.json")
           fixed=$(jq -r .config_values.estimated_fixed_cost_usd "$RUNNER_TEMP/cost.json")
           python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$fixed" --hourly-usd "$hourly" --hours-left 5
+      - name: checked cap
+        id: cap
+        env:
+          CAP: ${{ inputs.cost_cap_usd }}
+        run: |
+          set -euo pipefail
+          echo "cap_usd=$(python3 -B -c 'import sys; print(float(sys.argv[1]))' "$CAP")" >> "$GITHUB_OUTPUT"
 
   resolve:
     needs: guard
@@ -164,7 +173,7 @@ jobs:
   # The aw workflow tears the namespace, the CRD and the volumes down and fails when a volume is left (aw scripts/gke-test/teardown.sh).
   deploy:
     name: deploy and setup phase
-    needs: publish
+    needs: [guard, publish]
     permissions:
       id-token: write
       contents: read
@@ -177,6 +186,6 @@ jobs:
       namespace: sift-single-node
       lane: ""
       overlay: k8s/overlays/gke-single-node
-      test-command: bash scripts/single_node/acceptance/run.sh
+      test-command: COST_CAP_USD=${{ needs.guard.outputs.cap_usd }} bash scripts/single_node/acceptance/run.sh
       ttl-minutes: 300
       queue-minutes: 30

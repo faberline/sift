@@ -64,5 +64,70 @@ class PhaseTests(unittest.TestCase):
         self.assertIn(f'ttl-minutes: {phases.TTL_MINUTES}', WORKFLOW.read_text())
 
 
+class CostGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.inputs = json.loads(INPUTS.read_text())
+
+    def read_entries(self, directory):
+        return json.loads((Path(directory) / phases.GUARD_FILE).read_text())
+
+    def test_figures_before_first_phase(self):
+        figures = phases.guard_figures(self.inputs, 'load_30m', 0)
+        self.assertEqual(figures['hourly_usd'], 0.9301)
+        self.assertEqual(figures['spent_usd'], 0)
+        self.assertEqual(figures['hours_left'], 3.5)
+
+    def test_figures_after_three_hours(self):
+        figures = phases.guard_figures(self.inputs, 'faults', 10800)
+        self.assertEqual(figures['hours_left'], 1.0)
+        self.assertAlmostEqual(figures['spent_usd'], 2.7903, places=4)
+        self.assertEqual(figures['elapsed_hours'], 3.0)
+
+    def test_guard_lets_the_run_go_on(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(phases.run_guard('load_30m', self.inputs, '7', 0, tmp), 0)
+            entry = self.read_entries(tmp)[0]
+        self.assertEqual(entry['result'], 'pass')
+        self.assertEqual(entry['phase'], 'load_30m')
+        self.assertAlmostEqual(entry['projected_usd'], 3.2554, places=3)
+
+    def test_guard_stops_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code = phases.run_guard('load_30m', self.inputs, '3', 0, tmp)
+            entry = self.read_entries(tmp)[0]
+        self.assertNotEqual(code, 0)
+        self.assertEqual(entry['result'], 'fail')
+        self.assertIn('cost cap exceeded', entry['detail'])
+
+    def test_spent_counts_against_the_cap(self):
+        with tempfile.TemporaryDirectory() as refused, tempfile.TemporaryDirectory() as allowed:
+            self.assertNotEqual(phases.run_guard('faults', self.inputs, '3.7', 10800, refused), 0)
+            self.assertEqual(phases.run_guard('faults', self.inputs, '3.8', 10800, allowed), 0)
+
+    def test_every_check_is_appended(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for phase, seconds in zip(phases.PHASES, (0, 1800, 9000, 10800)):
+                self.assertEqual(phases.run_guard(phase, self.inputs, '7', seconds, tmp), 0)
+            entries = self.read_entries(tmp)
+        self.assertEqual([entry['phase'] for entry in entries], list(phases.PHASES))
+        for entry in entries:
+            self.assertEqual(set(entry), {'phase', 'elapsed_hours', 'spent_usd', 'hourly_usd',
+                                          'hours_left', 'projected_usd', 'cap_usd', 'result',
+                                          'detail'})
+
+    def test_bad_cap_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotEqual(phases.run_guard('load_30m', self.inputs, 'abc', 0, tmp), 0)
+            self.assertEqual(self.read_entries(tmp)[0]['result'], 'fail')
+
+    def test_guard_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ['guard', 'load_30m', '--cost-inputs', str(INPUTS), '--elapsed-seconds', '0',
+                    '--evidence-dir', tmp]
+            self.assertEqual(phases.main(args + ['--cap-usd', '7']), 0)
+            self.assertTrue((Path(tmp) / phases.GUARD_FILE).exists())
+            self.assertNotEqual(phases.main(args + ['--cap-usd', '3']), 0)
+
+
 if __name__ == '__main__':
     unittest.main()
