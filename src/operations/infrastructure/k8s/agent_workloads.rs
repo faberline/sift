@@ -84,36 +84,43 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
         }
     })])
     .with_volumes(agent_volumes);
-    let mut container = render::ContainerPlan::new(
-        "sift",
-        &spec.image,
-        vec![
-            "collect".into(),
-            "--cri-root".into(),
-            "/var/log/pods".into(),
-            "--namespace".into(),
-            log_namespaces(cx, spec),
-            "--data-dir".into(),
-            "/var/lib/sift".into(),
-            "--checkpoint".into(),
-            "/var/lib/sift/agent/checkpoint.json".into(),
-            "--quarantine".into(),
-            "/var/lib/sift/agent/rejected.jsonl".into(),
-            "--project".into(),
-            cx.name().into(),
-            "--environment".into(),
-            cx.ns().into(),
-            "--gcp-project".into(),
-            spec.gcp_project_id.clone(),
-            "--cluster".into(),
-            spec.gke_cluster_name.clone(),
-            "--location".into(),
-            spec.gke_location.clone(),
-            "--node".into(),
-            "$(NODE_NAME)".into(),
-            "--follow".into(),
-        ],
-    );
+    // The agent lists Pods through the Kubernetes API only when a Pod label is set.
+    let runtime = if spec.logs.pod_label.is_some() {
+        runtime.with_automount_service_account_token(true)
+    } else {
+        runtime
+    };
+    let mut args: Vec<String> = vec![
+        "collect".into(),
+        "--cri-root".into(),
+        "/var/log/pods".into(),
+        "--namespace".into(),
+        log_namespaces(cx, spec),
+        "--data-dir".into(),
+        "/var/lib/sift".into(),
+        "--checkpoint".into(),
+        "/var/lib/sift/agent/checkpoint.json".into(),
+        "--quarantine".into(),
+        "/var/lib/sift/agent/rejected.jsonl".into(),
+        "--project".into(),
+        cx.name().into(),
+        "--environment".into(),
+        cx.ns().into(),
+        "--gcp-project".into(),
+        spec.gcp_project_id.clone(),
+        "--cluster".into(),
+        spec.gke_cluster_name.clone(),
+        "--location".into(),
+        spec.gke_location.clone(),
+        "--node".into(),
+        "$(NODE_NAME)".into(),
+        "--follow".into(),
+    ];
+    if let Some(label) = &spec.logs.pod_label {
+        args.push("--pod-label".into());
+        args.push(label.clone());
+    }
+    let mut container = render::ContainerPlan::new("sift", &spec.image, args);
     container.env = env;
     container.volume_mounts = agent_mounts;
     container.security_context = Some(json!({

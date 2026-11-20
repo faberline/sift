@@ -52,6 +52,7 @@ pub(crate) enum InstanceTopology {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct InstanceLogs {
     pub namespaces: Vec<String>,
+    pub pod_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
