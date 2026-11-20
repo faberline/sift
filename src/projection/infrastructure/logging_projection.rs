@@ -95,6 +95,11 @@ impl LoggingProjection {
     }
 
     pub fn query(&self, query: &LogQuery) -> Result<LogPage> {
+        self.query_counted(query).map(|(page, _)| page)
+    }
+
+    /// The page, and the number of records that the query visited.
+    pub(crate) fn query_counted(&self, query: &LogQuery) -> Result<(LogPage, usize)> {
         let bounds = query.validate()?;
         let candidates = match query.text.as_deref().map(str::trim) {
             Some(text) if !text.is_empty() => Some(
@@ -115,26 +120,50 @@ impl LoggingProjection {
             .read()
             .expect("logging projection state lock poisoned");
         let projection_cursor = state.records.keys().next_back().copied().unwrap_or(0);
-        let mut matching = state
-            .records
-            .range((query.after_cursor.saturating_add(1))..)
-            .filter(|(_, record)| record_matches(record, query, &bounds, candidates.as_ref()))
-            .map(|(_, record)| record.clone())
-            .take(query.limit + 1)
-            .collect::<Vec<_>>();
+        let mut visited = 0_usize;
+        let mut matching = Vec::new();
+        let mut take = |record: &LogRecordV1| {
+            visited += 1;
+            if record_matches(record, query, &bounds, candidates.as_ref()) {
+                matching.push(record.clone());
+            }
+            matching.len() > query.limit
+        };
+        match state.time_window_cursors(&bounds, query.after_cursor) {
+            Some(cursors) => {
+                for cursor in cursors {
+                    if let Some(record) = state.records.get(&cursor) {
+                        if take(record) {
+                            break;
+                        }
+                    }
+                }
+            }
+            None => {
+                for (_, record) in state
+                    .records
+                    .range((query.after_cursor.saturating_add(1))..)
+                {
+                    if take(record) {
+                        break;
+                    }
+                }
+            }
+        }
         let has_more = matching.len() > query.limit;
         matching.truncate(query.limit);
         let next_cursor = matching
             .last()
             .map(|record| record.cursor)
             .unwrap_or(query.after_cursor);
-        Ok(LogPage {
+        let page = LogPage {
             records: matching,
             next_cursor,
             projection_cursor,
             has_more,
             incomplete: state.incomplete(query.after_cursor, &bounds),
-        })
+        };
+        Ok((page, visited))
     }
 
     fn index(&self, record: &LogRecordV1) -> Result<()> {
@@ -175,6 +204,7 @@ impl Projection for LoggingProjection {
             .expect("logging projection state lock poisoned");
         state.projection_cursor = state.projection_cursor.max(record.cursor);
         let size = record_bytes(&record);
+        state.index_time(&record);
         state.records.insert(record.cursor, record);
         state.retained_bytes = state.retained_bytes.saturating_add(size);
         while state.records.len() > self.max_records
@@ -186,6 +216,7 @@ impl Projection for LoggingProjection {
             self.text_index
                 .delete(&DocumentId::new(projection_row_key(oldest)), None)?;
             let removed = state.records.remove(&oldest).expect("retained log exists");
+            state.unindex_time(&removed);
             state.retained_bytes = state.retained_bytes.saturating_sub(record_bytes(&removed));
             let time = chrono::DateTime::parse_from_rfc3339(&removed.occurred_at)
                 .ok()
@@ -248,15 +279,18 @@ impl Projection for LoggingProjection {
                 .rebuild(snapshot.records.values().map(index_document).collect())
                 .context("rebuild logging index from retained projection records")?,
         }
-        *self
-            .state
-            .write()
-            .expect("logging projection state lock poisoned") = LoggingState {
+        let mut next = LoggingState {
             records: snapshot.records,
             projection_cursor: snapshot.projection_cursor,
             retention_boundary,
             retained_bytes,
+            ..Default::default()
         };
+        next.rebuild_time_index();
+        *self
+            .state
+            .write()
+            .expect("logging projection state lock poisoned") = next;
         Ok(())
     }
 
@@ -462,5 +496,113 @@ mod retention_tests {
         assert!(LoggingProjection::bytes_from(Some("0")).is_err());
         assert!(LoggingProjection::bytes_from(Some("abc")).is_err());
         assert!(LoggingProjection::bytes_from(Some("-1")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    fn add(projection: &LoggingProjection, cursor: u64, second: u64) {
+        let mut event = crate::EventEnvelope::for_project(
+            "p",
+            "prod",
+            format!("e{cursor}"),
+            SignalKind::Log,
+            serde_json::json!({"message": "test"}),
+        );
+        event.occurred_at = format!("2026-10-02T00:00:{second:02}Z");
+        projection
+            .apply_idempotent(&StoredEvent {
+                cursor,
+                acknowledged_at: event.observed_at.clone(),
+                event,
+            })
+            .unwrap();
+    }
+
+    fn cursors(page: &LogPage) -> Vec<u64> {
+        page.records.iter().map(|record| record.cursor).collect()
+    }
+
+    fn second_window(start: &str, end: &str) -> LogQuery {
+        let mut query = LogQuery::for_project("p");
+        query.start_time = Some(format!("2026-10-02T00:00:{start}Z"));
+        query.end_time = Some(format!("2026-10-02T00:00:{end}Z"));
+        query
+    }
+
+    #[test]
+    fn window_at_the_end_visits_only_the_window() {
+        let projection = LoggingProjection::with_max_records(20_000).unwrap();
+        for cursor in 1..=20_000_u64 {
+            add(&projection, cursor, (cursor - 1) / 1000);
+        }
+        let mut query = second_window("19", "20");
+        query.limit = 1000;
+        let (page, visited) = projection.query_counted(&query).unwrap();
+        assert_eq!(visited, 1000);
+        assert_eq!(page.records.len(), 1000);
+        assert!(!page.has_more);
+        assert_eq!(page.records.first().unwrap().cursor, 19_001);
+        assert_eq!(page.records.last().unwrap().cursor, 20_000);
+    }
+
+    #[test]
+    fn out_of_order_window_pages_by_cursor() {
+        let projection = LoggingProjection::with_max_records(10).unwrap();
+        for (cursor, second) in [(1, 10), (2, 3), (3, 10), (4, 5), (5, 10), (6, 3)] {
+            add(&projection, cursor, second);
+        }
+        let mut query = second_window("10", "11");
+        query.limit = 2;
+        let page = projection.query(&query).unwrap();
+        assert_eq!(cursors(&page), vec![1, 3]);
+        assert!(page.has_more);
+        assert_eq!(page.next_cursor, 3);
+        query.after_cursor = 3;
+        let page = projection.query(&query).unwrap();
+        assert_eq!(cursors(&page), vec![5]);
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn evicted_record_leaves_the_time_index() {
+        let projection = LoggingProjection::with_max_records(2).unwrap();
+        for cursor in 1..=3 {
+            add(&projection, cursor, 10);
+        }
+        let (page, visited) = projection
+            .query_counted(&second_window("10", "11"))
+            .unwrap();
+        assert_eq!(cursors(&page), vec![2, 3]);
+        assert_eq!(visited, 2);
+    }
+
+    #[test]
+    fn restore_rebuilds_the_time_index() {
+        let projection = LoggingProjection::with_max_records(2).unwrap();
+        for cursor in 1..=3 {
+            add(&projection, cursor, 10);
+        }
+        let restored = LoggingProjection::with_max_records(2).unwrap();
+        restored.restore(&projection.snapshot().unwrap()).unwrap();
+        let (page, visited) = restored.query_counted(&second_window("10", "11")).unwrap();
+        assert_eq!(cursors(&page), vec![2, 3]);
+        assert_eq!(visited, 2);
+    }
+
+    #[test]
+    fn query_without_time_bounds_still_scans_from_the_cursor() {
+        let projection = LoggingProjection::with_max_records(10).unwrap();
+        for (cursor, second) in [(1, 10), (2, 3), (3, 10), (4, 5), (5, 10), (6, 3)] {
+            add(&projection, cursor, second);
+        }
+        let mut query = LogQuery::for_project("p");
+        query.after_cursor = 2;
+        query.limit = 10;
+        let (page, visited) = projection.query_counted(&query).unwrap();
+        assert_eq!(cursors(&page), vec![3, 4, 5, 6]);
+        assert_eq!(visited, 4);
     }
 }
