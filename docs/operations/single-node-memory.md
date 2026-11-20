@@ -23,7 +23,7 @@ One row per long-lived holder of data in one `serve --role all` process. `Bounde
 | Bloom filter | yes | `MAX_BLOOM_BYTES` = 64 MiB | `src/journal/domain/bloom_filter.rs:5` |
 | Raft batch (encoded) | yes | `RAFT_BATCH_MAX_BYTES` = 1,048,576 bytes, on the encoded batch | `src/shared_kernel/raft_batch_limits.rs:5` |
 | Recovery page | yes | `RECOVERY_PAGE_BYTES` = 16 MiB; `RECOVERY_PAGE_EVENTS` = 10,000 events | `src/journal/domain/journal_limits.rs:7` |
-| Segment reader paths, `paths` | no | No constant. One entry for each segment file in the store when the reader opens. | `src/journal/infrastructure/storage/segment_read.rs:16` |
+| Segment reader paths, `paths` | yes | `SEGMENT_READER_MAX_PATHS` = 1,024 paths held at once. The reader loads the next page of paths when its queue is empty (`next_page`). `query_events` and `recovered_events` still collect every path during one call, and are not counted here. | `src/journal/infrastructure/storage/segment_read.rs:21` |
 | One ingest request | yes | `max_compressed_body_bytes` = 1 MiB; `max_decoded_body_bytes` = 8 MiB; `max_event_bytes` = 256 KiB; `max_events_per_batch` = 1,000. Environment variables: `SIFT_MAX_COMPRESSED_BODY_BYTES`, `SIFT_MAX_DECODED_BODY_BYTES`, `SIFT_MAX_EVENT_BYTES`, `SIFT_MAX_EVENTS_PER_BATCH`. | `src/ingest/domain/ingest_limits.rs:21` |
 | Per-project admission state | yes | 65,536 project keys; 32 concurrent requests per project; 720,000 items per 60 s window per project. Environment variables: `SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT`, `SIFT_MAX_INGEST_ITEMS_PER_PROJECT_WINDOW`, `SIFT_INGEST_QUOTA_WINDOW_SECS`. | `src/ingest/application/admission_controller.rs:12`; key limit refused at `src/ingest/application/admission_controller.rs:118` |
 | Prometheus series per selector | yes | `PROM_MAX_SERIES` = 1,000 series; a selector that matches more is refused | `src/query/domain/prom_models.rs:6` |
@@ -51,6 +51,5 @@ No. Nothing in the code releases the holders below when ingest stops. The code k
 - Log text index (`src/projection/infrastructure/logging_projection.rs:156`) — count only
 - Resident journal events (`src/journal/domain/journal_limits.rs:3`) — count only
 - WAL events in memory (`src/journal/infrastructure/storage/wal.rs:38`) — count only
-- Segment reader paths (`src/journal/infrastructure/storage/segment_read.rs:16`) — unbounded. No constant caps the number of segment files.
 - In-flight request bodies over all projects — unbounded. The per-project limits are in the admission row above. No limit caps the total over all projects; `grep -rn "max_concurrent" src` finds only the per-project setting.
 - Concurrent queries — unbounded. `grep -rn "Semaphore\|ConcurrencyLimit\|max_in_flight\|concurrency_limit" src` finds no query concurrency limit.
