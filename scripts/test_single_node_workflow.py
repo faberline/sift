@@ -158,6 +158,31 @@ class SingleNodeWorkflowTest(unittest.TestCase):
         self.assertNotIn("import requests", text)
         self.assertNotIn("import yaml", text)
 
+    def test_run_script_guards_each_phase(self):
+        text = self.read("scripts/single_node/acceptance/run.sh")
+        for needle in [
+            'phases.py" guard',
+            "COST_CAP_USD",
+            '--elapsed-seconds "$SECONDS"',
+            "cost guard refused",
+        ]:
+            self.assertIn(needle, text)
+        self.assertLess(text.index('phases.py" guard'), text.index('timeout "$limit"'))
+
+    def test_deploy_passes_the_checked_cap(self):
+        text = self.read(WORKFLOW)
+        deploy = self.job(text, "deploy")
+        guard = self.job(text, "guard")
+        self.assertIn("needs: [guard, publish]", deploy)
+        self.assertIn(
+            "test-command: COST_CAP_USD=${{ needs.guard.outputs.cap_usd }} "
+            "bash scripts/single_node/acceptance/run.sh",
+            deploy,
+        )
+        self.assertIn("id: cap", guard)
+        self.assertIn("outputs:", guard)
+        self.assertNotIn("inputs.cost_cap_usd", deploy)
+
     def test_ci_runs_this_test(self):
         self.assertIn(
             "python3 -B scripts/test_single_node_workflow.py -v",
