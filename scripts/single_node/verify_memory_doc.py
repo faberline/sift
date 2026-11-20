@@ -45,7 +45,9 @@ FACTS = [
     ('src/projection/infrastructure/trace_projection.rs', 'state.retained_bytes > self.max_bytes'),
     # Journal.
     ('src/journal/domain/journal_limits.rs', 'DEFAULT_RESIDENT_JOURNAL_EVENTS: usize = 100_000'),
+    ('src/journal/domain/journal_limits.rs', 'DEFAULT_RESIDENT_JOURNAL_BYTES: usize = 256 * 1024 * 1024'),
     ('src/journal/application/recover_journal.rs', 'while state.recent_events.len() > resident_limit {'),
+    ('src/journal/application/recover_journal.rs', 'state.resident_bytes > resident_byte_limit'),
     ('src/archive/application/evict_cold_segments.rs', 'journal.evict_resident_before(cutoff)?;'),
     ('src/journal/infrastructure/storage/wal.rs', 'events: VecDeque<StoredEvent>,'),
     ('src/journal/infrastructure/storage/dedupe_index.rs', 'BACKGROUND_FLUSH_ENTRIES: usize = 100_000'),

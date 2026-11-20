@@ -446,6 +446,7 @@ Variables are read at run time unless the row says otherwise. A name in backtick
 | `SIFT_MAX_EVENT_BYTES` | `sift serve` | 262144 | Largest single event, in bytes. |
 | `SIFT_MAX_EVENTS_PER_BATCH` | `sift serve` | 1000 | Most events in one batch. |
 | `SIFT_TRACE_RETAINED_BYTES` | `sift serve` | 268435456 | Most bytes of spans that the trace projection keeps in memory (the JSON size of each span). The oldest spans go first, after the span-count limit of 100,000. The newest span always stays. |
+| `SIFT_RESIDENT_JOURNAL_BYTES` | `sift serve` | 268435456 | Most bytes of events that the journal keeps resident in memory (the JSON size of each event). The oldest events go first, after the event-count limit of 100,000. The newest event always stays. |
 | `SIFT_MAX_CONCURRENT_INGEST_PER_PROJECT` | `sift serve`; CRD `spec.ingest.maxConcurrentRequests` | 32 | Ingest requests that run at once per project. |
 | `SIFT_MAX_INFLIGHT_BODY_BYTES` | `sift serve` | 134217728 | Decoded bytes of OTLP/HTTP and remote write request bodies that run at once over all projects; a request over the limit gets 429. Must be at least `SIFT_MAX_DECODED_BODY_BYTES`. |
 | `SIFT_MAX_CONCURRENT_QUERIES` | `sift serve` | 64 | Queries on the data-plane query routes that run at once; a query over the limit gets 429. |

@@ -6,13 +6,15 @@ use crate::journal::application::journal_service::DurableJournal;
 use crate::journal::domain::command_submission::{
     CapacityReservation, JournalCapacity, JournalGovernance, JournalReceiptLookup,
 };
-use crate::journal::domain::journal_limits::DEFAULT_RESIDENT_JOURNAL_EVENTS;
+use crate::journal::domain::journal_limits::{
+    DEFAULT_RESIDENT_JOURNAL_BYTES, DEFAULT_RESIDENT_JOURNAL_EVENTS,
+};
 use crate::journal::infrastructure::raft::command_committer::RaftCommandCommitter;
 use crate::node::domain::storage_role::StorageRole;
 use crate::node::infrastructure::local_capacity::LocalCapacity;
 use crate::shared_kernel::append_result::AppendResult;
 use crate::shared_kernel::event::EventEnvelope;
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use std::path::Path;
 use std::sync::Arc;
@@ -77,6 +79,7 @@ impl DurableJournal {
             Arc::new(GovernanceAdapter(governance)),
             role,
             DEFAULT_RESIDENT_JOURNAL_EVENTS,
+            resident_bytes_from_env()?,
         )
     }
     pub fn open_with_resident_limit(
@@ -88,8 +91,26 @@ impl DurableJournal {
             Arc::new(GovernanceAdapter(GovernancePolicySet::from_env()?)),
             StorageRole::All,
             resident_limit,
+            resident_bytes_from_env()?,
         )
     }
+}
+
+fn resident_bytes_from_env() -> Result<usize> {
+    bytes_from(std::env::var("SIFT_RESIDENT_JOURNAL_BYTES").ok().as_deref())
+}
+
+fn bytes_from(value: Option<&str>) -> Result<usize> {
+    let Some(value) = value else {
+        return Ok(DEFAULT_RESIDENT_JOURNAL_BYTES);
+    };
+    let bytes: usize = value
+        .parse()
+        .context("SIFT_RESIDENT_JOURNAL_BYTES must be a positive integer")?;
+    if bytes == 0 {
+        bail!("SIFT_RESIDENT_JOURNAL_BYTES must be a positive integer");
+    }
+    Ok(bytes)
 }
 
 pub(super) fn commit_context(
@@ -107,5 +128,19 @@ pub(super) fn commit_context(
             local_command,
         }),
         local_capacity: Arc::new(CapacityAdapter(local_capacity)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bytes_from;
+
+    #[test]
+    fn bytes_from_reads_the_setting() {
+        assert_eq!(bytes_from(None).unwrap(), 268_435_456);
+        assert_eq!(bytes_from(Some("4096")).unwrap(), 4096);
+        assert!(bytes_from(Some("0")).is_err());
+        assert!(bytes_from(Some("abc")).is_err());
+        assert!(bytes_from(Some("-1")).is_err());
     }
 }

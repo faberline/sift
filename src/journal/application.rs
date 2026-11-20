@@ -17,6 +17,9 @@ pub(crate) mod batch_limits;
 #[cfg(test)]
 mod commit_append_batch_tests;
 
+#[cfg(test)]
+mod resident_bytes_tests;
+
 pub(crate) mod raw_event_service;
 
 pub(crate) mod journal_service;

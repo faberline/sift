@@ -1,4 +1,5 @@
 use super::*;
+use crate::journal::domain::journal_limits::DEFAULT_RESIDENT_JOURNAL_BYTES;
 use crate::journal::domain::{
     dedupe_store::DedupeStore,
     journal_head::JournalHead,
@@ -114,8 +115,13 @@ fn recovery_failure_stops_at_each_store_port_and_keeps_error_chain() {
         let position = expected.iter().position(|step| *step == failure).unwrap();
         let root = tempfile::tempdir().unwrap();
         let (ports, steps) = recorded_dependencies(Some(failure));
-        let result =
-            JournalRuntime::open_configured(root.path(), Arc::new(Policy(true)), 128, ports);
+        let result = JournalRuntime::open_configured(
+            root.path(),
+            Arc::new(Policy(true)),
+            128,
+            DEFAULT_RESIDENT_JOURNAL_BYTES,
+            ports,
+        );
         let error = match result {
             Ok(_) => panic!("fault must stop recovery"),
             Err(error) => error,
@@ -138,8 +144,13 @@ fn recovery_policy_and_limit_fail_before_opening_storage() {
     ] {
         let root = tempfile::tempdir().unwrap();
         let (ports, steps) = recorded_dependencies(None);
-        let result =
-            JournalRuntime::open_configured(root.path(), Arc::new(Policy(policy)), limit, ports);
+        let result = JournalRuntime::open_configured(
+            root.path(),
+            Arc::new(Policy(policy)),
+            limit,
+            DEFAULT_RESIDENT_JOURNAL_BYTES,
+            ports,
+        );
         let error = match result {
             Ok(_) => panic!("invalid configuration must fail"),
             Err(error) => error,
@@ -150,11 +161,49 @@ fn recovery_policy_and_limit_fail_before_opening_storage() {
 }
 
 #[test]
+fn recovery_refuses_a_zero_resident_byte_limit() {
+    let root = tempfile::tempdir().unwrap();
+    let (ports, steps) = recorded_dependencies(None);
+    let result =
+        JournalRuntime::open_configured(root.path(), Arc::new(Policy(true)), 128, 0, ports);
+    let error = match result {
+        Ok(_) => panic!("a zero byte limit must fail"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.to_string(),
+        "resident journal byte limit must be greater than zero"
+    );
+    assert!(steps.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_empty_journal_holds_no_resident_bytes() {
+    let root = tempfile::tempdir().unwrap();
+    let (ports, _steps) = recorded_dependencies(None);
+    let journal = JournalRuntime::open_configured(
+        root.path(),
+        Arc::new(Policy(true)),
+        128,
+        DEFAULT_RESIDENT_JOURNAL_BYTES,
+        ports,
+    )
+    .unwrap();
+    assert_eq!(journal.resident_bytes(), 0);
+}
+
+#[test]
 fn recovered_head_is_persisted_after_replay() {
     let root = tempfile::tempdir().unwrap();
     let (ports, steps) = recorded_dependencies(None);
-    let journal =
-        JournalRuntime::open_configured(root.path(), Arc::new(Policy(true)), 128, ports).unwrap();
+    let journal = JournalRuntime::open_configured(
+        root.path(),
+        Arc::new(Policy(true)),
+        128,
+        DEFAULT_RESIDENT_JOURNAL_BYTES,
+        ports,
+    )
+    .unwrap();
     assert_eq!(
         *steps.lock().unwrap(),
         [
@@ -179,7 +228,14 @@ fn raft_and_read_session_share_runtime_without_archive_ownership_cycle() {
     let archive_reads = ports.archive_read.clone();
     let archive_lifecycle = ports.archive_maintenance.clone();
     let runtime = Arc::new(
-        JournalRuntime::open_configured(root.path(), Arc::new(Policy(true)), 128, ports).unwrap(),
+        JournalRuntime::open_configured(
+            root.path(),
+            Arc::new(Policy(true)),
+            128,
+            DEFAULT_RESIDENT_JOURNAL_BYTES,
+            ports,
+        )
+        .unwrap(),
     );
     let weak = Arc::downgrade(&runtime);
     let journal = Arc::new(JournalService::owned(runtime.clone()));
