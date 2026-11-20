@@ -39,6 +39,14 @@ impl IngestLimits {
                 "SIFT_MIN_LOCAL_FREE_BYTES",
                 defaults.min_local_free_bytes,
             )?,
+            max_inflight_body_bytes: env_usize(
+                "SIFT_MAX_INFLIGHT_BODY_BYTES",
+                defaults.max_inflight_body_bytes,
+            )?,
+            max_concurrent_queries: env_usize(
+                "SIFT_MAX_CONCURRENT_QUERIES",
+                defaults.max_concurrent_queries,
+            )?,
         })
     }
 }
@@ -56,5 +64,24 @@ fn env_u64(name: &str, default: u64) -> anyhow::Result<u64> {
         Ok(value) => Ok(value.parse()?),
         Err(std::env::VarError::NotPresent) => Ok(default),
         Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ingest::domain::ingest_limits::IngestLimits;
+
+    #[test]
+    fn global_limits_are_read_from_the_environment() {
+        std::env::set_var("SIFT_MAX_INFLIGHT_BODY_BYTES", "268435456");
+        std::env::set_var("SIFT_MAX_CONCURRENT_QUERIES", "7");
+        let limits = IngestLimits::from_env().unwrap();
+        assert_eq!(limits.max_inflight_body_bytes, 268_435_456);
+        assert_eq!(limits.max_concurrent_queries, 7);
+        std::env::set_var("SIFT_MAX_CONCURRENT_QUERIES", "0");
+        let zero = IngestLimits::from_env().unwrap();
+        assert!(zero.validate().is_err());
+        std::env::remove_var("SIFT_MAX_INFLIGHT_BODY_BYTES");
+        std::env::remove_var("SIFT_MAX_CONCURRENT_QUERIES");
     }
 }

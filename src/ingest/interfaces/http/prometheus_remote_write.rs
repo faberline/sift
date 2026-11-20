@@ -52,6 +52,10 @@ pub(crate) async fn prometheus_remote_write(
     state
         .ensure_local_capacity(decoded.len())
         .map_err(ApiError::from_admission)?;
+    let _body_permit = state
+        .admission()
+        .acquire_body_bytes(decoded.len())
+        .map_err(ApiError::from_admission)?;
     let admitted_project = headers
         .get("x-sift-project")
         .and_then(|value| value.to_str().ok())

@@ -94,6 +94,10 @@ async fn ingest_otlp(
     state
         .ensure_local_capacity(decoded_body.len())
         .map_err(ApiError::from_admission)?;
+    let _body_permit = state
+        .admission()
+        .acquire_body_bytes(decoded_body.len())
+        .map_err(ApiError::from_admission)?;
     let decoded =
         crate::ingest::interfaces::otlp::otlp_codec::decode(signal, media, &decoded_body, project)
             .map_err(|error| ApiError::bad_request("invalid_otlp", error.to_string()))?;

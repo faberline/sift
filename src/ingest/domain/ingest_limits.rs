@@ -13,6 +13,8 @@ pub struct IngestLimits {
     pub quota_window_secs: u64,
     pub max_local_storage_bytes: u64,
     pub min_local_free_bytes: u64,
+    pub max_inflight_body_bytes: usize,
+    pub max_concurrent_queries: usize,
 }
 
 impl Default for IngestLimits {
@@ -27,6 +29,8 @@ impl Default for IngestLimits {
             quota_window_secs: 60,
             max_local_storage_bytes: 50 * 1024 * 1024 * 1024,
             min_local_free_bytes: 1024 * 1024 * 1024,
+            max_inflight_body_bytes: 128 * 1024 * 1024,
+            max_concurrent_queries: 64,
         }
     }
 }
@@ -37,6 +41,8 @@ pub enum IngestLimitsError {
     ZeroLimit,
     #[error("compressed body limit must not exceed decoded body limit")]
     CompressedAboveDecoded,
+    #[error("in-flight body bytes limit must not be below the decoded body limit")]
+    InflightBelowDecoded,
 }
 
 impl IngestLimits {
@@ -50,12 +56,51 @@ impl IngestLimits {
             || self.quota_window_secs == 0
             || self.max_local_storage_bytes == 0
             || self.min_local_free_bytes == 0
+            || self.max_inflight_body_bytes == 0
+            || self.max_concurrent_queries == 0
         {
             return Err(IngestLimitsError::ZeroLimit);
         }
         if self.max_compressed_body_bytes > self.max_decoded_body_bytes {
             return Err(IngestLimitsError::CompressedAboveDecoded);
         }
+        if self.max_inflight_body_bytes < self.max_decoded_body_bytes {
+            return Err(IngestLimitsError::InflightBelowDecoded);
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_global_limits_are_refused() {
+        assert!(IngestLimits::default().validate().is_ok());
+        assert!(matches!(
+            IngestLimits {
+                max_inflight_body_bytes: 0,
+                ..Default::default()
+            }
+            .validate(),
+            Err(IngestLimitsError::ZeroLimit)
+        ));
+        assert!(matches!(
+            IngestLimits {
+                max_concurrent_queries: 0,
+                ..Default::default()
+            }
+            .validate(),
+            Err(IngestLimitsError::ZeroLimit)
+        ));
+        assert!(matches!(
+            IngestLimits {
+                max_inflight_body_bytes: 1,
+                ..Default::default()
+            }
+            .validate(),
+            Err(IngestLimitsError::InflightBelowDecoded)
+        ));
     }
 }

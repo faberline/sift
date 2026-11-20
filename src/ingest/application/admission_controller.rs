@@ -1,6 +1,8 @@
 //! Enforce compressed and decoded sizes, event count and size, per-project
 //! quota, concurrency, draining, and overload errors.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::ingest::domain::admission_error::{AdmissionError, AdmissionStatus};
@@ -10,6 +12,8 @@ use crate::ingest::domain::ingest_limits::IngestLimits;
 pub struct AdmissionController {
     pub(in crate::ingest) limits: IngestLimits,
     projects: service_http::WeightedAdmission<String>,
+    inflight_body_bytes: Arc<AtomicUsize>,
+    active_queries: Arc<AtomicUsize>,
 }
 
 impl AdmissionController {
@@ -24,6 +28,53 @@ impl AdmissionController {
         Ok(Self {
             limits,
             projects: service_http::WeightedAdmission::new(policy),
+            inflight_body_bytes: Arc::new(AtomicUsize::new(0)),
+            active_queries: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+
+    /// Hold `bytes` of decoded request body against the limit over all projects.
+    /// The check and the add are one compare-and-swap step.
+    pub fn acquire_body_bytes(&self, bytes: usize) -> Result<BodyBytesPermit, AdmissionError> {
+        let limit = self.limits.max_inflight_body_bytes;
+        self.inflight_body_bytes
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                current.checked_add(bytes).filter(|next| *next <= limit)
+            })
+            .map_err(|_| {
+                AdmissionError::new(
+                    AdmissionStatus::TooManyRequests,
+                    "inflight_body_bytes_exceeded",
+                    "too many request body bytes are in flight; retry later",
+                    true,
+                    Some(1),
+                )
+            })?;
+        Ok(BodyBytesPermit {
+            counter: Arc::clone(&self.inflight_body_bytes),
+            bytes,
+        })
+    }
+
+    /// Hold one slot of the concurrent query limit. The check and the add are
+    /// one compare-and-swap step.
+    pub fn acquire_query(&self) -> Result<QueryPermit, AdmissionError> {
+        let limit = self.limits.max_concurrent_queries;
+        self.active_queries
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                current.checked_add(1).filter(|next| *next <= limit)
+            })
+            .map_err(|_| {
+                AdmissionError::new(
+                    AdmissionStatus::TooManyRequests,
+                    "query_concurrency_exceeded",
+                    "too many concurrent queries; retry later",
+                    true,
+                    Some(1),
+                )
+            })?;
+        Ok(QueryPermit {
+            counter: Arc::clone(&self.active_queries),
         })
     }
 
@@ -130,3 +181,67 @@ impl AdmissionController {
 }
 
 pub type AdmissionPermit = service_http::ConcurrencyLease<String>;
+
+/// Holds decoded request bytes against the in-flight body limit until dropped.
+#[derive(Debug)]
+pub struct BodyBytesPermit {
+    counter: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl Drop for BodyBytesPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(self.bytes, Ordering::SeqCst);
+    }
+}
+
+/// Holds one slot of the concurrent query limit until dropped.
+#[derive(Debug)]
+pub struct QueryPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for QueryPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn body_bytes_limit_refuses_then_passes_after_release() {
+        let controller = AdmissionController::new(IngestLimits {
+            max_inflight_body_bytes: 100,
+            max_decoded_body_bytes: 100,
+            max_compressed_body_bytes: 100,
+            ..IngestLimits::default()
+        })
+        .unwrap();
+        let a = controller.acquire_body_bytes(60).unwrap();
+        let refused = controller.acquire_body_bytes(41).unwrap_err();
+        assert_eq!(refused.code, "inflight_body_bytes_exceeded");
+        assert_eq!(refused.status, AdmissionStatus::TooManyRequests);
+        let b = controller.acquire_body_bytes(40).unwrap();
+        drop(a);
+        drop(b);
+        assert!(controller.acquire_body_bytes(100).is_ok());
+    }
+
+    #[test]
+    fn query_limit_refuses_then_passes_after_release() {
+        let controller = AdmissionController::new(IngestLimits {
+            max_concurrent_queries: 2,
+            ..IngestLimits::default()
+        })
+        .unwrap();
+        let a = controller.acquire_query().unwrap();
+        let _b = controller.acquire_query().unwrap();
+        let refused = controller.acquire_query().unwrap_err();
+        assert_eq!(refused.code, "query_concurrency_exceeded");
+        drop(a);
+        assert!(controller.acquire_query().is_ok());
+    }
+}
