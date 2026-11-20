@@ -27,6 +27,7 @@ impl JournalRuntime {
         }
         state.recent_events = retained;
         state.recent_cursors_by_event_id = recent_cursor_map(&state.recent_events)?;
+        state.recompute_resident_bytes();
         Ok(before.saturating_sub(state.recent_events.len()))
     }
 
@@ -74,6 +75,7 @@ impl JournalRuntime {
         }
         state.recent_events = retained_resident;
         state.recent_cursors_by_event_id = recent_cursor_map(&state.recent_events)?;
+        state.recompute_resident_bytes();
         if !retention_status.retention_scan_pending
             && state.retention_generation != retention_generation
         {

@@ -171,7 +171,12 @@ impl JournalRuntime {
                 }
             }
             for stored in staged {
-                Self::push_resident(&mut state, stored, self.resident_limit)?;
+                Self::push_resident(
+                    &mut state,
+                    stored,
+                    self.resident_limit,
+                    self.resident_byte_limit,
+                )?;
             }
             self.resources
                 .persist_head(
