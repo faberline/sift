@@ -92,7 +92,12 @@ impl JournalRuntime {
                         append_unique_dedupe_page(self.dedupe.as_ref(), &mut suffix_dedupe_page)?;
                     }
                 }
-                Self::insert_recovered(&mut rebuilt, event, self.resident_limit)?;
+                Self::insert_recovered(
+                    &mut rebuilt,
+                    event,
+                    self.resident_limit,
+                    self.resident_byte_limit,
+                )?;
             }
         }
         append_unique_dedupe_page(self.dedupe.as_ref(), &mut suffix_dedupe_page)?;

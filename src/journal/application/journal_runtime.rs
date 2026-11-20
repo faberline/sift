@@ -33,6 +33,7 @@ pub(crate) struct JournalRuntime {
     pub(super) blob_gate: Mutex<()>,
     pub(super) state: RwLock<ResidentWindow>,
     pub(super) resident_limit: usize,
+    pub(super) resident_byte_limit: usize,
     pub(super) governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
     pub(super) accepted: Counter,
     pub(super) duplicates: Counter,
@@ -109,6 +110,14 @@ impl JournalRuntime {
             .expect("journal state lock poisoned")
             .recent_events
             .len()
+    }
+
+    #[cfg(test)]
+    pub fn resident_bytes(&self) -> usize {
+        self.state
+            .read()
+            .expect("journal state lock poisoned")
+            .resident_bytes
     }
 
     pub fn total_event_count(&self) -> u64 {
