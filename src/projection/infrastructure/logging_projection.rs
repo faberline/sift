@@ -122,15 +122,31 @@ impl LoggingProjection {
         let projection_cursor = state.records.keys().next_back().copied().unwrap_or(0);
         let mut visited = 0_usize;
         let mut matching = Vec::new();
-        for (_, record) in state
-            .records
-            .range((query.after_cursor.saturating_add(1))..)
-        {
+        let mut take = |record: &LogRecordV1| {
             visited += 1;
             if record_matches(record, query, &bounds, candidates.as_ref()) {
                 matching.push(record.clone());
-                if matching.len() > query.limit {
-                    break;
+            }
+            matching.len() > query.limit
+        };
+        match state.time_window_cursors(&bounds, query.after_cursor) {
+            Some(cursors) => {
+                for cursor in cursors {
+                    if let Some(record) = state.records.get(&cursor) {
+                        if take(record) {
+                            break;
+                        }
+                    }
+                }
+            }
+            None => {
+                for (_, record) in state
+                    .records
+                    .range((query.after_cursor.saturating_add(1))..)
+                {
+                    if take(record) {
+                        break;
+                    }
                 }
             }
         }
@@ -188,6 +204,7 @@ impl Projection for LoggingProjection {
             .expect("logging projection state lock poisoned");
         state.projection_cursor = state.projection_cursor.max(record.cursor);
         let size = record_bytes(&record);
+        state.index_time(&record);
         state.records.insert(record.cursor, record);
         state.retained_bytes = state.retained_bytes.saturating_add(size);
         while state.records.len() > self.max_records
@@ -199,6 +216,7 @@ impl Projection for LoggingProjection {
             self.text_index
                 .delete(&DocumentId::new(projection_row_key(oldest)), None)?;
             let removed = state.records.remove(&oldest).expect("retained log exists");
+            state.unindex_time(&removed);
             state.retained_bytes = state.retained_bytes.saturating_sub(record_bytes(&removed));
             let time = chrono::DateTime::parse_from_rfc3339(&removed.occurred_at)
                 .ok()
@@ -261,15 +279,18 @@ impl Projection for LoggingProjection {
                 .rebuild(snapshot.records.values().map(index_document).collect())
                 .context("rebuild logging index from retained projection records")?,
         }
-        *self
-            .state
-            .write()
-            .expect("logging projection state lock poisoned") = LoggingState {
+        let mut next = LoggingState {
             records: snapshot.records,
             projection_cursor: snapshot.projection_cursor,
             retention_boundary,
             retained_bytes,
+            ..Default::default()
         };
+        next.rebuild_time_index();
+        *self
+            .state
+            .write()
+            .expect("logging projection state lock poisoned") = next;
         Ok(())
     }
 
@@ -566,9 +587,7 @@ mod window_tests {
         }
         let restored = LoggingProjection::with_max_records(2).unwrap();
         restored.restore(&projection.snapshot().unwrap()).unwrap();
-        let (page, visited) = restored
-            .query_counted(&second_window("10", "11"))
-            .unwrap();
+        let (page, visited) = restored.query_counted(&second_window("10", "11")).unwrap();
         assert_eq!(cursors(&page), vec![2, 3]);
         assert_eq!(visited, 2);
     }

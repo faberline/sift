@@ -1,7 +1,8 @@
 //! A log record as the logging projection keeps and returns it, the query and
 //! page over records, the filter a record must pass, and the logging state.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::ops::Bound;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,9 @@ pub(in crate::projection) struct LoggingState {
     pub(in crate::projection) projection_cursor: u64,
     pub(in crate::projection) retention_boundary: Option<LogRetentionBoundary>,
     pub(in crate::projection) retained_bytes: usize,
+    /// (seconds since the epoch, nanoseconds, cursor) of each retained record
+    /// with a valid `occurred_at`. Rebuilt on restore, never stored.
+    pub(in crate::projection) time_index: BTreeSet<(i64, u32, u64)>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -55,6 +59,61 @@ impl LoggingState {
                     .is_none_or(|(start, latest)| start <= latest)
         })
     }
+
+    pub(in crate::projection) fn index_time(&mut self, record: &LogRecordV1) {
+        if let Some(key) = time_key(record) {
+            self.time_index.insert(key);
+        }
+    }
+
+    pub(in crate::projection) fn unindex_time(&mut self, record: &LogRecordV1) {
+        if let Some(key) = time_key(record) {
+            self.time_index.remove(&key);
+        }
+    }
+
+    pub(in crate::projection) fn rebuild_time_index(&mut self) {
+        self.time_index = self.records.values().filter_map(time_key).collect();
+    }
+
+    /// The cursors after `after_cursor` whose `occurred_at` is in the window,
+    /// in cursor order. `None` when the query has no time bounds.
+    pub(in crate::projection) fn time_window_cursors(
+        &self,
+        bounds: &QueryBounds,
+        after_cursor: u64,
+    ) -> Option<Vec<u64>> {
+        if bounds.start.is_none() && bounds.end.is_none() {
+            return None;
+        }
+        let lower = match bounds.start {
+            Some(start) => Bound::Included((start.timestamp(), start.timestamp_subsec_nanos(), 0)),
+            None => Bound::Unbounded,
+        };
+        let upper = match bounds.end {
+            Some(end) => Bound::Excluded((end.timestamp(), end.timestamp_subsec_nanos(), 0)),
+            None => Bound::Unbounded,
+        };
+        let mut cursors: Vec<u64> = self
+            .time_index
+            .range((lower, upper))
+            .map(|(_, _, cursor)| *cursor)
+            .filter(|cursor| *cursor > after_cursor)
+            .collect();
+        cursors.sort_unstable();
+        Some(cursors)
+    }
+}
+
+fn time_key(record: &LogRecordV1) -> Option<(i64, u32, u64)> {
+    let time = DateTime::parse_from_rfc3339(&record.occurred_at)
+        .ok()?
+        .with_timezone(&Utc);
+    Some((
+        time.timestamp(),
+        time.timestamp_subsec_nanos(),
+        record.cursor,
+    ))
 }
 
 pub(in crate::projection) struct QueryBounds {
