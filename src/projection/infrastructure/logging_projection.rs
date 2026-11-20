@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::projection::domain::log::{
     projection_row_key, record_matches, LogPage, LogQuery, LogRecordV1, LogRetentionBoundary,
-    LoggingState, DEFAULT_RETAINED_LOG_RECORDS, LOGGING_SCHEMA_VERSION, PROJECTION_LOGGING_STORE,
-    RESOURCE_TYPE, SERVICE_NAME,
+    LoggingState, DEFAULT_RETAINED_LOG_BYTES, DEFAULT_RETAINED_LOG_RECORDS, LOGGING_SCHEMA_VERSION,
+    PROJECTION_LOGGING_STORE, RESOURCE_TYPE, SERVICE_NAME,
 };
 use crate::projection::domain::log_record_normalizer::normalize;
 use crate::projection::domain::projection::Projection;
@@ -47,6 +47,7 @@ pub struct LoggingProjection {
     text_index: MemoryTextIndex,
     state: RwLock<LoggingState>,
     max_records: usize,
+    max_bytes: usize,
 }
 
 impl LoggingProjection {
@@ -54,9 +55,34 @@ impl LoggingProjection {
         Self::with_max_records(DEFAULT_RETAINED_LOG_RECORDS)
     }
 
+    pub fn from_env() -> Result<Self> {
+        let max_bytes = Self::bytes_from(std::env::var("SIFT_LOG_RETAINED_BYTES").ok().as_deref())?;
+        Self::with_limits(DEFAULT_RETAINED_LOG_RECORDS, max_bytes)
+    }
+
+    fn bytes_from(value: Option<&str>) -> Result<usize> {
+        let Some(text) = value else {
+            return Ok(DEFAULT_RETAINED_LOG_BYTES);
+        };
+        let bytes: usize = text
+            .parse()
+            .context("SIFT_LOG_RETAINED_BYTES must be a positive integer")?;
+        if bytes == 0 {
+            bail!("SIFT_LOG_RETAINED_BYTES must be a positive integer");
+        }
+        Ok(bytes)
+    }
+
     pub fn with_max_records(max_records: usize) -> Result<Self> {
+        Self::with_limits(max_records, DEFAULT_RETAINED_LOG_BYTES)
+    }
+
+    pub fn with_limits(max_records: usize, max_bytes: usize) -> Result<Self> {
         if max_records == 0 {
             bail!("logging retention must keep at least one record");
+        }
+        if max_bytes == 0 {
+            bail!("logging retention byte limit must be greater than zero");
         }
         let text_index =
             MemoryTextIndex::new(fixed_schema()?).context("create shared logging text index")?;
@@ -64,6 +90,7 @@ impl LoggingProjection {
             text_index,
             state: RwLock::new(LoggingState::default()),
             max_records,
+            max_bytes,
         })
     }
 
@@ -147,14 +174,19 @@ impl Projection for LoggingProjection {
             .write()
             .expect("logging projection state lock poisoned");
         state.projection_cursor = state.projection_cursor.max(record.cursor);
+        let size = record_bytes(&record);
         state.records.insert(record.cursor, record);
-        while state.records.len() > self.max_records {
+        state.retained_bytes = state.retained_bytes.saturating_add(size);
+        while state.records.len() > self.max_records
+            || (state.retained_bytes > self.max_bytes && state.records.len() > 1)
+        {
             let Some(oldest) = state.records.keys().next().copied() else {
                 break;
             };
             self.text_index
                 .delete(&DocumentId::new(projection_row_key(oldest)), None)?;
             let removed = state.records.remove(&oldest).expect("retained log exists");
+            state.retained_bytes = state.retained_bytes.saturating_sub(record_bytes(&removed));
             let time = chrono::DateTime::parse_from_rfc3339(&removed.occurred_at)
                 .ok()
                 .map(|t| t.with_timezone(&chrono::Utc));
@@ -208,6 +240,7 @@ impl Projection for LoggingProjection {
                 latest_time: None,
             })
         });
+        let retained_bytes: usize = snapshot.records.values().map(record_bytes).sum();
         match snapshot.text_index {
             Some(text_index) if self.text_index.restore(&text_index).is_ok() => {}
             _ => self
@@ -222,6 +255,7 @@ impl Projection for LoggingProjection {
             records: snapshot.records,
             projection_cursor: snapshot.projection_cursor,
             retention_boundary,
+            retained_bytes,
         };
         Ok(())
     }
@@ -293,6 +327,13 @@ fn index_document(record: &LogRecordV1) -> TextDocument {
     document
 }
 
+/// The charged size of a record: its JSON size, as the metric point size is.
+fn record_bytes(record: &LogRecordV1) -> usize {
+    serde_json::to_vec(record)
+        .map(|bytes| bytes.len())
+        .unwrap_or(0)
+}
+
 fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let value: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(value)?)?;
     serde_json::to_vec(&value).map_err(Into::into)
@@ -335,5 +376,91 @@ mod retention_tests {
         query.start_time = None;
         query.after_cursor = 1;
         assert!(!restored.query(&query).unwrap().incomplete);
+    }
+
+    fn log_event(cursor: u64, text: &str) -> StoredEvent {
+        let event = crate::EventEnvelope::for_project(
+            "p",
+            "prod",
+            format!("e{cursor}"),
+            SignalKind::Log,
+            serde_json::json!({"message": text}),
+        );
+        StoredEvent {
+            cursor,
+            acknowledged_at: event.observed_at.clone(),
+            event,
+        }
+    }
+
+    fn filler(cursor: u64) -> StoredEvent {
+        log_event(cursor, &"x".repeat(1000))
+    }
+
+    #[test]
+    fn byte_limit_evicts_oldest_records_before_the_count_limit() {
+        let projection = LoggingProjection::with_limits(1000, 4096).unwrap();
+        for cursor in 1..=20 {
+            projection.apply_idempotent(&filler(cursor)).unwrap();
+        }
+        let state = projection.state.read().unwrap();
+        assert!(state.records.len() < 20);
+        assert!(state.records.contains_key(&20));
+        assert!(!state.records.contains_key(&1));
+        assert!(state.retained_bytes <= 4096);
+    }
+
+    #[test]
+    fn byte_limit_removes_evicted_records_from_the_text_index() {
+        let projection = LoggingProjection::with_limits(1000, 4096).unwrap();
+        let first = format!("firstmarker {}", "x".repeat(1000));
+        projection.apply_idempotent(&log_event(1, &first)).unwrap();
+        let mut query = LogQuery::for_project("p");
+        query.text = Some("firstmarker".into());
+        assert_eq!(projection.query(&query).unwrap().records.len(), 1);
+        for cursor in 2..=20 {
+            projection.apply_idempotent(&filler(cursor)).unwrap();
+        }
+        assert!(projection.query(&query).unwrap().records.is_empty());
+    }
+
+    #[test]
+    fn one_record_larger_than_the_byte_limit_stays() {
+        let projection = LoggingProjection::with_limits(1000, 10).unwrap();
+        for cursor in 1..=3 {
+            projection.apply_idempotent(&filler(cursor)).unwrap();
+        }
+        let state = projection.state.read().unwrap();
+        assert_eq!(state.records.len(), 1);
+        assert!(state.records.contains_key(&3));
+    }
+
+    #[test]
+    fn restore_recomputes_retained_bytes() {
+        let first = LoggingProjection::with_limits(1000, 1_000_000).unwrap();
+        for cursor in 1..=5 {
+            first.apply_idempotent(&filler(cursor)).unwrap();
+        }
+        let second = LoggingProjection::with_limits(1000, 1_000_000).unwrap();
+        second.restore(&first.snapshot().unwrap()).unwrap();
+        let before = first.state.read().unwrap().retained_bytes;
+        let after = second.state.read().unwrap().retained_bytes;
+        assert_eq!(before, after);
+        assert!(after > 0);
+    }
+
+    #[test]
+    fn with_limits_refuses_zero() {
+        assert!(LoggingProjection::with_limits(0, 10).is_err());
+        assert!(LoggingProjection::with_limits(10, 0).is_err());
+    }
+
+    #[test]
+    fn bytes_from_reads_the_setting() {
+        assert_eq!(LoggingProjection::bytes_from(None).unwrap(), 268_435_456);
+        assert_eq!(LoggingProjection::bytes_from(Some("4096")).unwrap(), 4096);
+        assert!(LoggingProjection::bytes_from(Some("0")).is_err());
+        assert!(LoggingProjection::bytes_from(Some("abc")).is_err());
+        assert!(LoggingProjection::bytes_from(Some("-1")).is_err());
     }
 }
