@@ -52,6 +52,8 @@ FACTS = [
     ('src/journal/application/recover_journal.rs', 'while state.resident_bytes > resident_byte_limit && state.recent_events.len() > 1 {'),
     ('src/archive/application/evict_cold_segments.rs', 'journal.evict_resident_before(cutoff)?;'),
     ('src/journal/infrastructure/storage/wal.rs', 'events: VecDeque<StoredEvent>,'),
+    ('src/journal/infrastructure/storage/wal.rs', 'DEFAULT_WAL_DECODED_BYTES: usize = 64 * 1024 * 1024'),
+    ('src/journal/infrastructure/storage/wal.rs', 'if decoded > self.max_decoded_bytes {'),
     ('src/journal/infrastructure/storage/dedupe_index.rs', 'BACKGROUND_FLUSH_ENTRIES: usize = 100_000'),
     ('src/journal/infrastructure/storage/dedupe_index.rs', 'pub(super) const MAX_PENDING_ENTRIES: usize = BACKGROUND_FLUSH_ENTRIES * 2;'),
     ('src/journal/infrastructure/storage/dedupe_append.rs', 'if pending.saturating_add(incoming_entries) > MAX_PENDING_ENTRIES {'),
