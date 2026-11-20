@@ -7,8 +7,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from load_client import Api  # noqa: E402
 from load_data import build  # noqa: E402
 import run_local_load as driver  # noqa: E402
+import cost_guard, cost_model  # noqa: E402
 
 PHASES = ('load_30m', 'load_24h', 'faults', 'comparison')
+GUARD = Path(__file__).resolve().parents[2] / 'production' / 'cost_guard.py'
+GUARD_FILE = 'cost-guard.json'
 TTL_MINUTES = 300
 SETUP_SECONDS_MAX = 1200
 MAX_LOAD_RATE = 1000
@@ -61,6 +64,39 @@ def write_evidence(evidence_dir, result):
     path = directory / f"{result['phase']}.json"
     path.write_text(json.dumps(result, indent=2) + '\n')
     return path
+
+
+def guard_figures(cost_inputs, phase, elapsed_seconds):
+    # Elapsed time counts from the start of run.sh. The setup phase before it is
+    # inside the estimate that the aw workflow's guard job already checks.
+    config = cost_model.estimate(cost_inputs)['config_values']
+    hourly_usd = config['estimated_hourly_cost_usd']
+    elapsed_hours = elapsed_seconds / 3600
+    spent_usd = config['estimated_fixed_cost_usd'] + hourly_usd * elapsed_hours
+    hours_left = sum(cost_inputs['phases_hours'][p] for p in PHASES[PHASES.index(phase):])
+    return {'hourly_usd': hourly_usd, 'spent_usd': spent_usd, 'hours_left': hours_left,
+            'elapsed_hours': elapsed_hours}
+
+
+def run_guard(phase, cost_inputs, cap_usd, elapsed_seconds, evidence_dir):
+    figures = guard_figures(cost_inputs, phase, elapsed_seconds)
+    hourly, spent, left = figures['hourly_usd'], figures['spent_usd'], figures['hours_left']
+    completed = subprocess.run([sys.executable, '-B', str(GUARD), '--cap-usd', str(cap_usd),
+                                '--spent-usd', repr(spent), '--hourly-usd', repr(hourly),
+                                '--hours-left', repr(left)], capture_output=True, text=True)
+    entry = {'phase': phase, 'elapsed_hours': round(figures['elapsed_hours'], 4),
+             'spent_usd': round(spent, 4), 'hourly_usd': hourly, 'hours_left': left,
+             'projected_usd': round(cost_guard.projected_cost(spent, hourly, left), 4),
+             'cap_usd': str(cap_usd),
+             'result': 'pass' if completed.returncode == 0 else 'fail',
+             'detail': (completed.stdout + completed.stderr).strip()}
+    directory = Path(evidence_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / GUARD_FILE
+    entries = json.loads(path.read_text()) if path.exists() else []
+    entries.append(entry)
+    path.write_text(json.dumps(entries, indent=2) + '\n')
+    return completed.returncode
 
 
 def items_of(block):
@@ -226,6 +262,12 @@ def main(argv=None):
     fail.add_argument('phase')
     fail.add_argument('--evidence-dir', required=True, type=Path)
     fail.add_argument('--reason', required=True)
+    guard = sub.add_parser('guard')
+    guard.add_argument('phase')
+    guard.add_argument('--cost-inputs', required=True, type=Path)
+    guard.add_argument('--cap-usd', required=True)
+    guard.add_argument('--elapsed-seconds', required=True, type=float)
+    guard.add_argument('--evidence-dir', required=True, type=Path)
     args = parser.parse_args(argv)
 
     if args.command == 'list':
@@ -238,6 +280,13 @@ def main(argv=None):
         now = utc_now()
         print(write_evidence(args.evidence_dir, phase_result(args.phase, now, now, 0, 0, 0, args.reason)))
         return 0
+    if args.command == 'guard':
+        if args.phase not in PHASES:
+            parser.error(f'unknown phase {args.phase!r}')
+        cost = json.loads(args.cost_inputs.read_text())
+        code = run_guard(args.phase, cost, args.cap_usd, args.elapsed_seconds, args.evidence_dir)
+        print(Path(args.evidence_dir) / GUARD_FILE)
+        return code
 
     if args.phase not in PHASES:
         parser.error(f'unknown phase {args.phase!r}')
