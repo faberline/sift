@@ -115,6 +115,21 @@ fn crd_schema_lists_retention_days() {
 }
 
 #[test]
+fn crd_schema_lists_log_pod_label() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let pod_label = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+        ["spec"]["properties"]["logs"]["properties"]["podLabel"];
+    assert_eq!(pod_label["type"], "string");
+    assert_eq!(pod_label["maxLength"], 320);
+    assert!(
+        pod_label["pattern"]
+            .as_str()
+            .is_some_and(|pattern| !pattern.is_empty()),
+        "podLabel needs a pattern: {pod_label}"
+    );
+}
+
+#[test]
 fn crd_schema_lists_log_namespaces() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let namespaces = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]

@@ -546,6 +546,8 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.topology` | string | no | `ha` | Instance topology: `ha` or `singleNode`. |
 | `spec.logs` | object | no | none | Log agent settings. |
 | `spec.logs.namespaces` | array | no | none | Namespaces whose Pod logs the log agent collects, as `--namespace a,b`. Empty means the namespace of the instance. |
+| `spec.logs.podLabel` | string | no | none | Collect logs only from Pods that carry this label, as `key=value` (for example `sift.axiom.dev/logs=true`). The operator passes it as `--pod-label` to the log agent. A Pod is collected when it is in a listed namespace and carries the label. Without it, every Pod of the listed namespaces is collected. |
+| `spec.logs.podLabel` (RBAC) | - | - | - | With the field set, the log agent Pod mounts a Kubernetes API token and lists Pods with the label selector in each listed namespace. The operator grants Pod `get` and `list` only in the instance namespace (the Role `<name>-agent-project`); a cluster admin grants `get` and `list` on `pods` in each other listed namespace. The operator creates no cluster-wide role for this. |
 | `spec.retentionDays` | integer | no | 180 | Days of events Sift keeps and accepts, 1 to 180. The operator passes it as `--retention-days` to the store, control and all-role workloads. |
 | `spec.metrics` | object | no | none | Metrics agent settings. |
 | `spec.metrics.namespaces` | array | no | none | Namespaces whose Pods the metrics agent scrapes, as `--namespace a,b`. Empty means the namespace of the instance. The operator grants Pod read access only in the instance namespace; a cluster admin grants `get` and `list` on `pods` in each other listed namespace. |

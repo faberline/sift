@@ -99,6 +99,8 @@ pub struct LogsSpec {
     /// Kubernetes namespaces whose Pod logs the log agent collects.
     /// Empty means the namespace of the Sift instance only.
     pub namespaces: Vec<String>,
+    /// Collect logs only from Pods that carry this label (`key=value`). Empty means every Pod of the listed namespaces.
+    pub pod_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -254,6 +256,20 @@ mod tests {
     fn logs_namespaces_are_read() {
         let spec = spec_with(r#""logs":{"namespaces":["team-a","team-b"]}"#).unwrap();
         assert_eq!(spec.logs.namespaces, ["team-a", "team-b"]);
+    }
+
+    #[test]
+    fn logs_pod_label_default_is_none() {
+        assert!(spec_with("").unwrap().logs.pod_label.is_none());
+    }
+
+    #[test]
+    fn logs_pod_label_is_read() {
+        let spec = spec_with(r#""logs":{"podLabel":"sift.axiom.dev/logs=true"}"#).unwrap();
+        assert_eq!(
+            spec.logs.pod_label,
+            Some("sift.axiom.dev/logs=true".to_string())
+        );
     }
 
     #[test]
