@@ -59,6 +59,7 @@ FACTS = [
     ('src/shared_kernel/raft_batch_limits.rs', 'RAFT_BATCH_MAX_BYTES: usize = 1_048_576'),
     ('src/journal/domain/journal_limits.rs', 'RECOVERY_PAGE_BYTES: usize = 16 * 1024 * 1024'),
     ('src/journal/infrastructure/storage/segment_read.rs', 'paths: VecDeque<(PathBuf, u64)>,'),
+    ('src/journal/infrastructure/storage/segment_read.rs', 'SEGMENT_READER_MAX_PATHS: usize = 1_024'),
     # Ingest and admission.
     ('src/ingest/domain/ingest_limits.rs', 'max_compressed_body_bytes: 1_048_576,'),
     ('src/ingest/domain/ingest_limits.rs', 'max_decoded_body_bytes: 8_388_608,'),
