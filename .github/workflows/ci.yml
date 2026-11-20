@@ -188,6 +188,7 @@ jobs:
         run: |
           python3 -B scripts/single_node/test_run_local_load.py -v
           python3 -B scripts/single_node/test_workflow.py -v
+          python3 -B scripts/test_single_node_workflow.py -v
       - name: single-node operations doc tests
         run: |
           python3 -B scripts/test_single_node_operations_doc.py -v
