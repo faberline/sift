@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Setup phase of the single-node acceptance run. The aw reusable workflow
 # calls this script with NAMESPACE, IMAGE, EVIDENCE_DIR, RUN_LABEL and
-# KUBECONFIG set. It writes setup.json; the aw workflow tears everything down.
+# KUBECONFIG set; the sift workflow also sets COST_CAP_USD (the cap that its
+# guard job checked). It writes setup.json and cost-guard.json; the aw workflow
+# tears everything down.
 set -euo pipefail
 
-: "${NAMESPACE:?}" "${EVIDENCE_DIR:?}" "${IMAGE:?}"
+: "${NAMESPACE:?}" "${EVIDENCE_DIR:?}" "${IMAGE:?}" "${COST_CAP_USD:?}"
 start="$(date -u +%FT%TZ)"
 mkdir -p "$EVIDENCE_DIR"
 
@@ -60,6 +62,11 @@ failed=""
 for phase in $(python3 -B "$here/phases.py" list); do
   if [[ -n "$failed" ]]; then
     python3 -B "$here/phases.py" fail "$phase" --evidence-dir "$EVIDENCE_DIR" --reason "not run: phase $failed failed"
+    continue
+  fi
+  if ! python3 -B "$here/phases.py" guard "$phase" --cost-inputs "$inputs" --cap-usd "$COST_CAP_USD" --elapsed-seconds "$SECONDS" --evidence-dir "$EVIDENCE_DIR"; then
+    python3 -B "$here/phases.py" fail "$phase" --evidence-dir "$EVIDENCE_DIR" --reason "cost guard refused before phase $phase; see cost-guard.json"
+    failed="$phase"
     continue
   fi
   limit="$(python3 -B "$here/phases.py" timeout "$phase" --cost-inputs "$inputs")"
