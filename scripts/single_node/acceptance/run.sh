@@ -51,3 +51,21 @@ nodes="$(kubectl get nodes -l faberline.dev/pool=sift-server --no-headers | wc -
 jq -n --arg start "$start" --arg end "$end" --argjson nodes "$nodes" --arg image "$IMAGE" \
   '{phase: "setup", node_count: $nodes, start: $start, end: $end, image: $image, pod: "sift-all-0", pvc: "data-sift-all-0"}' \
   > "$EVIDENCE_DIR/setup.json"
+
+# 4. The phases, in order. Stop at the first failure so that no paid time is
+#    spent after it; the remaining phases get a fail result "not run".
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+inputs="$here/../../production/cost-inputs.single-node.json"
+failed=""
+for phase in $(python3 -B "$here/phases.py" list); do
+  if [[ -n "$failed" ]]; then
+    python3 -B "$here/phases.py" fail "$phase" --evidence-dir "$EVIDENCE_DIR" --reason "not run: phase $failed failed"
+    continue
+  fi
+  limit="$(python3 -B "$here/phases.py" timeout "$phase" --cost-inputs "$inputs")"
+  if ! timeout "$limit" python3 -B "$here/phases.py" run "$phase" --cost-inputs "$inputs" --evidence-dir "$EVIDENCE_DIR"; then
+    [[ -f "$EVIDENCE_DIR/$phase.json" ]] || python3 -B "$here/phases.py" fail "$phase" --evidence-dir "$EVIDENCE_DIR" --reason "no result: timeout of $limit s or a crash"
+    failed="$phase"
+  fi
+done
+[[ -z "$failed" ]]
