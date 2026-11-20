@@ -14,7 +14,7 @@ use crate::journal::application::journal_runtime::JournalRuntime;
 use crate::journal::domain::command_submission::JournalGovernance;
 use crate::journal::domain::event_content_digest::xor_event_content_digest;
 use crate::journal::domain::recent_cursor::{recent_cursor_at, RecentCursor};
-use crate::journal::domain::resident_window::ResidentWindow;
+use crate::journal::domain::resident_window::{resident_event_bytes, ResidentWindow};
 use crate::shared_kernel::event_content_digest::xor_digest;
 use crate::shared_kernel::stored_event::StoredEvent;
 
@@ -23,11 +23,15 @@ impl JournalRuntime {
         data_dir: impl AsRef<Path>,
         governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
         resident_limit: usize,
+        resident_byte_limit: usize,
         dependencies: super::journal_dependencies::JournalDependencies,
     ) -> Result<Self> {
         governance.validate()?;
         if resident_limit == 0 {
             bail!("resident journal event limit must be greater than zero");
+        }
+        if resident_byte_limit == 0 {
+            bail!("resident journal byte limit must be greater than zero");
         }
         let layout = dependencies.resources.initialize_root(data_dir.as_ref())?;
         let data_dir = layout.root().to_path_buf();
@@ -90,7 +94,7 @@ impl JournalRuntime {
                 {
                     dedupe_matches = false;
                 }
-                Self::insert_recovered(&mut state, stored, resident_limit)?;
+                Self::insert_recovered(&mut state, stored, resident_limit, resident_byte_limit)?;
             }
         }
 
@@ -170,6 +174,7 @@ impl JournalRuntime {
             blob_gate: Mutex::new(()),
             state: RwLock::new(state),
             resident_limit,
+            resident_byte_limit,
             governance,
             accepted: Counter::new(),
             duplicates: Counter::new(),
@@ -191,6 +196,7 @@ impl JournalRuntime {
         state: &mut ResidentWindow,
         stored: StoredEvent,
         resident_limit: usize,
+        resident_byte_limit: usize,
     ) -> Result<()> {
         stored.event.validate()?;
         let acknowledged_at = DateTime::parse_from_rfc3339(&stored.acknowledged_at)
@@ -216,7 +222,7 @@ impl JournalRuntime {
                 stored.event.event_id
             );
         }
-        Self::push_resident(state, stored, resident_limit)?;
+        Self::push_resident(state, stored, resident_limit, resident_byte_limit)?;
         Ok(())
     }
 
@@ -224,6 +230,7 @@ impl JournalRuntime {
         state: &mut ResidentWindow,
         stored: StoredEvent,
         resident_limit: usize,
+        resident_byte_limit: usize,
     ) -> Result<()> {
         xor_event_content_digest(&mut state.event_content_digest, &stored.event)
             .expect("validated Sift event must have a stable content digest");
@@ -234,24 +241,37 @@ impl JournalRuntime {
             (stored.event.project.clone(), stored.event.event_id.clone()),
             recent,
         );
+        let size = resident_event_bytes(&stored);
         state.recent_events.push_back(stored);
+        state.resident_bytes = state.resident_bytes.saturating_add(size);
         while state.recent_events.len() > resident_limit {
-            if let Some(evicted) = state.recent_events.pop_front() {
-                let remove = state
-                    .recent_cursors_by_event_id
-                    .get(&(
-                        evicted.event.project.clone(),
-                        evicted.event.event_id.clone(),
-                    ))
-                    .is_some_and(|recent| recent.cursor == evicted.cursor);
-                if remove {
-                    state.recent_cursors_by_event_id.remove(&(
-                        evicted.event.project.clone(),
-                        evicted.event.event_id.clone(),
-                    ));
-                }
-            }
+            Self::evict_oldest_resident(state);
+        }
+        while state.resident_bytes > resident_byte_limit && state.recent_events.len() > 1 {
+            Self::evict_oldest_resident(state);
         }
         Ok(())
+    }
+
+    /// Drop the oldest resident event and its cursor, and give back its bytes.
+    fn evict_oldest_resident(state: &mut ResidentWindow) {
+        if let Some(evicted) = state.recent_events.pop_front() {
+            state.resident_bytes = state
+                .resident_bytes
+                .saturating_sub(resident_event_bytes(&evicted));
+            let remove = state
+                .recent_cursors_by_event_id
+                .get(&(
+                    evicted.event.project.clone(),
+                    evicted.event.event_id.clone(),
+                ))
+                .is_some_and(|recent| recent.cursor == evicted.cursor);
+            if remove {
+                state.recent_cursors_by_event_id.remove(&(
+                    evicted.event.project.clone(),
+                    evicted.event.event_id.clone(),
+                ));
+            }
+        }
     }
 }

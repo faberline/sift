@@ -28,9 +28,16 @@ pub(super) fn open_journal(
     governance: Arc<dyn JournalGovernance<Error = anyhow::Error>>,
     role: StorageRole,
     resident_limit: usize,
+    resident_byte_limit: usize,
 ) -> Result<DurableJournal> {
     Ok(JournalService::owned(Arc::new(
-        JournalRuntime::open_configured(root, governance, resident_limit, dependencies(role))?,
+        JournalRuntime::open_configured(
+            root,
+            governance,
+            resident_limit,
+            resident_byte_limit,
+            dependencies(role),
+        )?,
     )))
 }
 

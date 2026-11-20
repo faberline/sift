@@ -87,7 +87,12 @@ impl JournalRuntime {
             .context("restore ordered page into dedupe index")?;
         self.dedupe.maintain_at(restore_time, false)?;
         for event in events {
-            Self::push_resident(&mut state, event, self.resident_limit)?;
+            Self::push_resident(
+                &mut state,
+                event,
+                self.resident_limit,
+                self.resident_byte_limit,
+            )?;
         }
         self.resources
             .persist_head(
