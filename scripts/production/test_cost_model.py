@@ -87,5 +87,22 @@ class SingleNodeCostModel(unittest.TestCase):
     def test_production_inputs_unchanged(self):
         self.assertEqual(cost_model.estimate(json.loads(self.PROD.read_text()))['store_pvc_gib'], 48280)
 
+    def test_retention_phase_is_counted(self):
+        inputs = json.loads(self.SINGLE.read_text())
+        self.assertEqual(inputs['phases_hours']['retention'], 0.25)
+        self.assertEqual(cost_model.estimate(inputs)['total_hours'], 4.75)
+        self.assertIs(cost_model.estimate(inputs)['over_cap'], False)
+        without = copy.deepcopy(inputs)
+        del without['phases_hours']['retention']
+        self.assertEqual(cost_model.estimate(without)['total_hours'], 4.5)
+        zero = copy.deepcopy(inputs)
+        zero['phases_hours']['retention'] = 0
+        with self.assertRaises(ValueError):
+            cost_model.estimate(zero)
+        bogus = copy.deepcopy(inputs)
+        bogus['phases_hours']['bogus'] = 1
+        with self.assertRaises(ValueError):
+            cost_model.estimate(bogus)
+
 if __name__ == '__main__':
     unittest.main()

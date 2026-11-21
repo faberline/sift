@@ -16,6 +16,40 @@ SUMMARY = {'pods': [{'podRef': {'name': 'sift-all-0', 'namespace': 'ns'},
                      'volume': [{'name': 'x', 'usedBytes': 1},
                                 {'name': 'data', 'pvcRef': {'name': 'data-sift-all-0'},
                                  'usedBytes': 4096}]}]}
+NOW = 10 * 86400 * 10**9
+
+
+def first_time(value):
+    if isinstance(value, dict):
+        for key in ('timeUnixNano', 'startTimeUnixNano'):
+            if key in value:
+                return int(value[key])
+        value = list(value.values())
+    for item in value if isinstance(value, list) else []:
+        found = first_time(item)
+        if found is not None:
+            return found
+    return None
+
+
+class FakeApi:
+    def __init__(self, accept_old=False, old_rows=None, fail_verify=False):
+        self.accept_old, self.old_rows, self.fail_verify = accept_old, old_rows or [], fail_verify
+        self.sent = []
+
+    def send(self, batch):
+        self.sent.append(batch)
+        if first_time(batch[2]) < NOW - 86400 * 10**9 and not self.accept_old:
+            raise ValueError('OTLP partial success is not an acknowledgement of the whole batch')
+        return batch[1]
+
+    def query(self, signal, start, end, name=None, run=None):
+        return self.old_rows
+
+    def verify(self, block, run):
+        if self.fail_verify:
+            raise ValueError('lost')
+        return {}
 
 
 class PhaseTests(unittest.TestCase):
@@ -161,6 +195,78 @@ class PhaseTests(unittest.TestCase):
         self.assertEqual(samples, [])
         self.assertIn('boom', sampler.errors[0])
 
+    def test_retention_is_the_last_phase(self):
+        self.assertEqual(phases.PHASES[-1], 'retention')
+        hours = phases.read_hours(INPUTS)
+        self.assertIn('retention', hours)
+        self.assertEqual(hours['retention'], 0.25)
+
+    def test_retention_days_from_args(self):
+        self.assertEqual(phases.retention_days_from_args(['serve', '--role', 'all', '--retention-days', '1']), 1)
+        self.assertIsNone(phases.retention_days_from_args(['serve']))
+        self.assertIsNone(phases.retention_days_from_args(['--retention-days', 'x']))
+        self.assertIsNone(phases.retention_days_from_args(['--retention-days']))
+
+    def test_check_retention_passes_when_old_is_rejected_and_new_is_stored(self):
+        api = FakeApi()
+        selected, accepted, notes = phases.check_retention(api, 1, NOW, ['x'])
+        self.assertGreater(selected, 0)
+        self.assertEqual(accepted, selected)
+        self.assertEqual(notes, [])
+        self.assertEqual(len(api.sent), 6)
+
+    def test_check_retention_fails_when_old_data_is_accepted(self):
+        api = FakeApi(accept_old=True)
+        selected, accepted, notes = phases.check_retention(api, 1, NOW, ['x'])
+        self.assertLess(accepted, selected)
+        self.assertTrue(any('old logs batch was accepted' in note for note in notes))
+        self.assertEqual(phases.retention_result(selected, accepted, notes)['result'], 'fail')
+
+    def test_check_retention_fails_when_old_data_is_queryable(self):
+        api = FakeApi(old_rows=[{'event_id': 'e'}])
+        selected, accepted, notes = phases.check_retention(api, 1, NOW, ['x'])
+        self.assertLess(accepted, selected)
+        self.assertIn('old logs are queryable', notes)
+
+    def test_check_retention_fails_when_new_data_is_lost(self):
+        api = FakeApi(fail_verify=True)
+        selected, accepted, notes = phases.check_retention(api, 1, NOW, ['x'])
+        self.assertLess(accepted, selected)
+        self.assertTrue(any(note.startswith('new: lost') for note in notes))
+
+    def test_retention_result_passes(self):
+        result = phases.retention_result(20, 20, [])
+        self.assertEqual(result['result'], 'pass')
+        self.assertEqual(result['detail'],
+                         'old batch rejected and not queryable; new batch accepted and queryable')
+
+    def test_retention_evidence_has_gate_g2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = phases.write_evidence(tmp, phases.retention_result(20, 20, []))
+            data = json.loads(path.read_text())
+        self.assertEqual(data['gate'], 'G2')
+        self.assertTrue(data['proves'])
+        self.assertTrue(data['does_not_prove'])
+        self.assertIn('expiry of stored data', data['does_not_prove'])
+
+    def test_failed_retention_evidence_has_gate_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = phases.write_evidence(tmp, phases.phase_result('retention', 'a', 'b', 0, 0, 0, 'boom'))
+            self.assertEqual(json.loads(path.read_text())['gate'], 'G2')
+            other = phases.write_evidence(tmp, phases.phase_result('comparison', 'a', 'b', 0, 0, 0, 'x'))
+            self.assertNotIn('gate', json.loads(other.read_text()))
+
+    def test_wait_retention_args(self):
+        class Done:
+            returncode = 0
+            stdout = '["serve","--retention-days","1"]'
+
+        class Other(Done):
+            stdout = '["serve","--retention-days","180"]'
+        phases.wait_retention_args('ns', 1, seconds=5, run=lambda *a, **k: Done())
+        with self.assertRaises(RuntimeError):
+            phases.wait_retention_args('ns', 1, seconds=0, run=lambda *a, **k: Other())
+
 
 class CostGuardTests(unittest.TestCase):
     def setUp(self):
@@ -171,14 +277,14 @@ class CostGuardTests(unittest.TestCase):
 
     def test_figures_before_first_phase(self):
         figures = phases.guard_figures(self.inputs, 'load_30m', 0)
-        self.assertEqual(figures['hourly_usd'], 0.9301)
+        self.assertEqual(figures['hourly_usd'], 0.93)
         self.assertEqual(figures['spent_usd'], 0)
-        self.assertEqual(figures['hours_left'], 3.5)
+        self.assertEqual(figures['hours_left'], 3.75)
 
     def test_figures_after_three_hours(self):
         figures = phases.guard_figures(self.inputs, 'faults', 10800)
-        self.assertEqual(figures['hours_left'], 1.0)
-        self.assertAlmostEqual(figures['spent_usd'], 2.7903, places=4)
+        self.assertEqual(figures['hours_left'], 1.25)
+        self.assertAlmostEqual(figures['spent_usd'], 2.79, places=4)
         self.assertEqual(figures['elapsed_hours'], 3.0)
 
     def test_guard_lets_the_run_go_on(self):
@@ -187,7 +293,7 @@ class CostGuardTests(unittest.TestCase):
             entry = self.read_entries(tmp)[0]
         self.assertEqual(entry['result'], 'pass')
         self.assertEqual(entry['phase'], 'load_30m')
-        self.assertAlmostEqual(entry['projected_usd'], 3.2554, places=3)
+        self.assertAlmostEqual(entry['projected_usd'], 3.4879, places=3)
 
     def test_guard_stops_the_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,12 +305,12 @@ class CostGuardTests(unittest.TestCase):
 
     def test_spent_counts_against_the_cap(self):
         with tempfile.TemporaryDirectory() as refused, tempfile.TemporaryDirectory() as allowed:
-            self.assertNotEqual(phases.run_guard('faults', self.inputs, '3.7', 10800, refused), 0)
-            self.assertEqual(phases.run_guard('faults', self.inputs, '3.8', 10800, allowed), 0)
+            self.assertNotEqual(phases.run_guard('faults', self.inputs, '3.9', 10800, refused), 0)
+            self.assertEqual(phases.run_guard('faults', self.inputs, '4.0', 10800, allowed), 0)
 
     def test_every_check_is_appended(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for phase, seconds in zip(phases.PHASES, (0, 1800, 9000, 10800)):
+            for phase, seconds in zip(phases.PHASES, (0, 1800, 9000, 10800, 12600)):
                 self.assertEqual(phases.run_guard(phase, self.inputs, '7', seconds, tmp), 0)
             entries = self.read_entries(tmp)
         self.assertEqual([entry['phase'] for entry in entries], list(phases.PHASES))
