@@ -311,7 +311,10 @@ fn ensure_retention_head_reconciled(
 
 /// The event cutoff, `retention` days before `now`, and the dedupe receipt
 /// cutoff, one idempotency window before it, in Unix nanoseconds.
-fn retention_cutoffs(now: DateTime<Utc>, retention: RetentionDays) -> Result<(i64, i64)> {
+pub(crate) fn retention_cutoffs(
+    now: DateTime<Utc>,
+    retention: RetentionDays,
+) -> Result<(i64, i64)> {
     let requested_cutoff_nanos = (now - chrono::Duration::days(i64::from(retention.days())))
         .timestamp_nanos_opt()
         .with_context(|| {

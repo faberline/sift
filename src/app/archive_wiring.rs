@@ -155,6 +155,19 @@ pub fn expire_committed_events_with_days_at(
         retention,
     )
 }
+pub fn expire_local_events_with_days_at(
+    journal: &crate::journal::application::journal_service::JournalService<'_>,
+    now: DateTime<Utc>,
+    days: u32,
+) -> Result<LocalExpiryReceipt> {
+    let retention = RetentionDays::new(days).map_err(|error| anyhow::anyhow!(error))?;
+    crate::archive::application::local_retention_expiry::expire_local_events_at(
+        &archive_services(),
+        journal,
+        now,
+        retention,
+    )
+}
 pub fn finalize_archive_gc_after_checkpoint(root: &Path) -> Result<usize> {
     crate::archive::application::finalize_archive_gc::finalize_archive_gc_after_checkpoint(
         &archive_services(),
