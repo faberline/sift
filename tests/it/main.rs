@@ -26,6 +26,7 @@ mod kind_mvp_contract;
 mod kubernetes_auth;
 mod live_backup;
 mod local_backpressure;
+mod local_retention_expiry;
 mod local_runtime_journey;
 mod log_workload_script;
 mod logging_store;
