@@ -9,7 +9,11 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::archive::application::lifecycle_capacity::LifecycleCapacityService;
+use crate::archive::application::local_retention_expiry::expire_local_events_at;
+use crate::archive::application::local_retention_metrics::LocalRetentionMetrics;
 use crate::journal::application::journal_service::JournalService as DurableJournal;
+use crate::shared_kernel::archive_receipts::LocalExpiryReceipt;
+use crate::shared_kernel::retention_boundary::RetentionDays;
 
 pub(in crate::archive) struct LifecycleCommit {
     pub(in crate::archive) manifest_uri: Option<String>,
@@ -26,6 +30,7 @@ pub(in crate::archive) struct LifecycleOutcome {
     pub(in crate::archive) manifest_uri: Option<String>,
     pub(in crate::archive) manifest_sha256: Option<String>,
     pub(in crate::archive) retention_scan_pending: bool,
+    pub(in crate::archive) local_expiry: Option<LocalExpiryReceipt>,
 }
 
 /// What every lifecycle tick runs against: the journal and its Raft state
@@ -40,6 +45,8 @@ pub(crate) struct LifecycleContext {
         Arc<crate::journal::application::checkpoint_service::JournalCheckpointService>,
     pub(crate) local_capacity: Arc<LifecycleCapacityService>,
     pub(crate) destination: Option<String>,
+    pub(crate) clock: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    pub(crate) local_retention: Arc<LocalRetentionMetrics>,
 }
 
 pub(in crate::archive) fn run_lifecycle_attempt(
@@ -48,6 +55,7 @@ pub(in crate::archive) fn run_lifecycle_attempt(
     state_machine: &crate::journal::application::checkpoint_service::JournalCheckpointService,
     destination: Option<&str>,
     retention_fence: Option<crate::shared_kernel::retention_fence::RetentionFenceV1>,
+    local_expiry_now: Option<DateTime<Utc>>,
 ) -> Result<LifecycleOutcome> {
     crate::archive::application::reconcile_committed_retention::reconcile_live_committed_retention(
         services, journal,
@@ -58,6 +66,20 @@ pub(in crate::archive) fn run_lifecycle_attempt(
     crate::archive::application::resume_local_blob_gc::resume_local_blob_gc_batch(
         services, journal, 128, 1_280_000,
     )?;
+    // Expiry rewrites the local segments, so it runs before the capture that
+    // lists them; a capture taken earlier would name segments that no longer exist.
+    let local_expiry = match (destination, local_expiry_now) {
+        (None, Some(now)) => {
+            match expire_local_events_at(services, journal, now, RetentionDays::configured()) {
+                Ok(receipt) => Some(receipt),
+                Err(error) => {
+                    tracing::warn!(%error, "Sift local retention expiry failed; the tick goes on");
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
     let (applied_index, raw_cursor, segments) = state_machine.capture_archive_prefix()?;
     match destination {
         Some(destination) => {
@@ -140,6 +162,7 @@ pub(in crate::archive) fn run_lifecycle_attempt(
                 retention_scan_pending: status
                     .as_ref()
                     .is_some_and(|status| status.retention_scan_pending),
+                local_expiry: None,
             })
         }
         None => {
@@ -163,6 +186,7 @@ pub(in crate::archive) fn run_lifecycle_attempt(
             Ok(LifecycleOutcome {
                 commit,
                 captured_applied_index: applied_index,
+                local_expiry,
                 ..LifecycleOutcome::default()
             })
         }

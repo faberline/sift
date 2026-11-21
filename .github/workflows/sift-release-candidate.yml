@@ -24,6 +24,9 @@ concurrency:
   group: sift-release-candidate-${{ inputs.version }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   identity:
     name: candidate identity
@@ -293,6 +296,7 @@ jobs:
             org.opencontainers.image.revision=${{ needs.identity.outputs.commit }}
             org.opencontainers.image.version=${{ needs.identity.outputs.version }}
             org.opencontainers.image.url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+            ${{ inputs.profile == 'single-node' && 'profile=single-node' || '' }}
       - name: Extract exact two platform child digests
         id: platform_digests
         shell: bash

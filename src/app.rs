@@ -66,6 +66,8 @@ pub struct ServiceState {
     admission:
         std::sync::Arc<crate::ingest::application::admission_controller::AdmissionController>,
     local_capacity: std::sync::Arc<crate::node::infrastructure::local_capacity::LocalCapacity>,
+    local_retention:
+        std::sync::Arc<crate::archive::application::local_retention_metrics::LocalRetentionMetrics>,
     query_jobs: std::sync::Arc<crate::query::application::job_service::QueryJobService>,
     ingest: std::sync::Arc<crate::ingest::application::ingest_service::IngestService>,
     archive_reads: std::sync::Arc<crate::archive::application::read_service::ArchiveReadService>,
