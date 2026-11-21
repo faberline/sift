@@ -21,14 +21,14 @@
 
 # Prepare the empty durable root in a stage with install(1); distroless has no
 # shell or ownership tools.
-FROM debian:bookworm-slim AS data-root
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS data-root
 RUN install -d -m 0700 -o 65532 -g 65532 /image-root/var/lib/sift
 
 # distroless static runtime — only the binary + CA certs, nonroot. Identical
 # to Dockerfile.release's runtime stage; static-debian12 ships no
 # glibc/libgcc, so this only works with the fully static musl binaries the
 # workflow builds.
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 ARG TARGETARCH=amd64
 COPY dist/linux/${TARGETARCH}/sift /usr/local/bin/sift
 COPY --from=data-root --chown=65532:65532 --chmod=0700 /image-root/var/lib/sift /var/lib/sift
