@@ -73,6 +73,7 @@ fn render_single_node(
     }
     plan.add_service(single_node_service_plan(cx));
     plan.add_stateful_set(stateful_role_plan(cx, &instance.settings, ALL_COMPONENT));
+    plan.add_daemon_set(agent_daemon_set_plan(cx, &instance.settings));
     for policy in single_node_network_policy_plans(
         cx,
         &instance.settings,
