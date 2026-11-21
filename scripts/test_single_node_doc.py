@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,28 @@ class SingleNodeDocTest(unittest.TestCase):
         page = self.read(PAGE)
         self.assertIn("does not wait", page)
         self.assertIn("another Sift process may be using it", page)
+
+    def test_phase_gate_table_names_each_gate(self):
+        page = self.read(PAGE)
+        for phase, gate in [
+            ("install_one_namespace", "G1"),
+            ("retention", "G2"),
+            ("deleted_pod_logs", "G3"),
+        ]:
+            self.assertIn(f"| `{phase}` | {gate} |", page)
+
+    def test_phase_gate_table_lists_every_phase(self):
+        page = self.read(PAGE)
+        inputs = json.loads(self.read("scripts/production/cost-inputs.single-node.json"))
+        for key in inputs["phases_hours"]:
+            self.assertIn(f"| `{key}` |", page)
+
+    def test_phase_gate_table_is_under_the_gates_heading(self):
+        page = self.read(PAGE)
+        gates = page.index("## Acceptance gates")
+        table = page.index("### Phases and gates")
+        self.assertGreater(table, gates)
+        self.assertLess(table, page.index("## Senders"))
 
     def test_g4_names_existing_ci_jobs(self):
         page = self.read(PAGE)

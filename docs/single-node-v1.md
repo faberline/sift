@@ -25,7 +25,7 @@ The profile is one `all`-role Pod on one PVC on Standard GKE, installed by the o
 
 Every gate is **not run**. No live GKE evidence exists yet.
 
-1. **G1** One documented install on Standard GKE with a single node, no GCS and no FQDN policy, that collects the container logs and the Prometheus metrics of one namespace and answers `sift_query` and PromQL for them.
+1. **G1** One documented install on Standard GKE with a single node, no GCS and no FQDN policy, that collects the container logs and the Prometheus metrics of one namespace and answers `sift_query` and PromQL for them. The acceptance phase `install_one_namespace` (`scripts/single_node/acceptance/phases.py`) looks for the log records and the metric series of the namespace and sends one `sift_query` call and one PromQL query; its result `install_one_namespace.json` has `"gate": "G1"`; it does not prove an install with more than one node or namespace, GCS, an FQDN policy or query speed.
 2. **G2** Retention set to 30 days is enforced. G2 has two proofs. (a) The acceptance phase `retention` (`scripts/single_node/acceptance/phases.py`) sets `retentionDays` to 1 and proves that the setting reaches the Pod (`--retention-days 1`), that a batch older than the retention is rejected at ingest and is not queryable, and that a batch inside it is accepted and queryable. Its result `retention.json` has `"gate": "G2"`, `"proves"` and `"does_not_prove"`; it does not prove expiry of stored data, a retention of 30 days or reuse of disk. (b) The expiry of stored data without GCS is proved by the test `local_worker_expires_old_events_with_an_injected_clock` in `tests/archive_worker.rs`, which runs the lifecycle worker with an injected clock. G2 is complete only when both proofs exist.
 3. **G3** Logs of a Pod that is deleted within 10 s of exit are queryable. The acceptance phase `deleted_pod_logs` (`scripts/single_node/acceptance/phases.py`) starts a Pod that writes one marker line and exits, deletes it within 10 s, and looks for the marker with the Pod name and namespace; its result `deleted_pod_logs.json` has `"gate": "G3"`; it does not prove a Pod deleted sooner than 10 s or many Pods at once.
 4. **G4** The functional and PromQL-oracle gates that already run in the CI workflow `.github/workflows/ci.yml` with the default `serve --role all` (the default of `--role` in `src/bin/sift/serve_args.rs` is `all`):
@@ -33,6 +33,21 @@ Every gate is **not run**. No live GKE evidence exists yet.
    - `test: perf (metric workload)`: its step `metric workload` runs `tests/perf/metric_workload.sh`, which starts `sift serve` with the default role and runs the metric workload.
 
    These gates run on a CI runner, not on GKE.
+
+### Phases and gates
+
+| Phase or check | Gate | Note |
+|---|---|---|
+| `setup` | none | the install that G1 uses; G1 is proved by `install_one_namespace`; `setup.json` has no `gate` field |
+| `install_one_namespace` | G1 | result has `"gate": "G1"` |
+| `load_30m` | none | load evidence; no single gate |
+| `load_24h` | none | load evidence; no single gate |
+| `faults` | none | restart evidence; no single gate |
+| `comparison` | none | read-back evidence; no single gate |
+| `retention` | G2 | result has `"gate": "G2"` (proof a of G2) |
+| `deleted_pod_logs` | G3 | result has `"gate": "G3"` |
+
+Every gate stays **not run**. G4 runs in the CI workflow, not in the acceptance run.
 
 The load phase named load_24h in the single-node acceptance runs 7080 seconds at 50 items per second, not 24 hours. The cost page docs/operations/single-node-acceptance-cost.md gives the figure.
 

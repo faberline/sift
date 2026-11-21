@@ -63,7 +63,7 @@ class SingleNodeWorkflowTest(unittest.TestCase):
         self.assertIn(f"aw-ref: {AW_PIN}", deploy)
         self.assertIn("namespace: sift-single-node", deploy)
         self.assertIn(f"overlay: {OVERLAY}", deploy)
-        self.assertIn("ttl-minutes: 300", deploy)
+        self.assertIn("ttl-minutes: 310", deploy)
         self.assertIn("queue-minutes: 30", deploy)
         for perm in ["id-token: write", "contents: read", "packages: read"]:
             self.assertIn(perm, deploy)
@@ -154,7 +154,7 @@ class SingleNodeWorkflowTest(unittest.TestCase):
 
     def test_phases_script_exists_and_is_stdlib(self):
         text = self.read("scripts/single_node/acceptance/phases.py")
-        self.assertIn("PHASES = ('load_30m', 'load_24h', 'faults', 'comparison', 'retention', 'deleted_pod_logs')", text)
+        self.assertIn("PHASES = ('install_one_namespace', 'load_30m', 'load_24h', 'faults', 'comparison', 'retention', 'deleted_pod_logs')", text)
         self.assertNotIn("import requests", text)
         self.assertNotIn("import yaml", text)
 

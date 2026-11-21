@@ -91,12 +91,12 @@ class SingleNodeCostModel(unittest.TestCase):
         inputs = json.loads(self.SINGLE.read_text())
         self.assertEqual(inputs['phases_hours']['retention'], 0.25)
         result = cost_model.estimate(inputs)
-        self.assertAlmostEqual(result['total_hours'], 4.85, places=6)
+        self.assertAlmostEqual(result['total_hours'], 4.95, places=6)
         self.assertIs(result['over_cap'], False)
         self.assertEqual(result['config_values']['estimated_hourly_cost_usd'], 0.93)
         without = copy.deepcopy(inputs)
         del without['phases_hours']['retention']
-        self.assertAlmostEqual(cost_model.estimate(without)['total_hours'], 4.6, places=6)
+        self.assertAlmostEqual(cost_model.estimate(without)['total_hours'], 4.7, places=6)
         zero = copy.deepcopy(inputs)
         zero['phases_hours']['retention'] = 0
         with self.assertRaises(ValueError):
@@ -109,10 +109,22 @@ class SingleNodeCostModel(unittest.TestCase):
     def test_deleted_pod_logs_phase_is_optional(self):
         inputs = json.loads(self.SINGLE.read_text())
         self.assertEqual(inputs['phases_hours']['deleted_pod_logs'], 0.1)
-        self.assertAlmostEqual(cost_model.estimate(inputs)['total_hours'], 4.85, places=6)
+        self.assertAlmostEqual(cost_model.estimate(inputs)['total_hours'], 4.95, places=6)
         without = copy.deepcopy(inputs)
         del without['phases_hours']['deleted_pod_logs']
-        self.assertAlmostEqual(cost_model.estimate(without)['total_hours'], 4.75, places=6)
+        self.assertAlmostEqual(cost_model.estimate(without)['total_hours'], 4.85, places=6)
+        extra = copy.deepcopy(inputs)
+        extra['phases_hours']['x'] = 0.1
+        with self.assertRaises(ValueError):
+            cost_model.estimate(extra)
+
+    def test_install_one_namespace_phase_is_optional(self):
+        inputs = json.loads(self.SINGLE.read_text())
+        self.assertEqual(inputs['phases_hours']['install_one_namespace'], 0.1)
+        self.assertAlmostEqual(cost_model.estimate(inputs)['total_hours'], 4.95, places=6)
+        without = copy.deepcopy(inputs)
+        del without['phases_hours']['install_one_namespace']
+        self.assertAlmostEqual(cost_model.estimate(without)['total_hours'], 4.85, places=6)
         extra = copy.deepcopy(inputs)
         extra['phases_hours']['x'] = 0.1
         with self.assertRaises(ValueError):

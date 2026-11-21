@@ -6,6 +6,7 @@
   "driver_usd_per_hour": 0.15,
   "phases_hours": {
     "setup": 1.0,
+    "install_one_namespace": 0.1,
     "load_30m": 0.5,
     "load_24h": 2.0,
     "faults": 0.5,
