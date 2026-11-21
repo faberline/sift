@@ -118,7 +118,18 @@ pub(super) fn single_node_network_policy_plans(
             kubernetes_api_ports,
         ));
     }
-    vec![default_deny_policy(cx), all]
+    let mut agent =
+        role_network_policy(cx, AGENT_COMPONENT).with_egress(render::NetworkRulePlan::new(
+            vec![role_peer(cx, ALL_COMPONENT)],
+            vec![render::NetworkPortPlan::tcp(HTTP_PORT)],
+        ));
+    if !kubernetes_api_cidrs.is_empty() {
+        agent = agent.with_egress(kubernetes_api_egress(
+            kubernetes_api_cidrs,
+            kubernetes_api_ports,
+        ));
+    }
+    vec![default_deny_policy(cx), all, agent]
 }
 
 pub(super) fn network_policy_plans(

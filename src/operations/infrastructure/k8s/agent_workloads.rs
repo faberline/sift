@@ -6,7 +6,7 @@ use service_k8s::render::{self, RenderCtx};
 
 use crate::operations::domain::instance_names::{AGENT_COMPONENT, HTTP_PORT};
 use crate::operations::infrastructure::k8s::role_workloads::{
-    role_extra_labels, role_name, role_selector_labels,
+    role_extra_labels, role_name, role_selector_labels, tolerations_json,
 };
 use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
@@ -83,7 +83,8 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
             "capabilities":{"drop":["ALL"],"add":["CHOWN","FOWNER","DAC_OVERRIDE"]}
         }
     })])
-    .with_volumes(agent_volumes);
+    .with_volumes(agent_volumes)
+    .with_tolerations(tolerations_json(spec));
     // The agent lists Pods through the Kubernetes API only when a Pod label is set.
     let runtime = if spec.logs.pod_label.is_some() {
         runtime.with_automount_service_account_token(true)

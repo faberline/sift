@@ -275,7 +275,7 @@ fn role_container_plan(
 
 /// The Kubernetes tolerations of the role Pods. Only the fields that are set
 /// are written, so the API server applies its own defaults to the rest.
-fn tolerations_json(spec: &SiftSpec) -> Vec<Value> {
+pub(super) fn tolerations_json(spec: &SiftSpec) -> Vec<Value> {
     spec.placement
         .tolerations
         .iter()

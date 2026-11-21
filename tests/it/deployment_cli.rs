@@ -1435,7 +1435,6 @@ fn single_node_renders_one_all_role_statefulset() {
 
     for kind in [
         "Deployment",
-        "DaemonSet",
         "PodDisruptionBudget",
         "CronJob",
         "Role",
@@ -1448,6 +1447,13 @@ fn single_node_renders_one_all_role_statefulset() {
             "single-node must not render a {kind}"
         );
     }
+
+    let daemon_sets: Vec<&Value> = objects
+        .iter()
+        .filter(|object| object["kind"] == "DaemonSet")
+        .collect();
+    assert_eq!(daemon_sets.len(), 1);
+    object(&objects, "DaemonSet", "events-agent");
 
     let services: Vec<&Value> = objects
         .iter()
@@ -1476,7 +1482,14 @@ fn single_node_renders_one_all_role_statefulset() {
         .filter(|object| object["kind"] == "NetworkPolicy")
         .map(|policy| policy["metadata"]["name"].as_str().expect("policy name"))
         .collect();
-    assert_eq!(policy_names, ["events-network", "events-all-network"]);
+    assert_eq!(
+        policy_names,
+        [
+            "events-network",
+            "events-all-network",
+            "events-agent-network"
+        ]
+    );
 }
 
 #[test]
@@ -1741,6 +1754,106 @@ fn single_node_renders_toleration_and_storage_class() {
         stateful_set["spec"]["volumeClaimTemplates"][0]["spec"]["storageClassName"],
         "dynamic-rwo"
     );
+}
+
+#[test]
+fn single_node_renders_the_log_agent() {
+    let objects = single_node_resource("off", json!({})).render();
+
+    object(&objects, "DaemonSet", "events-agent");
+    let args = container_args(&objects, "DaemonSet", "events-agent");
+    let index = args
+        .iter()
+        .position(|arg| arg == "--namespace")
+        .expect("--namespace argument");
+    assert_eq!(args[index + 1], "observability");
+    assert!(args.iter().any(|arg| arg == "--follow"));
+
+    let agent = object(&objects, "DaemonSet", "events-agent");
+    let env = agent["spec"]["template"]["spec"]["containers"][0]["env"]
+        .as_array()
+        .expect("agent env");
+    assert!(env
+        .iter()
+        .any(|var| var["name"] == "SIFT_URL" && var["value"] == "http://events:7380"));
+}
+
+#[test]
+fn single_node_agent_collects_the_listed_namespaces() {
+    let objects = single_node_resource("off", json!({"logs": {"namespaces": ["a", "b"]}})).render();
+
+    let args = container_args(&objects, "DaemonSet", "events-agent");
+    let index = args
+        .iter()
+        .position(|arg| arg == "--namespace")
+        .expect("--namespace argument");
+    assert_eq!(args[index + 1], "a,b");
+}
+
+#[test]
+fn single_node_agent_has_the_placement_tolerations() {
+    let objects = single_node_resource(
+        "off",
+        json!({
+            "placement": {
+                "nodeSelector": {"faberline.dev/pool": "sift-server"},
+                "tolerations": [{
+                    "key": "faberline.dev/pool",
+                    "operator": "Equal",
+                    "value": "sift-server",
+                    "effect": "NoSchedule"
+                }]
+            }
+        }),
+    )
+    .render();
+
+    let agent = object(&objects, "DaemonSet", "events-agent");
+    assert_eq!(
+        agent["spec"]["template"]["spec"]["tolerations"],
+        json!([{
+            "key": "faberline.dev/pool",
+            "operator": "Equal",
+            "value": "sift-server",
+            "effect": "NoSchedule"
+        }])
+    );
+}
+
+#[test]
+fn single_node_agent_policy_reaches_only_the_all_pod() {
+    let objects = single_node_resource("off", json!({})).render();
+
+    let policy = object(&objects, "NetworkPolicy", "events-agent-network");
+    let egress = policy["spec"]["egress"]
+        .as_array()
+        .expect("agent egress rules");
+    assert_eq!(egress.len(), 2);
+    let all_rule = egress
+        .iter()
+        .find(|rule| rule["to"][0]["podSelector"]["matchLabels"]["sift.axiom.dev/role"] == "all")
+        .expect("egress rule to the all-role Pod");
+    let ports = all_rule["ports"].as_array().expect("agent egress ports");
+    assert_eq!(ports.len(), 1);
+    assert_eq!(ports[0]["port"], 7380);
+    assert!(egress.iter().all(|rule| rule["to"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .all(|peer| peer.get("ipBlock").is_none())));
+
+    let all_policy = object(&objects, "NetworkPolicy", "events-all-network");
+    let ingress = all_policy["spec"]["ingress"]
+        .as_array()
+        .expect("all-role ingress rules");
+    assert_eq!(ingress.len(), 1);
+    let ingress_ports: Vec<&Value> = ingress[0]["ports"]
+        .as_array()
+        .expect("all-role ingress ports")
+        .iter()
+        .map(|port| &port["port"])
+        .collect();
+    assert_eq!(ingress_ports, [&json!(7380), &json!(4317)]);
 }
 
 #[test]
