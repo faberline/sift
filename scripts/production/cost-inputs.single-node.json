@@ -10,7 +10,8 @@
     "load_24h": 2.0,
     "faults": 0.5,
     "comparison": 0.5,
-    "retention": 0.25
+    "retention": 0.25,
+    "deleted_pod_logs": 0.1
   },
   "store_replicas": 1,
   "control_replicas": 1,
