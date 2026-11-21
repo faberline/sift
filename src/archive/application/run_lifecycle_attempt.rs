@@ -144,11 +144,10 @@ pub(in crate::archive) fn run_lifecycle_attempt(
         }
         None => {
             let committed_cursor =
-                crate::archive::application::archive_status_queries::local_committed_watermarks(
+                crate::archive::application::archive_status_queries::local_committed_cursor(
                     services,
                     journal.storage().root(),
-                )?
-                .max_cursor();
+                )?;
             let commit = if raw_cursor > committed_cursor {
                 let receipt = crate::archive::application::archive_journal_local::archive_journal_local_captured(services,
                     journal, raw_cursor, segments,
@@ -207,11 +206,10 @@ pub(in crate::archive) fn prepare_lifecycle_checkpoint(
         }
         None => {
             let committed_cursor =
-                crate::archive::application::archive_status_queries::local_committed_watermarks(
+                crate::archive::application::archive_status_queries::local_committed_cursor(
                     services,
                     journal.storage().root(),
-                )?
-                .max_cursor();
+                )?;
             if raw_cursor > committed_cursor {
                 crate::archive::application::archive_journal_local::archive_journal_local_captured(
                     services, journal, raw_cursor, segments,

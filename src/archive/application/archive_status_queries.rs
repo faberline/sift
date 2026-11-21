@@ -53,6 +53,15 @@ pub(crate) fn local_committed_watermarks(
         .unwrap_or_default())
 }
 
+/// The highest cursor of the local commit, 0 when there is none. An expired
+/// tail counts, so a state whose newest rows were removed does not recommit.
+pub(crate) fn local_committed_cursor(services: &ArchiveServices, root: &Path) -> Result<u64> {
+    Ok(services
+        .read_local_commit_state(root)?
+        .map(|state| state.snapshot_index)
+        .unwrap_or(0))
+}
+
 pub(crate) fn local_committed_status(
     services: &ArchiveServices,
     root: &Path,
