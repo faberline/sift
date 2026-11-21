@@ -273,7 +273,7 @@ fn cli_help_bytes_do_not_change() {
     for (path, help) in old {
         if !["", "collect", "query", "serve"].contains(&path.as_str()) {
             assert_eq!(
-                pages[&path].replace("0.2.0", "0.1.2"),
+                pages[&path].replace("0.3.0", "0.1.2"),
                 help,
                 "old help page {path}"
             );

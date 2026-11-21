@@ -282,7 +282,7 @@ Render service account, RBAC, and controller deployment assets
 | Flag | Environment variable | Default | Meaning |
 |---|---|---|---|
 | `--namespace` | - | `sift-system` | Namespace of the operator resources. |
-| `--image` | - | `ghcr.io/faberline/sift:0.2.0` | Operator container image. |
+| `--image` | - | `ghcr.io/faberline/sift:0.3.0` | Operator container image. |
 | `--out` | - | - | Write to this file. Without it the output goes to stdout. |
 
 ### `sift k8s operator run`
@@ -319,7 +319,7 @@ Usage: sift k8s collector render [OPTIONS]
 | Flag | Environment variable | Default | Meaning |
 |---|---|---|---|
 | `--namespace` | - | `sift-system` | Namespace of the collector resources. |
-| `--image` | - | `ghcr.io/faberline/sift:0.2.0` | Collector container image. |
+| `--image` | - | `ghcr.io/faberline/sift:0.3.0` | Collector container image. |
 | `--out` | - | - | Write to this file. Without it the output goes to stdout. |
 
 ### `sift connect`

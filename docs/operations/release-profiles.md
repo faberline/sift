@@ -13,13 +13,13 @@ single-node line. It changes no workflow, no script and no tag.
 ## Version and tag
 
 The single-node line should use the version `0.3.0` and the tag `sift@0.3.0`.
-The version `0.2.0` stays for the `production` profile (#83), and `Cargo.toml`
-already says `0.2.0`. The release workflow accepts only a plain `X.Y.Z`
-version, so a profile suffix cannot carry the profile. A new profile is a
-minor step, so the version is `0.3.0` and not the patch `0.2.1`, which would
-say that the change fixes an unreleased `0.2.0`. A later issue sets
-`Cargo.toml` to the confirmed version, because the candidate workflow refuses
-a version that does not match `Cargo.toml`.
+`Cargo.toml` now says `0.3.0` (set by #334). The version `0.2.0` stays for the
+`production` profile (#83); it is not on `main` any more. The release workflow
+accepts only a plain `X.Y.Z` version, so a profile suffix cannot carry the
+profile. A new profile is a minor step, so the version is `0.3.0` and not the
+patch `0.2.1`, which would say that the change fixes an unreleased `0.2.0`.
+The candidate workflow still refuses a version that does not match
+`Cargo.toml`.
 
 Proposal: the owner confirms before any tag
 
