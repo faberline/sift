@@ -63,6 +63,23 @@ class FakeLogApi:
         return {'data': {'records': self.records}}
 
 
+class FakeInstallApi:
+    """Answers the log query and the PromQL query of the install phase."""
+
+    def __init__(self, log_records=1, series=1, log_error=None, prom_error=None):
+        self.log_records, self.series = log_records, series
+        self.log_error, self.prom_error = log_error, prom_error
+
+    def request(self, method, path, value=None, latency=None):
+        if path.startswith('/prometheus/api/v1/query'):
+            if self.prom_error:
+                raise ValueError(self.prom_error)
+            return {'status': 'success', 'data': {'resultType': 'vector', 'result': [{}] * self.series}}
+        if self.log_error:
+            raise ValueError(self.log_error)
+        return {'data': {'records': [log_record('x', 'sift-all-0', 'ns')] * self.log_records}}
+
+
 def log_record(body, pod, namespace):
     return {'body_text': body, 'resource': {'k8s.pod.name': pod, 'k8s.namespace.name': namespace}}
 
@@ -124,6 +141,89 @@ class PhaseTests(unittest.TestCase):
     def test_deleted_pod_logs_fits_the_ttl(self):
         self.assertEqual(phases.phase_timeout_seconds(0.1), 432)
         self.assertIsNone(phases.check_total(phases.read_hours(INPUTS), phases.TTL_MINUTES))
+
+    def test_install_one_namespace_is_the_first_phase(self):
+        self.assertEqual(phases.PHASES[0], 'install_one_namespace')
+        self.assertEqual(phases.read_hours(INPUTS)['install_one_namespace'], 0.1)
+        self.assertEqual(phases.TTL_MINUTES, 310)
+
+    def test_check_install_one_namespace_passes(self):
+        checked = phases.check_install_one_namespace(FakeInstallApi(2, 3), 'ns', NOW,
+                                                     wait_seconds=0, sleep=no_sleep)
+        self.assertEqual(checked, (2, 3, 200, 200, []))
+        self.assertEqual(phases.install_one_namespace_result('ns', *checked)['result'], 'pass')
+
+    def test_install_one_namespace_ignores_other_namespaces(self):
+        api = FakeLogApi([log_record('x', 'p', 'other'), log_record('y', 'p', 'ns')])
+        self.assertEqual(phases.count_namespace_logs(api, 'ns', NOW), 1)
+
+    def test_count_metric_series(self):
+        self.assertEqual(phases.count_metric_series(FakeInstallApi(series=3), 'ns'), 3)
+
+    def test_install_one_namespace_fails_with_zero_log_records(self):
+        checked = phases.check_install_one_namespace(FakeInstallApi(0, 3), 'ns', NOW,
+                                                     wait_seconds=0, sleep=no_sleep)
+        self.assertEqual(checked[0], 0)
+        self.assertEqual(checked[2], 200)
+        self.assertEqual(len(checked[4]), 1)
+        self.assertIn('no log record', checked[4][0])
+        result = phases.install_one_namespace_result('ns', *checked)
+        self.assertEqual(result['result'], 'fail')
+        self.assertEqual(result['log_records'], 0)
+
+    def test_install_one_namespace_fails_with_zero_metric_series(self):
+        checked = phases.check_install_one_namespace(FakeInstallApi(2, 0), 'ns', NOW,
+                                                     wait_seconds=0, sleep=no_sleep)
+        self.assertEqual(checked[1], 0)
+        self.assertEqual(len(checked[4]), 1)
+        self.assertIn('no metric series', checked[4][0])
+        self.assertEqual(phases.install_one_namespace_result('ns', *checked)['result'], 'fail')
+
+    def test_install_one_namespace_fails_when_sift_query_fails(self):
+        api = FakeInstallApi(2, 3, log_error='API refused POST /api/v1/query with HTTP 500 or exceeded its limit')
+        checked = phases.check_install_one_namespace(api, 'ns', NOW, wait_seconds=0, sleep=no_sleep)
+        self.assertEqual(checked[0], 0)
+        self.assertEqual(checked[2], 500)
+        result = phases.install_one_namespace_result('ns', *checked)
+        self.assertEqual(result['result'], 'fail')
+        self.assertIn('sift_query failed', result['detail'])
+
+    def test_install_one_namespace_fails_when_promql_fails(self):
+        api = FakeInstallApi(2, 3, prom_error='API refused GET /prometheus/api/v1/query with HTTP 400 or exceeded its limit')
+        checked = phases.check_install_one_namespace(api, 'ns', NOW, wait_seconds=0, sleep=no_sleep)
+        self.assertEqual(checked[1], 0)
+        self.assertEqual(checked[3], 400)
+        result = phases.install_one_namespace_result('ns', *checked)
+        self.assertEqual(result['result'], 'fail')
+        self.assertIn('PromQL failed', result['detail'])
+
+    def test_http_status(self):
+        self.assertEqual(phases.http_status(ValueError('x with HTTP 503 y')), 503)
+        self.assertEqual(phases.http_status(ValueError('boom')), 0)
+
+    def test_install_one_namespace_evidence_has_gate_g1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = phases.write_evidence(Path(tmp), phases.install_one_namespace_result('ns', 2, 3, 200, 200, []))
+            data = json.loads(path.read_text())
+        self.assertEqual(path.name, 'install_one_namespace.json')
+        self.assertEqual(data['gate'], 'G1')
+        self.assertTrue(data['proves'])
+        self.assertTrue(data['does_not_prove'])
+        self.assertEqual((data['namespace'], data['log_records'], data['metric_series'],
+                          data['sift_query_status'], data['promql_status']), ('ns', 2, 3, 200, 200))
+
+    def test_other_phases_keep_no_gate_except_g2_and_g3(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = phases.write_evidence(Path(tmp), phases.phase_result('faults', 'a', 'b', 5, 5, 1))
+            self.assertNotIn('gate', json.loads(path.read_text()))
+
+    def test_install_one_namespace_fits_the_ttl(self):
+        hours = phases.read_hours(INPUTS)
+        self.assertEqual(phases.phase_timeout_seconds(0.1), 432)
+        self.assertIsNone(phases.check_total(hours, phases.TTL_MINUTES))
+        with self.assertRaises(ValueError):
+            phases.check_total(hours, 300)
+        self.assertLess(phases.INSTALL_WAIT_SECONDS, phases.phase_timeout_seconds(0.1))
 
     def test_retention_days_from_args(self):
         self.assertEqual(phases.retention_days_from_args(['serve', '--role', 'all', '--retention-days', '1']), 1)
@@ -230,7 +330,7 @@ class PhaseTests(unittest.TestCase):
         self.assertEqual(phases.load_seconds(2.0), 7080)
 
     def test_total_fits_ttl(self):
-        self.assertIsNone(phases.check_total(phases.read_hours(INPUTS), 300))
+        self.assertIsNone(phases.check_total(phases.read_hours(INPUTS), 310))
         with self.assertRaises(ValueError):
             phases.check_total(phases.read_hours(INPUTS), 270)
 
@@ -362,6 +462,10 @@ class CostGuardTests(unittest.TestCase):
         self.assertEqual(figures['spent_usd'], 0)
         self.assertAlmostEqual(figures['hours_left'], 3.85, places=6)
 
+    def test_figures_before_the_install_phase(self):
+        figures = phases.guard_figures(self.inputs, 'install_one_namespace', 0)
+        self.assertAlmostEqual(figures['hours_left'], 3.95, places=6)
+
     def test_figures_after_three_hours(self):
         figures = phases.guard_figures(self.inputs, 'faults', 10800)
         self.assertAlmostEqual(figures['hours_left'], 1.35, places=6)
@@ -391,7 +495,7 @@ class CostGuardTests(unittest.TestCase):
 
     def test_every_check_is_appended(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for phase, seconds in zip(phases.PHASES, (0, 1800, 9000, 10800, 12600, 13500)):
+            for phase, seconds in zip(phases.PHASES, (0, 0, 1800, 9000, 10800, 12600, 13500)):
                 self.assertEqual(phases.run_guard(phase, self.inputs, '8', seconds, tmp), 0)
             entries = self.read_entries(tmp)
         self.assertEqual([entry['phase'] for entry in entries], list(phases.PHASES))

@@ -1,5 +1,5 @@
 """Phases of the single-node acceptance after setup. Standard library only."""
-import argparse, datetime, http.client, json, math, os, subprocess, sys, tempfile, threading, time, uuid
+import argparse, datetime, http.client, json, math, os, re, subprocess, sys, tempfile, threading, time, urllib.parse, uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'production'))
@@ -9,10 +9,10 @@ from load_data import build, timestamp  # noqa: E402
 import run_local_load as driver  # noqa: E402
 import cost_guard, cost_model  # noqa: E402
 
-PHASES = ('load_30m', 'load_24h', 'faults', 'comparison', 'retention', 'deleted_pod_logs')
+PHASES = ('install_one_namespace', 'load_30m', 'load_24h', 'faults', 'comparison', 'retention', 'deleted_pod_logs')
 GUARD = Path(__file__).resolve().parents[2] / 'production' / 'cost_guard.py'
 GUARD_FILE = 'cost-guard.json'
-TTL_MINUTES = 300
+TTL_MINUTES = 310
 SETUP_SECONDS_MAX = 1200
 MAX_LOAD_RATE = 1000
 LOCAL_PORT = 17380
@@ -33,6 +33,9 @@ DELETED_POD_NAME = 'g3-short-lived'
 DELETED_POD_MARKER_PREFIX = 'sift-g3-marker-'
 DELETED_POD_DELETE_SECONDS = 10
 DELETED_POD_WAIT_SECONDS = 120
+INSTALL_WAIT_SECONDS = 180
+INSTALL_POLL_SECONDS = 10
+INSTALL_QUERY = 'sift_collector_pending_records'
 GATES = {'retention': {
     'gate': 'G2',
     'proves': 'retentionDays 1 reaches the Pod (--retention-days 1); a batch older than 1 day is rejected at ingest and is not queryable; a batch inside 1 day is accepted and queryable',
@@ -41,6 +44,10 @@ GATES = {'retention': {
     'gate': 'G3',
     'proves': 'the log line of a Pod that was deleted within 10 s of its exit is queryable with the Pod name and the namespace',
     'does_not_prove': 'a Pod deleted sooner than 10 s, many short-lived Pods at once, a node restart, or the cost of the checkpoint file',
+}, 'install_one_namespace': {
+    'gate': 'G1',
+    'proves': 'the log records and the metric series of one namespace came through the agents of that namespace; one sift_query call and one PromQL query answered with HTTP 200 and data',
+    'does_not_prove': 'an install with more than one node or namespace, GCS, an FQDN policy, query speed, or the volume of the load',
 }}
 
 
@@ -593,6 +600,92 @@ def run_retention(namespace):
     return retention_result(selected, accepted, notes)
 
 
+def http_status(error):
+    match = re.search(r'HTTP (\d+)', str(error))
+    return int(match.group(1)) if match else 0
+
+
+def count_namespace_logs(api, namespace, now_nanos):
+    """The log records of one namespace in the last hour and ten minutes ahead."""
+    hour = 3600 * 1_000_000_000
+    request = {'version': 1, 'project': AGENT_PROJECT,
+               'time_range': {'start': timestamp(now_nanos - hour), 'end': timestamp(now_nanos + hour // 6)},
+               'signal': {'kind': 'logs',
+                          'filter': {'op': 'eq', 'field': 'resource.k8s.namespace.name', 'value': namespace}},
+               'mode': 'sync', 'limit': 1000}
+    records, cursors = [], set()
+    for _ in range(1000):
+        response = api.request('POST', '/api/v1/query', request, 'logs')
+        records.extend(response['data']['records'])
+        cursor = response.get('next_cursor')
+        if cursor is None:
+            return len([record for record in records
+                        if record['resource'].get('k8s.namespace.name') == namespace])
+        if cursor in cursors:
+            raise ValueError('log query cursor did not advance')
+        cursors.add(cursor)
+        request['cursor'] = cursor
+    raise ValueError('log query exceeded its page limit')
+
+
+def count_metric_series(api, namespace):
+    query = urllib.parse.urlencode({'project': AGENT_PROJECT, 'environment': namespace,
+                                    'query': INSTALL_QUERY})
+    response = api.request('GET', '/prometheus/api/v1/query?' + query, None, 'metrics')
+    return len(response['data']['result'])
+
+
+def check_install_one_namespace(api, namespace, now_nanos,
+                                wait_seconds=INSTALL_WAIT_SECONDS, sleep=time.sleep):
+    waited = 0
+    while True:
+        sift_status = promql_status = 200
+        sift_error = promql_error = None
+        try:
+            log_records = count_namespace_logs(api, namespace, now_nanos)
+        except ValueError as error:
+            log_records, sift_status, sift_error = 0, http_status(error), str(error)
+        try:
+            metric_series = count_metric_series(api, namespace)
+        except ValueError as error:
+            metric_series, promql_status, promql_error = 0, http_status(error), str(error)
+        if (log_records > 0 and metric_series > 0) or waited >= wait_seconds:
+            break
+        sleep(INSTALL_POLL_SECONDS)
+        waited += INSTALL_POLL_SECONDS
+    notes = []
+    if log_records == 0:
+        notes.append(f'no log record for the namespace within {waited} s')
+    if metric_series == 0:
+        notes.append(f'no metric series for the namespace within {waited} s')
+    if sift_error:
+        notes.append(f'sift_query failed: {sift_error}')
+    if promql_error:
+        notes.append(f'PromQL failed: {promql_error}')
+    return log_records, metric_series, sift_status, promql_status, notes
+
+
+def install_one_namespace_result(namespace, log_records, metric_series, sift_query_status,
+                                 promql_status, notes):
+    checks = [log_records > 0, metric_series > 0, sift_query_status == 200, promql_status == 200]
+    detail = '; '.join(notes) or 'logs and metrics of the namespace came through its agents; sift_query and PromQL answered'
+    result = phase_result('install_one_namespace', '', '', len(checks), sum(checks), 0, detail)
+    result.update(namespace=namespace, log_records=log_records, metric_series=metric_series,
+                  sift_query_status=sift_query_status, promql_status=promql_status)
+    return result
+
+
+def run_install_one_namespace(namespace):
+    forward = Forward()
+    forward.start(namespace)
+    try:
+        api = Api(ENDPOINT, AGENT_PROJECT)
+        checked = check_install_one_namespace(api, namespace, time.time_ns())
+    finally:
+        forward.stop()
+    return install_one_namespace_result(namespace, *checked)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -656,6 +749,8 @@ def main(argv=None):
             result = run_faults(namespace)
         elif args.phase == 'retention':
             result = run_retention(namespace)
+        elif args.phase == 'install_one_namespace':
+            result = run_install_one_namespace(namespace)
         elif args.phase == 'deleted_pod_logs':
             result = run_deleted_pod_logs(namespace)
         else:

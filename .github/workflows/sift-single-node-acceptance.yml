@@ -187,5 +187,5 @@ jobs:
       lane: ""
       overlay: k8s/overlays/gke-single-node
       test-command: COST_CAP_USD=${{ needs.guard.outputs.cap_usd }} bash scripts/single_node/acceptance/run.sh
-      ttl-minutes: 300
+      ttl-minutes: 310
       queue-minutes: 30
