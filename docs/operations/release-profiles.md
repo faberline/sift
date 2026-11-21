@@ -45,6 +45,7 @@ Proposal: the owner confirms before any tag
   workflow validates it. The promotion workflow stops a `single-node` run with
   `single-node receipt step not yet wired` until `make-single-node-receipt.py`
   is wired (a later child of #325).
+- Status (#333): for the single-node profile the release notes carry profile=single-node and the sentence that no claim is made for the three-voter topology, and the candidate image has the label profile=single-node. The production output is unchanged.
 
 This change is a later issue. The desk opens it after the owner confirms the
 version. This page edits no workflow.

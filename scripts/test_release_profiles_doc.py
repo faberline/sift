@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,7 @@ class ReleaseProfilesDocTest(unittest.TestCase):
                 "          - single-node\n",
                 '          [[ "$REQUESTED_PROFILE" == "production" || "$REQUESTED_PROFILE" == "single-node" ]]'
                 ' || { echo "invalid profile input" >&2; exit 1; }\n',
+                "            ${{ inputs.profile == 'single-node' && 'profile=single-node' || '' }}\n",
             ],
         }
         for name, lines in allowed.items():
@@ -86,6 +88,68 @@ class ReleaseProfilesDocTest(unittest.TestCase):
             text = self.read(name)
             found = re.findall(r"^  ([A-Za-z0-9_-]+):$", text.split("\njobs:\n", 1)[1], re.M)
             self.assertEqual(found, expected, name)
+
+    def run_profile_notes(self, *args):
+        return subprocess.run(
+            ["bash", "scripts/release/profile-notes.sh", *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_profile_notes_production_prints_nothing(self):
+        result = self.run_profile_notes("production")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_profile_notes_single_node_lines(self):
+        result = self.run_profile_notes("single-node")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "- Profile: profile=single-node\n"
+            "- Claim: this release makes no claim for the three-voter topology.\n",
+        )
+
+    def test_profile_notes_rejects_other_input(self):
+        for args in (["staging"], []):
+            result = self.run_profile_notes(*args)
+            self.assertEqual(result.returncode, 2, args)
+            self.assertEqual(result.stdout, "", args)
+
+    def test_candidate_label_only_for_single_node(self):
+        lines = self.read(".github/workflows/sift-release-candidate.yml").splitlines()
+        start = lines.index("          labels: |")
+        block = []
+        for line in lines[start + 1:]:
+            if len(line) - len(line.lstrip()) < 12:
+                break
+            block.append(line)
+        self.assertEqual(
+            block,
+            [
+                "            org.opencontainers.image.source=https://github.com/${{ github.repository }}",
+                "            org.opencontainers.image.revision=${{ needs.identity.outputs.commit }}",
+                "            org.opencontainers.image.version=${{ needs.identity.outputs.version }}",
+                "            org.opencontainers.image.url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}",
+                "            ${{ inputs.profile == 'single-node' && 'profile=single-node' || '' }}",
+            ],
+        )
+
+    def test_promotion_appends_profile_notes_after_the_heredoc(self):
+        text = self.read(".github/workflows/sift-release.yml")
+        self.assertEqual(text.count("RELEASE_PROFILE: ${{ inputs.profile }}"), 1)
+        call = 'bash scripts/release/profile-notes.sh "$RELEASE_PROFILE" >> release-notes.md'
+        self.assertEqual(text.count(call), 1)
+        self.assertGreater(text.index(call), text.index("cat > release-notes.md <<EOF"))
+        self.assertLess(text.index(call), text.index("gh release create"))
+        self.assertEqual(
+            text.count(
+                "          - Compatibility: no HTTP, CLI, wire format, on-disk format, "
+                "or Kubernetes manifest shape changed in this release.\n"
+            ),
+            1,
+        )
 
     def test_readme_links_the_page(self):
         self.assertIn(
