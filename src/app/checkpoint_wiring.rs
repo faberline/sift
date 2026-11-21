@@ -42,6 +42,8 @@ impl ServiceState {
                     capacity: self.local_capacity.clone(),
                 },
             ))),
+            clock: Arc::new(chrono::Utc::now),
+            local_retention: self.local_retention.clone(),
         }
     }
 }
