@@ -171,7 +171,7 @@ jobs:
         run: python3 -B -m unittest test_cost_guard test_check_cleanup -v
       - name: threat model unit tests
         working-directory: scripts/security
-        run: python3 -B -m unittest test_threat_model -v
+        run: python3 -B -m unittest test_threat_model test_auth_contract -v
       - name: alert runbook unit tests
         run: python3 -B -m unittest discover -s scripts -p 'test_verify_alert_runbook.py' -v
       - name: alert runbook check
