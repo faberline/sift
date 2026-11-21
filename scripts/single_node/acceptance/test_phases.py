@@ -1,5 +1,5 @@
 """Tests for the phases of the single-node acceptance. Standard library only."""
-import json, re, sys, tempfile, unittest
+import json, re, sys, tempfile, time, unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'production'))
@@ -10,6 +10,12 @@ import phases  # noqa: E402
 INPUTS = Path(__file__).resolve().parents[2] / 'production' / 'cost-inputs.single-node.json'
 WORKFLOW = Path(__file__).resolve().parents[3] / '.github' / 'workflows' / 'sift-single-node-acceptance.yml'
 TIMESTAMP = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+SUMMARY = {'pods': [{'podRef': {'name': 'sift-all-0', 'namespace': 'ns'},
+                     'cpu': {'usageCoreNanoSeconds': 5_000_000_000},
+                     'memory': {'rssBytes': 700},
+                     'volume': [{'name': 'x', 'usedBytes': 1},
+                                {'name': 'data', 'pvcRef': {'name': 'data-sift-all-0'},
+                                 'usedBytes': 4096}]}]}
 
 
 class PhaseTests(unittest.TestCase):
@@ -62,6 +68,98 @@ class PhaseTests(unittest.TestCase):
 
     def test_ttl_matches_workflow(self):
         self.assertIn(f'ttl-minutes: {phases.TTL_MINUTES}', WORKFLOW.read_text())
+
+    def test_pod_figures_reads_cpu_rss_and_pvc(self):
+        self.assertEqual(phases.pod_figures(SUMMARY, 'ns'),
+                         {'cpu_nanoseconds': 5000000000, 'rss_bytes': 700, 'volume_used_bytes': 4096})
+
+    def test_pod_figures_missing_pod_is_none(self):
+        figures = phases.pod_figures(SUMMARY, 'other')
+        self.assertEqual(figures, {'cpu_nanoseconds': None, 'rss_bytes': None, 'volume_used_bytes': None})
+
+    def test_usage_figures_measured(self):
+        first = {'cpu_nanoseconds': 1_000_000_000, 'rss_bytes': 100, 'volume_used_bytes': 1000}
+        last = {'cpu_nanoseconds': 4_000_000_000, 'rss_bytes': 300, 'volume_used_bytes': 9000}
+        samples = [{'cpu_nanoseconds': 2_000_000_000, 'rss_bytes': 900, 'volume_used_bytes': 5000}]
+        usage = phases.usage_figures(first, last, samples)
+        self.assertEqual(usage['cpu_seconds'], 3.0)
+        self.assertEqual(usage['peak_rss_bytes'], 900)
+        self.assertEqual(usage['disk_bytes_added'], 8000)
+        self.assertIsNone(usage['not_measured_reason'])
+
+    def test_usage_figures_unread_has_reason(self):
+        usage = phases.usage_figures(None, None, [], ['forbidden'])
+        self.assertIsNone(usage['cpu_seconds'])
+        self.assertIsNone(usage['peak_rss_bytes'])
+        self.assertIsNone(usage['disk_bytes_added'])
+        self.assertIn('forbidden', usage['not_measured_reason'])
+        self.assertIn('cpu_seconds', usage['not_measured_reason'])
+
+    def test_usage_figures_restart_has_no_cpu(self):
+        first = {'cpu_nanoseconds': 4_000_000_000, 'rss_bytes': 100, 'volume_used_bytes': 1000}
+        last = {'cpu_nanoseconds': 1_000_000_000, 'rss_bytes': 100, 'volume_used_bytes': 1000}
+        usage = phases.usage_figures(first, last, [])
+        self.assertIsNone(usage['cpu_seconds'])
+        self.assertIn('cpu_seconds', usage['not_measured_reason'])
+
+    def test_null_cpu_without_reason_is_refused(self):
+        usage = {'cpu_seconds': None, 'peak_rss_bytes': 5, 'disk_bytes_added': 7, 'not_measured_reason': None}
+        problems = phases.usage_problems(usage, 100)
+        self.assertTrue(problems)
+        self.assertIn('cpu_seconds', problems[0])
+
+    def test_zero_disk_with_items_without_reason_is_refused(self):
+        usage = {'cpu_seconds': 1.0, 'peak_rss_bytes': 5, 'disk_bytes_added': 0, 'not_measured_reason': None}
+        problems = phases.usage_problems(usage, 100)
+        self.assertTrue(problems)
+        self.assertIn('disk_bytes_added', problems[0])
+        self.assertEqual(phases.usage_problems(usage, 0), [])
+
+    def test_measured_figures_are_accepted(self):
+        usage = {'cpu_seconds': 1.0, 'peak_rss_bytes': 5, 'disk_bytes_added': 7, 'not_measured_reason': None}
+        self.assertEqual(phases.usage_problems(usage, 100), [])
+
+    def test_reason_excuses_missing_figures(self):
+        usage = {'cpu_seconds': None, 'peak_rss_bytes': None, 'disk_bytes_added': None,
+                 'not_measured_reason': 'kubelet stats not readable'}
+        self.assertEqual(phases.usage_problems(usage, 100), [])
+
+    def test_phase_result_with_bad_usage_fails(self):
+        usage = {'cpu_seconds': None, 'peak_rss_bytes': None, 'disk_bytes_added': 0, 'not_measured_reason': None}
+        result = phases.phase_result('load_30m', 'a', 'b', 10, 10, 1, usage=usage)
+        self.assertEqual(result['result'], 'fail')
+        self.assertIn('cpu_seconds', result['detail'])
+
+    def test_phase_result_with_measured_usage_passes(self):
+        usage = {'cpu_seconds': 1.0, 'peak_rss_bytes': 5, 'disk_bytes_added': 7, 'not_measured_reason': None}
+        result = phases.phase_result('load_30m', 'a', 'b', 10, 10, 1, usage=usage)
+        self.assertEqual(result['result'], 'pass')
+        for key in ('cpu_seconds', 'peak_rss_bytes', 'disk_bytes_added', 'not_measured_reason'):
+            self.assertIn(key, result)
+
+    def test_phase_result_with_reason_passes_and_keeps_it(self):
+        usage = {'cpu_seconds': None, 'peak_rss_bytes': None, 'disk_bytes_added': None,
+                 'not_measured_reason': 'kubelet stats not readable'}
+        result = phases.phase_result('load_30m', 'a', 'b', 10, 10, 1, usage=usage)
+        self.assertEqual(result['result'], 'pass')
+        self.assertEqual(result['not_measured_reason'], 'kubelet stats not readable')
+
+    def test_peak_sampler_collects_and_stops(self):
+        sampler = phases.PeakSampler(lambda: {'rss_bytes': 1}, interval=0.01)
+        sampler.start()
+        time.sleep(0.1)
+        samples = sampler.stop()
+        self.assertGreaterEqual(len(samples), 1)
+
+    def test_peak_sampler_keeps_read_errors(self):
+        def boom():
+            raise OSError('boom')
+        sampler = phases.PeakSampler(boom, interval=0.01)
+        sampler.start()
+        time.sleep(0.1)
+        samples = sampler.stop()
+        self.assertEqual(samples, [])
+        self.assertIn('boom', sampler.errors[0])
 
 
 class CostGuardTests(unittest.TestCase):

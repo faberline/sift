@@ -1,5 +1,5 @@
 """Phases of the single-node acceptance after setup. Standard library only."""
-import argparse, datetime, http.client, json, math, os, subprocess, sys, tempfile, time, uuid
+import argparse, datetime, http.client, json, math, os, subprocess, sys, tempfile, threading, time, uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'production'))
@@ -21,6 +21,9 @@ COMPARISON_SECONDS = 30
 FAULT_RATE = 100
 PROJECT = 'single-node-acceptance'
 ENDPOINT = f'http://127.0.0.1:{LOCAL_PORT}'
+POD = 'sift-all-0'
+PVC = 'data-sift-all-0'
+SAMPLE_SECONDS = 60
 
 
 def read_hours(path):
@@ -52,10 +55,18 @@ def utc_now():
     return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
-def phase_result(phase, start, end, selected, accepted, node_count, detail=''):
+def phase_result(phase, start, end, selected, accepted, node_count, detail='', usage=None):
     result = 'pass' if selected > 0 and accepted == selected else 'fail'
-    return {'phase': phase, 'start': start, 'end': end, 'selected': selected,
-            'accepted': accepted, 'node_count': node_count, 'result': result, 'detail': detail}
+    record = {'phase': phase, 'start': start, 'end': end, 'selected': selected,
+              'accepted': accepted, 'node_count': node_count, 'result': result, 'detail': detail}
+    if usage is not None:
+        record.update(usage)
+        problems = usage_problems(usage, accepted)
+        if problems:
+            record['result'] = 'fail'
+            joined = '; '.join(problems)
+            record['detail'] = f'{detail} {joined}' if detail else joined
+    return record
 
 
 def write_evidence(evidence_dir, result):
@@ -107,6 +118,108 @@ def node_count():
     out = subprocess.run(['kubectl', 'get', 'nodes', '-l', 'faberline.dev/pool=sift-server',
                           '--no-headers'], check=True, capture_output=True, text=True).stdout
     return len([line for line in out.splitlines() if line.strip()])
+
+
+def pod_figures(summary, namespace, pod=POD, pvc=PVC):
+    """The CPU, RSS and data volume figures of one Pod in a kubelet stats summary."""
+    figures = {'cpu_nanoseconds': None, 'rss_bytes': None, 'volume_used_bytes': None}
+    for entry in summary.get('pods') or []:
+        ref = entry.get('podRef') or {}
+        if ref.get('name') != pod or ref.get('namespace') != namespace:
+            continue
+        figures['cpu_nanoseconds'] = (entry.get('cpu') or {}).get('usageCoreNanoSeconds')
+        figures['rss_bytes'] = (entry.get('memory') or {}).get('rssBytes')
+        for volume in entry.get('volume') or []:
+            if (volume.get('pvcRef') or {}).get('name') == pvc:
+                figures['volume_used_bytes'] = volume.get('usedBytes')
+        break
+    return figures
+
+
+def read_pod_figures(namespace, run=subprocess.run):
+    node = run(['kubectl', '-n', namespace, 'get', 'pod', POD, '-o', 'jsonpath={.spec.nodeName}'],
+               capture_output=True, text=True, check=True).stdout.strip()
+    raw = run(['kubectl', 'get', '--raw', f'/api/v1/nodes/{node}/proxy/stats/summary'],
+              capture_output=True, text=True, check=True).stdout
+    return pod_figures(json.loads(raw), namespace)
+
+
+def read_or_note(namespace, errors):
+    try:
+        return read_pod_figures(namespace)
+    except (subprocess.CalledProcessError, OSError, ValueError) as error:
+        errors.append(str(error))
+        return None
+
+
+class PeakSampler:
+    """Reads the Pod figures every `interval` seconds on a daemon thread."""
+
+    def __init__(self, read, interval=SAMPLE_SECONDS):
+        self.read = read
+        self.interval = interval
+        self.samples = []
+        self.errors = []
+        self.stopped = threading.Event()
+        self.thread = None
+
+    def _loop(self):
+        while not self.stopped.wait(self.interval):
+            try:
+                self.samples.append(self.read())
+            except Exception as error:  # a failed sample is noted, the phase goes on
+                self.errors.append(str(error))
+
+    def start(self):
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.stopped.set()
+        if self.thread is not None:
+            self.thread.join(timeout=10)
+        return self.samples
+
+
+def _value(reading, key):
+    return None if reading is None else reading.get(key)
+
+
+def usage_figures(first, last, samples, errors=()):
+    first_cpu, last_cpu = _value(first, 'cpu_nanoseconds'), _value(last, 'cpu_nanoseconds')
+    cpu = None
+    if first_cpu is not None and last_cpu is not None and last_cpu >= first_cpu:
+        cpu = (last_cpu - first_cpu) / 1e9
+    rss = [value for value in [_value(first, 'rss_bytes'), _value(last, 'rss_bytes')]
+           + [_value(sample, 'rss_bytes') for sample in samples] if value is not None]
+    peak = max(rss) if rss else None
+    first_disk, last_disk = _value(first, 'volume_used_bytes'), _value(last, 'volume_used_bytes')
+    disk = last_disk - first_disk if first_disk is not None and last_disk is not None else None
+    if errors:
+        why = errors[0]
+    elif first is None or last is None:
+        why = 'first or last reading missing'
+    else:
+        why = 'the kubelet stats have no value (the Pod restarted, or the volume is not listed)'
+    parts = [f'{name}: {why}' for name, value in
+             (('cpu_seconds', cpu), ('peak_rss_bytes', peak), ('disk_bytes_added', disk))
+             if value is None]
+    return {'cpu_seconds': cpu, 'peak_rss_bytes': peak, 'disk_bytes_added': disk,
+            'not_measured_reason': '; '.join(parts) or None}
+
+
+def usage_problems(usage, accepted):
+    if usage.get('not_measured_reason'):
+        return []
+    problems = []
+    for name in ('cpu_seconds', 'peak_rss_bytes'):
+        if usage[name] is None:
+            problems.append(f'{name} is null without not_measured_reason')
+    if usage['disk_bytes_added'] is None:
+        problems.append('disk_bytes_added is null without not_measured_reason')
+    elif usage['disk_bytes_added'] == 0 and accepted > 0:
+        problems.append(f'disk_bytes_added is 0 for {accepted} accepted items without not_measured_reason')
+    return problems
 
 
 class Forward:
@@ -166,15 +279,24 @@ def wait_pod_ready(namespace, seconds=900):
 def run_load(phase, hours, rate, namespace):
     forward = Forward()
     forward.start(namespace)
+    errors = []
+    first = read_or_note(namespace, errors)
+    sampler = PeakSampler(lambda: read_pod_figures(namespace))
+    if first is not None:
+        sampler.start()
     try:
         api = Api(ENDPOINT, PROJECT)
         step = driver.run_step(api, uuid.uuid4().hex, PROJECT, rate, load_seconds(hours),
                                driver.synthetic_templates(), time.time_ns(), None,
                                Path(tempfile.mkdtemp()) / 'none')
     finally:
+        samples = sampler.stop()
+        errors.extend(sampler.errors)
+        last = read_or_note(namespace, errors)
         forward.stop()
+    usage = usage_figures(first, last, samples, errors)
     result = phase_result(phase, '', '', step['offered_items'], step['accepted_items'], 0,
-                          json.dumps(step, sort_keys=True))
+                          json.dumps(step, sort_keys=True), usage=usage)
     if step['query_errors'] > 0:
         result['result'] = 'fail'
         result['detail'] += f" query_errors={step['query_errors']}"
