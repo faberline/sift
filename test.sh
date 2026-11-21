@@ -89,6 +89,7 @@ if [[ "${1:-}" == "--candidate" ]]; then
     python3 -B scripts/production/test_load.py
   python3 -B scripts/production/test_pilot.py
   python3 -B scripts/release/make-gke-release-receipt.py --self-test
+  python3 -B scripts/release/test_make_single_node_receipt.py
   source scripts/prepare-prometheus-oracle.sh
   verify_official_promql_oracle
   candidate_bin="${CARGO_TARGET_DIR:-$repo_root/target}/debug/sift"
