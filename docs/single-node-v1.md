@@ -106,6 +106,36 @@ The rates for each Pod (1, 5 and 20 items per second) are an assumption, the own
 
 Above the measured limit, or when the profile needs quorum and failover, use the three-voter topology in [production-v1.md](production-v1.md).
 
+## Log query p95 under ingest load
+
+The first table comes from run 44737037877 of the workflow `sift-single-node-load` (main d7e68f58, defaults, each step lasted 180 s; artifact `single-node-load-result/result.json`). The second table comes from run 44511577882, the run of the [Capacity](#capacity) section. Both runs were measured on a GitHub runner with 4 CPUs, not a GKE claim.
+
+Run 44737037877:
+
+| Offered items per second | Ingest p95 (s) | Log query p95 (s) | Query errors |
+|---|---|---|---|
+| 500 | 0.05 | 0.13 | 0 |
+| 1000 | 0.11 | 1.24 | 0 |
+| 2500 | 0.35 | 8.28 | 0 |
+| 5000 | 0.84 | 13.78 | 1 |
+| 10000 | 1.47 | 13.53 | 7 |
+
+Run 44511577882:
+
+| Offered items per second | Ingest p95 (s) | Log query p95 (s) | Query errors |
+|---|---|---|---|
+| 500 | 0.05 | 0.08 | 0 |
+| 1000 | 0.11 | 0.26 | 0 |
+| 2500 | 0.52 | 6.14 | 0 |
+| 5000 | 1.37 | 10.08 | 0 |
+| 10000 | 1.67 | 12.62 | 8 |
+
+The highest offered rate at which the log query p95 stays below 1 second is 500 items per second (0.13 s, run 44737037877). At 1000 items per second the log query p95 was 1.24 s in run 44737037877 and 0.26 s in run 44511577882, so the two runs do not agree at that step.
+
+At 10000 items per second the first run accepted 961000 of 1800000 offered items and rejected 839000; this step is an overload.
+
+GitHub runner with 4 CPUs, not a GKE claim.
+
 ## Memory
 
 The numbers come from `docs/operations/single-node-memory-result.json` (run 44737055221 of the workflow `sift-single-node-load` on main d7e68f58, soak mode: 1000 items per second for 600 s, then 120 s with no ingest). The run was measured on linux, 4 CPUs, 16759431168 bytes of memory, ext4, not a GKE claim.

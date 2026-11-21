@@ -24,6 +24,7 @@ class SingleNodeDocTest(unittest.TestCase):
                 "## Acceptance gates",
                 "## Senders",
                 "## Capacity",
+                "## Log query p95 under ingest load",
                 "## Memory",
                 "## Relation to production-v1",
             ],
