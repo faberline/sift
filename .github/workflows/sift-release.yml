@@ -349,6 +349,7 @@ jobs:
         if: steps.existing_release.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_PROFILE: ${{ inputs.profile }}
         shell: bash
         run: |
           set -euo pipefail
@@ -369,6 +370,7 @@ jobs:
           - Install: curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/sift@${{ inputs.version }}/install.sh | sh (the tarballs above, verified by their .sha256 sidecars)
           - Image: ghcr.io/faberline/sift:${{ inputs.version }} is the root index digest above; latest moves only when this is the newest semver.
           EOF
+          bash scripts/release/profile-notes.sh "$RELEASE_PROFILE" >> release-notes.md
           gh release create "sift@${{ inputs.version }}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "sift@${{ inputs.version }}" --notes-file release-notes.md \
             candidate/sift-*.tar.gz candidate/sift-*.tar.gz.sha256 candidate/spdx-amd64.json candidate/spdx-arm64.json gke-receipt/sift-gke-receipt.json gke-receipt/sift-gke-receipt.json.sha256
       - name: Publicly verify immutable tag, release bytes, and promoted image

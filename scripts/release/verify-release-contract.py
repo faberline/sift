@@ -472,6 +472,7 @@ def check_candidate(app: App, text: str) -> None:
         f".github/workflows/{app.name}-release-candidate.yml@refs/heads/main",
         'REQUESTED_PROFILE: ${{ inputs.profile }}',
         "invalid profile input",
+        "${{ inputs.profile == 'single-node' && 'profile=single-node' || '' }}",
     ):
         if required not in text:
             fail(f"{label}: required fragment absent: {required!r}")
@@ -522,11 +523,16 @@ def check_promotion(app: App, text: str) -> None:
         "Decode and bind sanitized GKE receipt",
         '--gke-receipt "${{ steps.gke_receipt.outputs.receipt }}"',
         '--gke-receipt-sidecar "${{ steps.gke_receipt.outputs.sidecar }}"',
+        "RELEASE_PROFILE: ${{ inputs.profile }}",
+        'bash scripts/release/profile-notes.sh "$RELEASE_PROFILE" >> release-notes.md',
     ):
         if required not in text:
             fail(f"{label}: required fragment absent: {required!r}")
     if text.index("single-node receipt step not yet wired") > text.index("Decode and bind sanitized GKE receipt"):
         fail(f"{label}: the single-node stop must run before the production receipt step")
+    notes_call = 'bash scripts/release/profile-notes.sh "$RELEASE_PROFILE" >> release-notes.md'
+    if not text.index("cat > release-notes.md <<EOF") < text.index(notes_call) < text.index("gh release create"):
+        fail(f"{label}: the profile notes must be appended after the heredoc and before gh release create")
     if app.shared_scripts:
         if f"--app {app.name}" not in text:
             fail(f"{label}: the shared artifact verifier must be told --app {app.name}")
@@ -905,6 +911,7 @@ def candidate_controls(app: App, text: str) -> List[Tuple[str, Callable[[], str]
         (f"{label}: profile option dropped", lambda: replace_once(text, "          - single-node\n", "", label)),
         (f"{label}: profile input renamed", lambda: replace_once(text, "      profile:\n", "      release_profile:\n", label)),
         (f"{label}: profile validation dropped", lambda: replace_all(text, "invalid profile input", "profile is fine", label)),
+        (f"{label}: profile image label dropped", lambda: replace_all(text, "${{ inputs.profile == 'single-node' && 'profile=single-node' || '' }}", "", label)),
     ]
 
 
@@ -934,6 +941,8 @@ def promotion_controls(app: App, text: str) -> List[Tuple[str, Callable[[], str]
         (f"{label}: profile input renamed", lambda: replace_once(text, "      profile:\n", "      release_profile:\n", label)),
         (f"{label}: single-node stop reworded", lambda: replace_all(text, "single-node receipt step not yet wired", "single-node ok", label)),
         (f"{label}: single-node stop made conditional on production", lambda: replace_all(text, "if: ${{ inputs.profile == 'single-node' }}", "if: ${{ inputs.profile == 'production' }}", label)),
+        (f"{label}: profile notes call dropped", lambda: replace_all(text, 'bash scripts/release/profile-notes.sh "$RELEASE_PROFILE" >> release-notes.md', "true", label)),
+        (f"{label}: profile env bound to production", lambda: replace_once(text, "RELEASE_PROFILE: ${{ inputs.profile }}", "RELEASE_PROFILE: production", label)),
         (f"{label}: production receipt step renamed", lambda: replace_all(text, "      - name: Decode and bind sanitized GKE receipt\n", "      - name: Decode receipt\n", label)),
         (f"{label}: production receipt argument dropped", lambda: replace_all(text, '--gke-receipt-sidecar "${{ steps.gke_receipt.outputs.sidecar }}"', "--no-sidecar", label)),
         (f"{label}: production receipt sha input renamed", lambda: replace_once(text, "      gke_receipt_sha256:\n", "      gke_receipt_hash:\n", label)),
