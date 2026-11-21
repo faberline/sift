@@ -9,6 +9,7 @@ import phases  # noqa: E402
 
 INPUTS = Path(__file__).resolve().parents[2] / 'production' / 'cost-inputs.single-node.json'
 WORKFLOW = Path(__file__).resolve().parents[3] / '.github' / 'workflows' / 'sift-single-node-acceptance.yml'
+COST_PAGE = Path(__file__).resolve().parents[3] / 'docs' / 'operations' / 'single-node-acceptance-cost.md'
 TIMESTAMP = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
 SUMMARY = {'pods': [{'podRef': {'name': 'sift-all-0', 'namespace': 'ns'},
                      'cpu': {'usageCoreNanoSeconds': 5_000_000_000},
@@ -160,6 +161,14 @@ class PhaseTests(unittest.TestCase):
         samples = sampler.stop()
         self.assertEqual(samples, [])
         self.assertIn('boom', sampler.errors[0])
+
+    def test_load_24h_length_is_stated_in_the_cost_page(self):
+        hours = phases.read_hours(INPUTS)['load_24h']
+        seconds = phases.load_seconds(hours)
+        self.assertEqual(seconds, 7080)
+        text = COST_PAGE.read_text()
+        self.assertIn(f'phase load_24h runs {seconds} seconds', text)
+        self.assertIn(f'{phases.load_rate(json.loads(INPUTS.read_text()))} items per second', text)
 
 
 class CostGuardTests(unittest.TestCase):
