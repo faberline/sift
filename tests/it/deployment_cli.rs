@@ -1775,7 +1775,7 @@ fn single_node_renders_the_log_agent() {
         .expect("agent env");
     assert!(env
         .iter()
-        .any(|var| var["name"] == "SIFT_URL" && var["value"] == "http://events:8080"));
+        .any(|var| var["name"] == "SIFT_URL" && var["value"] == "http://events:7380"));
 }
 
 #[test]
@@ -1835,12 +1835,25 @@ fn single_node_agent_policy_reaches_only_the_all_pod() {
         .expect("egress rule to the all-role Pod");
     let ports = all_rule["ports"].as_array().expect("agent egress ports");
     assert_eq!(ports.len(), 1);
-    assert_eq!(ports[0]["port"], 8080);
+    assert_eq!(ports[0]["port"], 7380);
     assert!(egress.iter().all(|rule| rule["to"]
         .as_array()
         .into_iter()
         .flatten()
         .all(|peer| peer.get("ipBlock").is_none())));
+
+    let all_policy = object(&objects, "NetworkPolicy", "events-all-network");
+    let ingress = all_policy["spec"]["ingress"]
+        .as_array()
+        .expect("all-role ingress rules");
+    assert_eq!(ingress.len(), 1);
+    let ingress_ports: Vec<&Value> = ingress[0]["ports"]
+        .as_array()
+        .expect("all-role ingress ports")
+        .iter()
+        .map(|port| &port["port"])
+        .collect();
+    assert_eq!(ingress_ports, [&json!(7380), &json!(4317)]);
 }
 
 #[test]
