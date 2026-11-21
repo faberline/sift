@@ -13,6 +13,7 @@ use crate::SignalKind;
 #[cfg(any(not(unix), unix))]
 use crate::archive::infrastructure::private_fs_mode::set_private_file;
 
+use crate::archive::domain::control_values::highest_committed_cursor;
 pub(in crate::archive) use crate::archive::domain::control_values::LocalSegmentCommitState;
 
 pub(in crate::archive) fn read_local_commit_state(
@@ -65,7 +66,9 @@ pub(in crate::archive) fn read_local_commit_state(
             );
         }
     }
-    if watermarks != state.watermarks || watermarks.max_cursor() != state.snapshot_index {
+    if watermarks != state.watermarks
+        || highest_committed_cursor(&watermarks, &state.expired_cursors) != state.snapshot_index
+    {
         bail!("local segment commit watermarks do not match its manifest set");
     }
     set_private_file(&path)?;

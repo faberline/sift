@@ -26,6 +26,8 @@ Figure for approval: USD 6.68 (TWD 216), cap TWD 300, over cap: no.
 
 Node hours: 4.5 (one node). PVC size: 242 GiB for the store plus 5 GiB for control. Total: USD 6.68, TWD 216.
 
+The phase name load_24h is only a name. In this profile the phase load_24h runs 7080 seconds (2.0 hours of budget minus 120 seconds of headroom, from load_seconds in scripts/single_node/acceptance/phases.py) at 50 items per second, as in run 44740023742. It does not run 24 hours. Other workflows and the production scripts use the name, so it is not renamed.
+
 The figure is under the approved cap of TWD 300: over cap, no. The numbers are not changed to fit the cap.
 
 ## Config values
