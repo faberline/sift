@@ -72,6 +72,8 @@ pub(crate) struct LocalSegmentCommitState {
 
 /// Merges inclusive cursor ranges into sorted, non-overlapping, non-adjacent
 /// ranges. This is the only place that builds the expired ranges of a commit.
+// Until #343 calls it, only the tests use it.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn merge_expired_ranges(
     existing: &[(u64, u64)],
     added: &[(u64, u64)],
@@ -142,7 +144,10 @@ pub(crate) struct SpillBlobReference {
 
 #[cfg(test)]
 mod tests {
-    use super::{expired_cursor_count, highest_committed_cursor, merge_expired_ranges, LocalSegmentCommitState};
+    use super::{
+        expired_cursor_count, highest_committed_cursor, merge_expired_ranges,
+        LocalSegmentCommitState,
+    };
     use crate::archive::domain::control_paths::LOCAL_COMMIT_FORMAT_VERSION;
     use crate::shared_kernel::archive_watermarks::ArchiveWatermarks;
     use crate::SignalKind;
