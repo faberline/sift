@@ -54,6 +54,7 @@ PREPARE_EVIDENCE_STEP = "Prepare evidence directory"
 HARNESS_STEP = "Run acceptance harness"
 PARK_STEP = "Park node pool (belt and suspenders)"
 FIXTURE_BANNER = "LOCAL FIXTURE ONLY"
+PROFILE_OPTIONS = ["production", "single-node"]
 
 FIVE_TARGETS = (
     "aarch64-apple-darwin",
@@ -95,6 +96,7 @@ class App:
         base = ["version", "candidate_run_id"]
         if self.takes_attempt:
             base.append("candidate_run_attempt")
+        base.append("profile")
         prefix = self.promotion_prefix
         return tuple(base + [f"{prefix}_b64", f"{prefix}_sha256", f"{prefix}_sidecar_b64", f"{prefix}_sidecar_sha256"])
 
@@ -200,6 +202,21 @@ def workflow_triggers(text: str) -> List[str]:
 
 def workflow_inputs(text: str) -> set:
     return set(re.findall(r"^      ([a-z][a-z0-9_]*):$", top_block(text, "on"), re.M))
+
+
+def check_profile_input(label: str, text: str) -> None:
+    block = top_block(text, "on")
+    match = re.search(r"^      profile:\n((?:        .*\n|          .*\n)+)", block + "\n", re.M)
+    if match is None:
+        fail(f"{label}: the profile input is absent")
+    body = match.group(1)
+    if not re.search(r"^        type: choice$", body, re.M):
+        fail(f"{label}: profile must be type choice")
+    if not re.search(r"^        default: production$", body, re.M):
+        fail(f"{label}: profile must default to production")
+    options = re.findall(r"^          - (\S+)$", body, re.M)
+    if options != PROFILE_OPTIONS:
+        fail(f"{label}: profile options must be exactly {PROFILE_OPTIONS}, got {options}")
 
 
 def job_ids(text: str) -> set:
@@ -439,8 +456,9 @@ def check_candidate(app: App, text: str) -> None:
     label = f"{app.name} candidate"
     if workflow_triggers(text) != ["workflow_dispatch"]:
         fail(f"{label}: the only trigger must be workflow_dispatch, got {workflow_triggers(text)}")
-    if workflow_inputs(text) != {"version", "commit"}:
-        fail(f"{label}: inputs must be exactly version and commit, got {sorted(workflow_inputs(text))}")
+    if workflow_inputs(text) != {"version", "commit", "profile"}:
+        fail(f"{label}: inputs must be exactly version, commit and profile, got {sorted(workflow_inputs(text))}")
+    check_profile_input(label, text)
     if job_ids(text) != set(app.candidate_jobs):
         fail(f"{label}: jobs must be {sorted(app.candidate_jobs)}, got {sorted(job_ids(text))}")
     assert_actions_pinned(label, text)
@@ -452,6 +470,8 @@ def check_candidate(app: App, text: str) -> None:
         '[[ "$GITHUB_REF" == "refs/heads/main" ]]',
         '[[ "$REQUESTED_COMMIT" == "$GITHUB_SHA" ]]',
         f".github/workflows/{app.name}-release-candidate.yml@refs/heads/main",
+        'REQUESTED_PROFILE: ${{ inputs.profile }}',
+        "invalid profile input",
     ):
         if required not in text:
             fail(f"{label}: required fragment absent: {required!r}")
@@ -484,6 +504,7 @@ def check_promotion(app: App, text: str) -> None:
         fail(f"{label}: the only trigger must be workflow_dispatch, got {workflow_triggers(text)}")
     if workflow_inputs(text) != set(app.promotion_inputs):
         fail(f"{label}: inputs must be {sorted(app.promotion_inputs)}, got {sorted(workflow_inputs(text))}")
+    check_profile_input(label, text)
     if job_ids(text) != {"verify-inputs", "publish-release"}:
         fail(f"{label}: jobs must be verify-inputs and publish-release, got {sorted(job_ids(text))}")
     assert_actions_pinned(label, text)
@@ -496,9 +517,16 @@ def check_promotion(app: App, text: str) -> None:
         f"{app.scripts_dir}/verify-release-artifacts.sh",
         "--mode candidate",
         "--mode public",
+        "single-node receipt step not yet wired",
+        "if: ${{ inputs.profile == 'single-node' }}",
+        "Decode and bind sanitized GKE receipt",
+        '--gke-receipt "${{ steps.gke_receipt.outputs.receipt }}"',
+        '--gke-receipt-sidecar "${{ steps.gke_receipt.outputs.sidecar }}"',
     ):
         if required not in text:
             fail(f"{label}: required fragment absent: {required!r}")
+    if text.index("single-node receipt step not yet wired") > text.index("Decode and bind sanitized GKE receipt"):
+        fail(f"{label}: the single-node stop must run before the production receipt step")
     if app.shared_scripts:
         if f"--app {app.name}" not in text:
             fail(f"{label}: the shared artifact verifier must be told --app {app.name}")
@@ -873,6 +901,10 @@ def candidate_controls(app: App, text: str) -> List[Tuple[str, Callable[[], str]
         (f"{label}: stale target archive still downloaded", lambda: replace_all(text, f"{app.name}-candidate-{app.targets[-1]}-", f"{app.name}-candidate-x86_64-unknown-freebsd-", label)),
         (f"{label}: manifest loop drops a target", lambda: replace_all(text, f"for target in {' '.join(app.targets)}; do", f"for target in {' '.join(app.targets[:-1])}; do", label)),
         (f"{label}: build matrix row dropped", lambda: drop_matrix_row(app, text, label)),
+        (f"{label}: profile default changed", lambda: replace_once(text, "        default: production\n", "        default: single-node\n", label)),
+        (f"{label}: profile option dropped", lambda: replace_once(text, "          - single-node\n", "", label)),
+        (f"{label}: profile input renamed", lambda: replace_once(text, "      profile:\n", "      release_profile:\n", label)),
+        (f"{label}: profile validation dropped", lambda: replace_all(text, "invalid profile input", "profile is fine", label)),
     ]
 
 
@@ -897,6 +929,14 @@ def promotion_controls(app: App, text: str) -> List[Tuple[str, Callable[[], str]
         (f"{label}: retag sourced from a mutable ref", retag_from_mutable),
         (f"{label}: public verification dropped", lambda: replace_all(text, "--mode public", "--mode candidate", label)),
         (f"{label}: tag ref guard dropped", lambda: replace_all(text, tag_ref, "refs/heads/main", label)),
+        (f"{label}: profile default changed", lambda: replace_once(text, "        default: production\n", "        default: single-node\n", label)),
+        (f"{label}: profile option dropped", lambda: replace_once(text, "          - single-node\n", "", label)),
+        (f"{label}: profile input renamed", lambda: replace_once(text, "      profile:\n", "      release_profile:\n", label)),
+        (f"{label}: single-node stop reworded", lambda: replace_all(text, "single-node receipt step not yet wired", "single-node ok", label)),
+        (f"{label}: single-node stop made conditional on production", lambda: replace_all(text, "if: ${{ inputs.profile == 'single-node' }}", "if: ${{ inputs.profile == 'production' }}", label)),
+        (f"{label}: production receipt step renamed", lambda: replace_all(text, "      - name: Decode and bind sanitized GKE receipt\n", "      - name: Decode receipt\n", label)),
+        (f"{label}: production receipt argument dropped", lambda: replace_all(text, '--gke-receipt-sidecar "${{ steps.gke_receipt.outputs.sidecar }}"', "--no-sidecar", label)),
+        (f"{label}: production receipt sha input renamed", lambda: replace_once(text, "      gke_receipt_sha256:\n", "      gke_receipt_hash:\n", label)),
     ]
     if app.shared_scripts:
         compatibility = bash_variable("RELEASE_COMPATIBILITY_LINE")
