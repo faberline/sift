@@ -87,6 +87,24 @@ impl service_http::MetricsProvider for ServiceState {
                 "One when local Sift storage is at or above the 90 percent readiness threshold.",
                 u64::from(self.local_capacity.level() == CapacityLevel::Critical),
             ),
+            Sample::new(
+                "sift_local_retention_expired_events_total",
+                "counter",
+                "Local events removed by retention expiry.",
+                self.local_retention.expired_events(),
+            ),
+            Sample::new(
+                "sift_local_retention_runs_total",
+                "counter",
+                "Local retention expiry passes that finished without error.",
+                self.local_retention.runs(),
+            ),
+            Sample::new(
+                "sift_local_retention_oldest_retained_unix_nano",
+                "gauge",
+                "Occurred time in Unix nanoseconds of the oldest retained local event, 0 when there is none or no pass ran.",
+                self.local_retention.oldest_retained_unix_nano(),
+            ),
         ]));
         text
     }

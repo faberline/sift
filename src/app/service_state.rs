@@ -195,6 +195,7 @@ impl ServiceState {
             checkpoint_raft,
             admission,
             local_capacity,
+            local_retention: Arc::default(),
             query_jobs,
             ingest,
             archive_reads: Arc::new(

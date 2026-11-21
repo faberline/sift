@@ -170,6 +170,59 @@ async fn committed_receipt_retries_a_late_wal_compaction_failure() {
     );
 }
 
+fn timed_log(id: &str, occurred_at: chrono::DateTime<chrono::Utc>) -> EventEnvelope {
+    let mut event = log();
+    event.event_id = id.into();
+    event.occurred_at = occurred_at.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+    event.observed_at.clone_from(&event.occurred_at);
+    event
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn local_worker_expires_old_events_with_an_injected_clock() {
+    let data = tempfile::tempdir().unwrap();
+    let state = ServiceState::open(data.path()).unwrap();
+    let now = chrono::Utc::now();
+    state
+        .append_events(vec![
+            timed_log("old-log", now - chrono::Duration::days(2)),
+            timed_log("fresh-log", now),
+        ])
+        .await
+        .unwrap();
+
+    // With the default 180-day window the cutoff is now - 1 day: the 2-day-old
+    // log expires and the fresh log stays.
+    let clock_now = now + chrono::Duration::days(179);
+    let worker =
+        state.start_local_archive_worker_with_clock(Duration::from_millis(10), move || clock_now);
+    for _ in 0..500 {
+        if metric_value(
+            &state.render_metrics(),
+            "sift_local_retention_expired_events_total",
+        ) == 1
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    worker.stop().await;
+
+    let metrics = state.render_metrics();
+    assert_eq!(
+        metric_value(&metrics, "sift_local_retention_expired_events_total"),
+        1
+    );
+    assert!(metric_value(&metrics, "sift_local_retention_runs_total") >= 1);
+    assert_eq!(
+        metric_value(&metrics, "sift_local_retention_oldest_retained_unix_nano"),
+        u64::try_from(now.timestamp_nanos_opt().unwrap()).unwrap()
+    );
+    let events = state.journal().query(EventQuery::default()).unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].event.event_id, "fresh-log");
+}
+
 fn metric_value(metrics: &str, name: &str) -> u64 {
     metrics
         .lines()
