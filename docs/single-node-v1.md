@@ -104,6 +104,24 @@ The rates for each Pod (1, 5 and 20 items per second) are an assumption, the own
 
 Above the measured limit, or when the profile needs quorum and failover, use the three-voter topology in [production-v1.md](production-v1.md).
 
+## Memory
+
+The numbers come from `docs/operations/single-node-memory-result.json` (run 44737055221 of the workflow `sift-single-node-load` on main d7e68f58, soak mode: 1000 items per second for 600 s, then 120 s with no ingest). The run was measured on linux, 4 CPUs, 16759431168 bytes of memory, ext4, not a GKE claim.
+
+| Measure | Bytes | GB |
+|---|---|---|
+| Peak RSS of the run (`peak_rss_bytes`) | 7469522944 | 7.5 |
+| Highest sample during the soak (every 30 s) | 5347778560 | 5.3 |
+| RSS at 600 s, the end of ingest | 5093838848 | 5.1 |
+| RSS after 120 s with no ingest (`rss_after_quiet_bytes`) | 5093838848 | 5.1 |
+
+At 1000 items per second the RSS grew from 521433088 bytes at 30 s to 5347778560 bytes at 510 s, and did not go down in the quiet time.
+
+Give the Pod at least this memory at 1000 items per second: peak RSS x 1.3 = 9.7 GB. 1.3 is the 30 percent margin. This is the figure of one run on one machine shape. The memory limit of the Pod must be at least this figure.
+
+- Not measured: other rates, a run longer than 600 s, GKE, and the memory of a Pod that runs the log agent.
+- What holds the memory and why it does not go down: [single-node-memory.md](operations/single-node-memory.md).
+
 ## Relation to production-v1
 
 [production-v1.md](production-v1.md) and its 13-gate acceptance are not changed and are not run for this profile. This profile makes no claim for the three-voter topology.
