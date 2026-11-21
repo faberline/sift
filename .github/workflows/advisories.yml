@@ -1,0 +1,16 @@
+# SEC2 of docs/standards/security.md in faberline/aw. Dependabot or a person updates the commit.
+name: advisories
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  advisories:
+    permissions:
+      contents: read
+      issues: write
+    uses: faberline/aw/.github/workflows/advisories.yml@df440b3884f52569a2facf1eecdb12275ae77c33
