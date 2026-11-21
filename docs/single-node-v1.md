@@ -26,7 +26,7 @@ The profile is one `all`-role Pod on one PVC on Standard GKE, installed by the o
 Every gate is **not run**. No live GKE evidence exists yet.
 
 1. **G1** One documented install on Standard GKE with a single node, no GCS and no FQDN policy, that collects the container logs and the Prometheus metrics of one namespace and answers `sift_query` and PromQL for them.
-2. **G2** Retention set to 30 days is enforced.
+2. **G2** Retention set to 30 days is enforced. G2 has two proofs. (a) The acceptance phase `retention` (`scripts/single_node/acceptance/phases.py`) sets `retentionDays` to 1 and proves that the setting reaches the Pod (`--retention-days 1`), that a batch older than the retention is rejected at ingest and is not queryable, and that a batch inside it is accepted and queryable. Its result `retention.json` has `"gate": "G2"`, `"proves"` and `"does_not_prove"`; it does not prove expiry of stored data, a retention of 30 days or reuse of disk. (b) The expiry of stored data without GCS is proved by the test of #337 (an injected clock). G2 is complete only when both proofs exist.
 3. **G3** Logs of a Pod that is deleted within 10 s of exit are queryable.
 4. **G4** The functional and PromQL-oracle gates that already run in the CI workflow `.github/workflows/ci.yml` with the default `serve --role all` (the default of `--role` in `src/bin/sift/serve_args.rs` is `all`):
    - `test: compat`: its step `prometheus compliance` runs `tests/prometheus_compliance.sh`, which starts `sift serve` with the default role and compares PromQL answers with the oracle.
