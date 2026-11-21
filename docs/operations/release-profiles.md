@@ -41,6 +41,10 @@ Proposal: the owner confirms before any tag
 - `scripts/release/verify-release-contract.py` pins the workflow inputs. The
   later issue changes that script and its tests in the same pull request as
   the workflows.
+- Status: the input `profile` exists in both workflows (#331). The candidate
+  workflow validates it. The promotion workflow stops a `single-node` run with
+  `single-node receipt step not yet wired` until `make-single-node-receipt.py`
+  is wired (a later child of #325).
 
 This change is a later issue. The desk opens it after the owner confirms the
 version. This page edits no workflow.
