@@ -154,7 +154,7 @@ class SingleNodeWorkflowTest(unittest.TestCase):
 
     def test_phases_script_exists_and_is_stdlib(self):
         text = self.read("scripts/single_node/acceptance/phases.py")
-        self.assertIn("PHASES = ('load_30m', 'load_24h', 'faults', 'comparison')", text)
+        self.assertIn("PHASES = ('load_30m', 'load_24h', 'faults', 'comparison', 'retention')", text)
         self.assertNotIn("import requests", text)
         self.assertNotIn("import yaml", text)
 

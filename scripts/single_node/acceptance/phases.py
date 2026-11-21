@@ -9,7 +9,7 @@ from load_data import build  # noqa: E402
 import run_local_load as driver  # noqa: E402
 import cost_guard, cost_model  # noqa: E402
 
-PHASES = ('load_30m', 'load_24h', 'faults', 'comparison')
+PHASES = ('load_30m', 'load_24h', 'faults', 'comparison', 'retention')
 GUARD = Path(__file__).resolve().parents[2] / 'production' / 'cost_guard.py'
 GUARD_FILE = 'cost-guard.json'
 TTL_MINUTES = 300
@@ -24,6 +24,15 @@ ENDPOINT = f'http://127.0.0.1:{LOCAL_PORT}'
 POD = 'sift-all-0'
 PVC = 'data-sift-all-0'
 SAMPLE_SECONDS = 60
+RETENTION_DAYS = 1
+RETENTION_ROLL_SECONDS = 900
+OLD_EXTRA_DAYS = 1
+RETENTION_RATE = 10
+GATES = {'retention': {
+    'gate': 'G2',
+    'proves': 'retentionDays 1 reaches the Pod (--retention-days 1); a batch older than 1 day is rejected at ingest and is not queryable; a batch inside 1 day is accepted and queryable',
+    'does_not_prove': 'expiry of stored data (proved by the test of #337), a retention of 30 days, reuse of disk space',
+}}
 
 
 def read_hours(path):
@@ -69,7 +78,14 @@ def phase_result(phase, start, end, selected, accepted, node_count, detail='', u
     return record
 
 
+def with_gate(result):
+    if result['phase'] not in GATES:
+        return result
+    return {**result, **GATES[result['phase']]}
+
+
 def write_evidence(evidence_dir, result):
+    result = with_gate(result)
     directory = Path(evidence_dir)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{result['phase']}.json"
@@ -369,6 +385,99 @@ def run_comparison(namespace):
                         '; '.join(notes) or 'every offered item read back')
 
 
+def retention_days_from_args(args):
+    if '--retention-days' not in args:
+        return None
+    index = args.index('--retention-days') + 1
+    if index >= len(args):
+        return None
+    try:
+        return int(args[index])
+    except ValueError:
+        return None
+
+
+def check_retention(api, days, now_nanos, templates):
+    old_run = uuid.uuid4().hex
+    new_run = uuid.uuid4().hex
+    old = build(old_run, PROJECT, 0, now_nanos - (days + OLD_EXTRA_DAYS) * 86400 * 1_000_000_000,
+                templates, RETENTION_RATE)
+    new = build(new_run, PROJECT, 0, now_nanos, templates, RETENTION_RATE)
+    selected = items_of(old) + items_of(new)
+    accepted = 0
+    notes = []
+    old_ok = True
+    for batch in old['batches']:
+        try:
+            api.send(batch)
+        except ValueError as error:
+            if 'partial success' not in str(error):
+                notes.append(f'old {batch[0]} batch: {error}')
+                old_ok = False
+        else:
+            notes.append(f'old {batch[0]} batch was accepted')
+            old_ok = False
+    try:
+        rows = api.query('logs', old['start_nanos'], old['end_nanos'], run=old_run)
+    except ValueError as error:
+        notes.append(f'old query: {error}')
+        old_ok = False
+    else:
+        if rows:
+            notes.append('old logs are queryable')
+            old_ok = False
+    if old_ok:
+        accepted += items_of(old)
+    try:
+        for batch in new['batches']:
+            api.send(batch)
+        api.verify(new, new_run)
+        accepted += items_of(new)
+    except ValueError as error:
+        notes.append(f'new: {error}')
+    return selected, accepted, notes
+
+
+def retention_result(selected, accepted, notes):
+    return phase_result('retention', '', '', selected, accepted, 0,
+                        '; '.join(notes) or 'old batch rejected and not queryable; new batch accepted and queryable')
+
+
+def wait_retention_args(namespace, days, seconds=RETENTION_ROLL_SECONDS, run=subprocess.run):
+    deadline = time.monotonic() + seconds
+    while True:
+        read = run(['kubectl', '-n', namespace, 'get', 'pod', POD, '-o',
+                    'jsonpath={.spec.containers[0].args}'], capture_output=True, text=True)
+        args = None
+        if read.returncode == 0:
+            try:
+                args = json.loads(read.stdout)
+            except (ValueError, TypeError):
+                args = None
+        if args is not None and retention_days_from_args(args) == days:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f'the Pod args do not show --retention-days {days} in {seconds} s')
+        time.sleep(5)
+
+
+def run_retention(namespace):
+    subprocess.run(['kubectl', '-n', namespace, 'patch', 'sift', 'sift', '--type', 'merge', '-p',
+                    json.dumps({'spec': {'retentionDays': RETENTION_DAYS}})], check=True)
+    deadline = time.monotonic() + RETENTION_ROLL_SECONDS
+    wait_retention_args(namespace, RETENTION_DAYS, seconds=max(1, deadline - time.monotonic()))
+    wait_pod_ready(namespace, max(1, deadline - time.monotonic()))
+    forward = Forward()
+    forward.start(namespace)
+    try:
+        api = Api(ENDPOINT, PROJECT)
+        selected, accepted, notes = check_retention(api, RETENTION_DAYS, time.time_ns(),
+                                                    driver.synthetic_templates())
+    finally:
+        forward.stop()
+    return retention_result(selected, accepted, notes)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -430,6 +539,8 @@ def main(argv=None):
             result = run_load(args.phase, hours[args.phase], load_rate(cost), namespace)
         elif args.phase == 'faults':
             result = run_faults(namespace)
+        elif args.phase == 'retention':
+            result = run_retention(namespace)
         else:
             result = run_comparison(namespace)
     except Exception as error:  # a phase that raises is a failed phase, with the reason
