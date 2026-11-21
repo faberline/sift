@@ -34,6 +34,8 @@ Every gate is **not run**. No live GKE evidence exists yet.
 
    These gates run on a CI runner, not on GKE.
 
+The load phase named load_24h in the single-node acceptance runs 7080 seconds at 50 items per second, not 24 hours. The cost page docs/operations/single-node-acceptance-cost.md gives the figure.
+
 ## Senders
 
 **Basis.** Read from the code of this repository, not measured, not a GKE claim. No live GKE evidence exists yet.
