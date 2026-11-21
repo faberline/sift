@@ -4,7 +4,7 @@ import argparse, json, math, sys
 
 SCHEMA = 'sift.production-cost-inputs/v1'
 PHASES = {'setup', 'load_30m', 'load_24h', 'faults', 'comparison'}
-OPTIONAL_PHASES = {'retention'}
+OPTIONAL_PHASES = {'retention', 'deleted_pod_logs'}
 NUMBER_KEYS = {
     'node_count', 'node_usd_per_hour', 'driver_count', 'driver_usd_per_hour',
     'store_replicas', 'control_replicas', 'control_pvc_gib', 'pvc_usd_per_gib_month',
@@ -27,7 +27,7 @@ def estimate(inputs):
     require(inputs['schema'] == SCHEMA, 'schema must be ' + SCHEMA)
     phases = inputs['phases_hours']
     require(type(phases) is dict and PHASES <= set(phases) <= PHASES | OPTIONAL_PHASES,
-        'phases_hours must have the five phase keys and may have retention')
+        'phases_hours must have the five phase keys and may have retention and deleted_pod_logs')
     for name in sorted(phases): number(phases[name], 'phase ' + name)
     for key in sorted(NUMBER_KEYS): number(inputs[key], key)
 

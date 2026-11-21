@@ -53,10 +53,77 @@ class FakeApi:
         return {}
 
 
+class FakeLogApi:
+    """Answers each query with the same records; the phase filters them itself."""
+
+    def __init__(self, records):
+        self.records = records
+
+    def request(self, method, path, value=None, latency=None):
+        return {'data': {'records': self.records}}
+
+
+def log_record(body, pod, namespace):
+    return {'body_text': body, 'resource': {'k8s.pod.name': pod, 'k8s.namespace.name': namespace}}
+
+
+def no_sleep(seconds):
+    return None
+
+
 class PhaseTests(unittest.TestCase):
-    def test_retention_is_the_last_phase(self):
-        self.assertEqual(phases.PHASES[-1], 'retention')
+    def test_retention_precedes_the_last_phase(self):
+        self.assertEqual(phases.PHASES[-2], 'retention')
         self.assertEqual(phases.read_hours(INPUTS)['retention'], 0.25)
+
+    def test_deleted_pod_logs_is_a_phase(self):
+        self.assertEqual(phases.PHASES[-1], 'deleted_pod_logs')
+        self.assertEqual(phases.read_hours(INPUTS)['deleted_pod_logs'], 0.1)
+
+    def test_pod_manifest(self):
+        manifest = phases.pod_manifest('ns', 'm1')
+        self.assertEqual(manifest['metadata']['namespace'], 'ns')
+        self.assertEqual(manifest['spec']['restartPolicy'], 'Never')
+        self.assertTrue(any('m1' in part for part in manifest['spec']['containers'][0]['command']))
+        self.assertIn('faberline.dev/pool', [item['key'] for item in manifest['spec']['tolerations']])
+
+
+    def test_check_deleted_pod_logs_passes(self):
+        api = FakeLogApi([log_record('m1', 'g3-short-lived', 'ns')])
+        selected, accepted, notes = phases.check_deleted_pod_logs(
+            api, 'm1', 'ns', 'g3-short-lived', NOW, wait_seconds=0, sleep=no_sleep)
+        self.assertEqual((selected, accepted, notes), (1, 1, []))
+        self.assertEqual(phases.deleted_pod_logs_result(selected, accepted, notes)['result'], 'pass')
+
+    def test_check_deleted_pod_logs_fails_when_the_marker_is_not_found(self):
+        api = FakeLogApi([])
+        selected, accepted, notes = phases.check_deleted_pod_logs(
+            api, 'm1', 'ns', 'g3-short-lived', NOW, wait_seconds=0, sleep=no_sleep)
+        self.assertEqual((selected, accepted), (1, 0))
+        self.assertEqual(len(notes), 1)
+        self.assertIn('marker not found', notes[0])
+        self.assertEqual(phases.deleted_pod_logs_result(selected, accepted, notes)['result'], 'fail')
+
+    def test_check_deleted_pod_logs_fails_for_another_pod_or_namespace(self):
+        for pod, namespace in (('other', 'ns'), ('g3-short-lived', 'other')):
+            with self.subTest(pod=pod, namespace=namespace):
+                api = FakeLogApi([log_record('m1', pod, namespace)])
+                _, accepted, _ = phases.check_deleted_pod_logs(
+                    api, 'm1', 'ns', 'g3-short-lived', NOW, wait_seconds=0, sleep=no_sleep)
+                self.assertEqual(accepted, 0)
+
+    def test_deleted_pod_logs_evidence_has_gate_g3(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = phases.write_evidence(Path(tmp), phases.deleted_pod_logs_result(1, 1, []))
+            data = json.loads(path.read_text())
+        self.assertEqual(path.name, 'deleted_pod_logs.json')
+        self.assertEqual(data['gate'], 'G3')
+        self.assertTrue(data['proves'])
+        self.assertTrue(data['does_not_prove'])
+
+    def test_deleted_pod_logs_fits_the_ttl(self):
+        self.assertEqual(phases.phase_timeout_seconds(0.1), 432)
+        self.assertIsNone(phases.check_total(phases.read_hours(INPUTS), phases.TTL_MINUTES))
 
     def test_retention_days_from_args(self):
         self.assertEqual(phases.retention_days_from_args(['serve', '--role', 'all', '--retention-days', '1']), 1)
@@ -293,21 +360,21 @@ class CostGuardTests(unittest.TestCase):
         figures = phases.guard_figures(self.inputs, 'load_30m', 0)
         self.assertEqual(figures['hourly_usd'], 0.93)
         self.assertEqual(figures['spent_usd'], 0)
-        self.assertEqual(figures['hours_left'], 3.75)
+        self.assertAlmostEqual(figures['hours_left'], 3.85, places=6)
 
     def test_figures_after_three_hours(self):
         figures = phases.guard_figures(self.inputs, 'faults', 10800)
-        self.assertEqual(figures['hours_left'], 1.25)
+        self.assertAlmostEqual(figures['hours_left'], 1.35, places=6)
         self.assertAlmostEqual(figures['spent_usd'], 2.79, places=4)
         self.assertEqual(figures['elapsed_hours'], 3.0)
 
     def test_guard_lets_the_run_go_on(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(phases.run_guard('load_30m', self.inputs, '7', 0, tmp), 0)
+            self.assertEqual(phases.run_guard('load_30m', self.inputs, '8', 0, tmp), 0)
             entry = self.read_entries(tmp)[0]
         self.assertEqual(entry['result'], 'pass')
         self.assertEqual(entry['phase'], 'load_30m')
-        self.assertAlmostEqual(entry['projected_usd'], 3.4875, places=3)
+        self.assertAlmostEqual(entry['projected_usd'], 3.5805, places=3)
 
     def test_guard_stops_the_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -320,12 +387,12 @@ class CostGuardTests(unittest.TestCase):
     def test_spent_counts_against_the_cap(self):
         with tempfile.TemporaryDirectory() as refused, tempfile.TemporaryDirectory() as allowed:
             self.assertNotEqual(phases.run_guard('faults', self.inputs, '3.9', 10800, refused), 0)
-            self.assertEqual(phases.run_guard('faults', self.inputs, '4.0', 10800, allowed), 0)
+            self.assertEqual(phases.run_guard('faults', self.inputs, '4.1', 10800, allowed), 0)
 
     def test_every_check_is_appended(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for phase, seconds in zip(phases.PHASES, (0, 1800, 9000, 10800, 12600)):
-                self.assertEqual(phases.run_guard(phase, self.inputs, '7', seconds, tmp), 0)
+            for phase, seconds in zip(phases.PHASES, (0, 1800, 9000, 10800, 12600, 13500)):
+                self.assertEqual(phases.run_guard(phase, self.inputs, '8', seconds, tmp), 0)
             entries = self.read_entries(tmp)
         self.assertEqual([entry['phase'] for entry in entries], list(phases.PHASES))
         for entry in entries:
@@ -342,7 +409,7 @@ class CostGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             args = ['guard', 'load_30m', '--cost-inputs', str(INPUTS), '--elapsed-seconds', '0',
                     '--evidence-dir', tmp]
-            self.assertEqual(phases.main(args + ['--cap-usd', '7']), 0)
+            self.assertEqual(phases.main(args + ['--cap-usd', '8']), 0)
             self.assertTrue((Path(tmp) / phases.GUARD_FILE).exists())
             self.assertNotEqual(phases.main(args + ['--cap-usd', '3']), 0)
 

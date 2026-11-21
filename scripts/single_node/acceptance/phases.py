@@ -5,11 +5,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'production'))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from load_client import Api  # noqa: E402
-from load_data import build  # noqa: E402
+from load_data import build, timestamp  # noqa: E402
 import run_local_load as driver  # noqa: E402
 import cost_guard, cost_model  # noqa: E402
 
-PHASES = ('load_30m', 'load_24h', 'faults', 'comparison', 'retention')
+PHASES = ('load_30m', 'load_24h', 'faults', 'comparison', 'retention', 'deleted_pod_logs')
 GUARD = Path(__file__).resolve().parents[2] / 'production' / 'cost_guard.py'
 GUARD_FILE = 'cost-guard.json'
 TTL_MINUTES = 300
@@ -28,10 +28,19 @@ RETENTION_DAYS = 1
 RETENTION_ROLL_SECONDS = 900
 OLD_EXTRA_DAYS = 1
 RETENTION_RATE = 10
+AGENT_PROJECT = 'sift'
+DELETED_POD_NAME = 'g3-short-lived'
+DELETED_POD_MARKER_PREFIX = 'sift-g3-marker-'
+DELETED_POD_DELETE_SECONDS = 10
+DELETED_POD_WAIT_SECONDS = 120
 GATES = {'retention': {
     'gate': 'G2',
     'proves': 'retentionDays 1 reaches the Pod (--retention-days 1); a batch older than 1 day is rejected at ingest and is not queryable; a batch inside 1 day is accepted and queryable',
     'does_not_prove': 'expiry of stored data (proved by the test of #337), a retention of 30 days, reuse of disk space',
+}, 'deleted_pod_logs': {
+    'gate': 'G3',
+    'proves': 'the log line of a Pod that was deleted within 10 s of its exit is queryable with the Pod name and the namespace',
+    'does_not_prove': 'a Pod deleted sooner than 10 s, many short-lived Pods at once, a node restart, or the cost of the checkpoint file',
 }}
 
 
@@ -443,6 +452,112 @@ def retention_result(selected, accepted, notes):
                         '; '.join(notes) or 'old batch rejected and not queryable; new batch accepted and queryable')
 
 
+def pod_manifest(namespace, marker):
+    return {
+        'apiVersion': 'v1',
+        'kind': 'Pod',
+        'metadata': {'name': DELETED_POD_NAME, 'namespace': namespace},
+        'spec': {
+            'restartPolicy': 'Never',
+            'nodeSelector': {'faberline.dev/pool': 'sift-server'},
+            'tolerations': [{'key': 'faberline.dev/pool', 'operator': 'Equal',
+                             'value': 'sift-server', 'effect': 'NoSchedule'}],
+            'containers': [{'name': 'writer', 'image': 'busybox:1.36.1',
+                            'command': ['sh', '-c', f'echo {marker}']}],
+        },
+    }
+
+
+def find_marker(api, marker, namespace, pod, now_nanos):
+    """The records that carry the marker with the Pod name and the namespace of the Pod."""
+    hour = 3600 * 1_000_000_000
+    request = {'version': 1, 'project': AGENT_PROJECT,
+               'time_range': {'start': timestamp(now_nanos - hour), 'end': timestamp(now_nanos + hour // 6)},
+               'signal': {'kind': 'logs',
+                          'filter': {'op': 'eq', 'field': 'resource.k8s.pod.name', 'value': pod}},
+               'mode': 'sync', 'limit': 1000}
+    records, cursors = [], set()
+    for _ in range(1000):
+        response = api.request('POST', '/api/v1/query', request, 'logs')
+        records.extend(response['data']['records'])
+        cursor = response.get('next_cursor')
+        if cursor is None:
+            return [record for record in records
+                    if marker in record['body_text']
+                    and record['resource'].get('k8s.pod.name') == pod
+                    and record['resource'].get('k8s.namespace.name') == namespace]
+        if cursor in cursors:
+            raise ValueError('log query cursor did not advance')
+        cursors.add(cursor)
+        request['cursor'] = cursor
+    raise ValueError('log query exceeded its page limit')
+
+
+def check_deleted_pod_logs(api, marker, namespace, pod, now_nanos,
+                           wait_seconds=DELETED_POD_WAIT_SECONDS, sleep=time.sleep):
+    waited = 0
+    error = None
+    while True:
+        try:
+            matches = find_marker(api, marker, namespace, pod, now_nanos)
+            error = None
+        except ValueError as failure:
+            matches, error = [], str(failure)
+        if matches or waited >= wait_seconds:
+            break
+        sleep(5)
+        waited += 5
+    notes = []
+    if not matches:
+        notes.append(f'marker not found within {waited} s')
+        if error:
+            notes.append(f'last query error: {error}')
+    elif len(matches) > 1:
+        notes.append(f'marker found {len(matches)} times')
+    return 1, (1 if len(matches) == 1 else 0), notes
+
+
+def deleted_pod_logs_result(selected, accepted, notes):
+    return phase_result('deleted_pod_logs', '', '', selected, accepted, 0,
+                        '; '.join(notes) or 'the marker of a deleted Pod was found with its Pod name and namespace')
+
+
+def wait_pod_succeeded(namespace, seconds=DELETED_POD_WAIT_SECONDS):
+    deadline = time.monotonic() + seconds
+    while True:
+        phase = subprocess.run(['kubectl', '-n', namespace, 'get', 'pod', DELETED_POD_NAME, '-o',
+                                'jsonpath={.status.phase}'], capture_output=True, text=True).stdout.strip()
+        if phase == 'Succeeded':
+            return time.monotonic()
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f'{DELETED_POD_NAME} did not reach Succeeded in {seconds} s')
+        time.sleep(2)
+
+
+def run_deleted_pod_logs(namespace):
+    marker = DELETED_POD_MARKER_PREFIX + uuid.uuid4().hex
+    subprocess.run(['kubectl', '-n', namespace, 'apply', '-f', '-'],
+                   input=json.dumps(pod_manifest(namespace, marker)), text=True, check=True)
+    selected, accepted, notes = 1, 0, []
+    forward = Forward()
+    try:
+        exited = wait_pod_succeeded(namespace)
+        delay = time.monotonic() - exited
+        subprocess.run(['kubectl', '-n', namespace, 'delete', 'pod', DELETED_POD_NAME, '--wait=false'],
+                       check=True)
+        forward.start(namespace)
+        selected, accepted, notes = check_deleted_pod_logs(
+            Api(ENDPOINT, AGENT_PROJECT), marker, namespace, DELETED_POD_NAME, time.time_ns())
+        if delay > DELETED_POD_DELETE_SECONDS:
+            accepted = 0
+            notes.insert(0, f'delete started later than {DELETED_POD_DELETE_SECONDS} s after exit')
+    finally:
+        forward.stop()
+        subprocess.run(['kubectl', '-n', namespace, 'delete', 'pod', DELETED_POD_NAME,
+                        '--ignore-not-found', '--wait=false'])
+    return deleted_pod_logs_result(selected, accepted, notes)
+
+
 def wait_retention_args(namespace, days, seconds=RETENTION_ROLL_SECONDS, run=subprocess.run):
     deadline = time.monotonic() + seconds
     while True:
@@ -541,6 +656,8 @@ def main(argv=None):
             result = run_faults(namespace)
         elif args.phase == 'retention':
             result = run_retention(namespace)
+        elif args.phase == 'deleted_pod_logs':
+            result = run_deleted_pod_logs(namespace)
         else:
             result = run_comparison(namespace)
     except Exception as error:  # a phase that raises is a failed phase, with the reason
