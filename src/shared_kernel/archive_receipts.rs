@@ -21,6 +21,13 @@ pub struct LocalArchiveReceipt {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LocalExpiryReceipt {
+    pub removed_events: u64,
+    pub retained_events: u64,
+    pub oldest_retained_unix_nano: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HotEvictionReceipt {
     pub evicted_segments: usize,
     pub evicted_events: u64,
