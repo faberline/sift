@@ -24,6 +24,9 @@ concurrency:
   group: sift-release-candidate-${{ inputs.version }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   identity:
     name: candidate identity

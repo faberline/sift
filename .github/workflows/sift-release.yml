@@ -44,6 +44,9 @@ concurrency:
   group: sift-release-promotion-${{ inputs.version }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   verify-inputs:
     name: prove immutable tag and candidate receipt
