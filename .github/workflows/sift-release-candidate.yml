@@ -11,6 +11,14 @@ on:
         description: Exact landed main commit to build and test.
         required: true
         type: string
+      profile:
+        description: Release profile. production keeps every current gate; single-node is the profile of docs/single-node-v1.md.
+        required: false
+        type: choice
+        default: production
+        options:
+          - production
+          - single-node
 
 concurrency:
   group: sift-release-candidate-${{ inputs.version }}
@@ -45,6 +53,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_COMMIT: ${{ inputs.commit }}
+          REQUESTED_PROFILE: ${{ inputs.profile }}
           REQUESTED_VERSION: ${{ inputs.version }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
         shell: bash
@@ -53,6 +62,7 @@ jobs:
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "candidate must dispatch main" >&2; exit 1; }
           [[ "$REQUESTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid commit input" >&2; exit 1; }
           [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid version input" >&2; exit 1; }
+          [[ "$REQUESTED_PROFILE" == "production" || "$REQUESTED_PROFILE" == "single-node" ]] || { echo "invalid profile input" >&2; exit 1; }
           [[ "$REQUESTED_COMMIT" == "$GITHUB_SHA" ]] || { echo "input commit is not dispatch SHA" >&2; exit 1; }
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || { echo "checkout SHA mismatch" >&2; exit 1; }
           [[ "$WORKFLOW_REF" == "${GITHUB_REPOSITORY}/.github/workflows/sift-release-candidate.yml@refs/heads/main" ]] || { echo "candidate workflow ref mismatch" >&2; exit 1; }

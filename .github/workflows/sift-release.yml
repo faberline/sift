@@ -31,6 +31,14 @@ on:
         description: Lowercase SHA-256 of the exact sift-gke-receipt.json.sha256 sidecar bytes.
         required: true
         type: string
+      profile:
+        description: Release profile. production keeps every current gate; single-node is the profile of docs/single-node-v1.md.
+        required: false
+        type: choice
+        default: production
+        options:
+          - production
+          - single-node
 
 concurrency:
   group: sift-release-promotion-${{ inputs.version }}
@@ -69,6 +77,13 @@ jobs:
           [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid version input" >&2; exit 1; }
           [[ "$GITHUB_REF" == "refs/tags/sift@${{ inputs.version }}" ]] || { echo "promotion must dispatch the exact annotated release tag" >&2; exit 1; }
           [[ "$GITHUB_WORKFLOW_REF" == "${GITHUB_REPOSITORY}/.github/workflows/sift-release.yml@${GITHUB_REF}" ]] || { echo "promotion workflow identity mismatch" >&2; exit 1; }
+      - name: Stop the single-node profile until its receipt step is wired
+        if: ${{ inputs.profile == 'single-node' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "single-node receipt step not yet wired" >&2
+          exit 1
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3
