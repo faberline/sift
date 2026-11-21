@@ -12,22 +12,37 @@ impl ServiceState {
         destination: impl Into<String>,
         interval: std::time::Duration,
     ) -> ArchiveWorker {
-        self.start_lifecycle_worker(Some(destination.into()), interval)
+        self.start_lifecycle_worker(Some(destination.into()), interval, None)
     }
 
     /// Start the same leader-only lifecycle worker for an installation that
     /// has no remote archive. It commits the local immutable segment set before
     /// it compacts WAL bytes.
     pub fn start_local_archive_worker(&self, interval: std::time::Duration) -> ArchiveWorker {
-        self.start_lifecycle_worker(None, interval)
+        self.start_lifecycle_worker(None, interval, None)
+    }
+
+    /// The local worker with an injected clock. The tests use it to expire
+    /// events without waiting for real time.
+    #[doc(hidden)]
+    pub fn start_local_archive_worker_with_clock(
+        &self,
+        interval: std::time::Duration,
+        clock: impl Fn() -> chrono::DateTime<chrono::Utc> + Send + Sync + 'static,
+    ) -> ArchiveWorker {
+        self.start_lifecycle_worker(None, interval, Some(std::sync::Arc::new(clock)))
     }
 
     fn start_lifecycle_worker(
         &self,
         destination: Option<String>,
         interval: std::time::Duration,
+        clock: Option<std::sync::Arc<dyn Fn() -> chrono::DateTime<chrono::Utc> + Send + Sync>>,
     ) -> ArchiveWorker {
-        let ctx = self.lifecycle_context(destination);
+        let mut ctx = self.lifecycle_context(destination);
+        if let Some(clock) = clock {
+            ctx.clock = clock;
+        }
         let archive_serial = self.archive_serial();
         let (shutdown, mut shutdown_rx) = tokio::sync::watch::channel(false);
         let task = tokio::spawn(async move {

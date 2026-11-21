@@ -49,6 +49,9 @@ no separate command for this request.
 | `sift_local_storage_used_bytes` | below `sift_local_storage_max_bytes` | `src/app/interfaces/metrics_provider.rs` |
 | `sift_local_storage_warning` | see the metric's source file | `src/app/interfaces/metrics_provider.rs` |
 | `sift_local_storage_critical` | see the metric's source file | `src/app/interfaces/metrics_provider.rs` |
+| `sift_local_retention_expired_events_total` | grows only when events older than the retention window exist | `src/app/interfaces/metrics_provider.rs` |
+| `sift_local_retention_runs_total` | grows on each tick in a single-node install with no destination | `src/app/interfaces/metrics_provider.rs` |
+| `sift_local_retention_oldest_retained_unix_nano` | not older than the retention window | `src/app/interfaces/metrics_provider.rs` |
 | `sift_remote_protection_lag_seconds` | see the metric's source file | `src/app/interfaces/metrics_provider.rs` |
 | `sift_remote_protection_backpressure` | see the metric's source file | `src/app/interfaces/metrics_provider.rs` |
 | `sift_query_failures_total` | does not grow | `src/app/interfaces/metrics_provider.rs` |

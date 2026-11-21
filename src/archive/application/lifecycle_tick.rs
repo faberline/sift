@@ -66,6 +66,7 @@ pub(crate) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
         retention_capable,
     )
     .await;
+    let local_expiry_now = (ctx.destination.is_none() && ctx.raft.is_none()).then(|| (ctx.clock)());
     let archive = match retention_fence {
         Ok(retention_fence) => {
             let attempt_services = ctx.services.clone();
@@ -79,6 +80,7 @@ pub(crate) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
                     &attempt_state_machine,
                     attempt_destination.as_deref(),
                     retention_fence,
+                    local_expiry_now,
                 )
             })
             .await
@@ -97,6 +99,18 @@ pub(crate) async fn run_lifecycle_tick(ctx: &LifecycleContext) {
                 changed: outcome.commit.is_some(),
                 replicated_checkpoint_installed: false,
             };
+            if let Some(receipt) = &outcome.local_expiry {
+                ctx.local_retention.record(receipt);
+                if receipt.removed_events > 0 {
+                    tracing::info!(
+                        removed_events = receipt.removed_events,
+                        retained_events = receipt.retained_events,
+                        oldest_retained_unix_nano = receipt.oldest_retained_unix_nano.unwrap_or(0),
+                        "Sift local retention expired events"
+                    );
+                    flags.changed = true;
+                }
+            }
             let still_leader = match &ctx.raft {
                 Some(raft) => raft.is_leader().await,
                 None => true,
