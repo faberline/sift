@@ -2,7 +2,7 @@
 ---
 id: sift-security-hardening-bearer-auth-ec
 summary: Security contract for Sift bearer authentication and probe exemptions.
-fill_sections: [e2e-test, tool-contract]
+fill_sections: [e2e-test]
 ---
 
 # EC: Sift Bearer Authentication
@@ -23,20 +23,4 @@ e2e_tests:
       - "Health, readiness, metrics, OpenAPI, and docs probes remain reachable without a bearer token."
 ```
 
-## Tool Contract
-<!-- type: tool-contract lang: yaml -->
-
-```yaml
-tool_contracts:
-  - id: sift-guard-auth-surface
-    tool: guard
-    manifest: guard.toml
-    category: security
-    command: "guard scan . --compact --no-persist"
-    native:
-      version: 1
-      project: sift
-      source_contract: sift-security-hardening-bearer-auth
-      target: .
-```
 <!-- HANDWRITE-END -->
