@@ -182,6 +182,29 @@ class SingleNodeWorkflowTest(unittest.TestCase):
         self.assertIn("outputs:", guard)
         self.assertNotIn("inputs.cost_cap_usd", deploy)
 
+    def test_phases_input_defaults_to_all(self):
+        text = self.read(WORKFLOW)
+        match = re.search(r"\n      phases:\n((?:        .*\n)+)", text)
+        self.assertIsNotNone(match)
+        self.assertIn("type: string", match.group(1))
+        self.assertIn('default: ""', match.group(1))
+
+    def test_guard_validates_the_phases(self):
+        guard = self.job(self.read(WORKFLOW), "guard")
+        self.assertIn("phases.py select", guard)
+        self.assertIn("steps.phases.outputs.phases", guard)
+        self.assertIsNotNone(re.search(r"PHASES: \$\{\{ inputs\.phases \}\}", guard))
+        self.assertEqual(guard.count("inputs.phases"), 1)
+
+    def test_deploy_passes_the_validated_phases(self):
+        deploy = self.job(self.read(WORKFLOW), "deploy")
+        self.assertIn(
+            "bash scripts/single_node/acceptance/run.sh ${{ needs.guard.outputs.phases }}",
+            deploy,
+        )
+        self.assertIn("COST_CAP_USD=${{ needs.guard.outputs.cap_usd }}", deploy)
+        self.assertNotIn("inputs.phases", deploy)
+
     def test_ci_runs_this_test(self):
         self.assertIn(
             "python3 -B scripts/test_single_node_workflow.py -v",

@@ -24,6 +24,7 @@ GATE_FILES = {
     "G3": "deleted_pod_logs.json",
 }
 SETUP_FILE = "setup.json"
+ACCEPTANCE_FILE = "acceptance.json"
 COMMIT_RE = r"[0-9a-f]{40}"
 IMAGE_RE = r"ghcr\.io/faberline/sift@(sha256:[0-9a-f]{64})"
 
@@ -89,6 +90,13 @@ def make_receipt(evidence_dir: Path, run_id: str, attempt: str, commit: str, run
     if match is None:
         fail("image digest must be an immutable ghcr.io/faberline/sift digest")
     digest = match.group(1)
+
+    acceptance_path = evidence_dir / ACCEPTANCE_FILE
+    if acceptance_path.exists() or acceptance_path.is_symlink():
+        record = load_json(acceptance_path, ACCEPTANCE_FILE)
+        if record.get("mode") != "full":
+            not_run = ", ".join(record.get("not_run", []))
+            fail(f"the run is partial (not run: {not_run}); a receipt needs a full acceptance")
 
     gates = {}
     for gate in ("G1", "G2", "G3"):

@@ -2,13 +2,21 @@
 # Setup phase of the single-node acceptance run. The aw reusable workflow
 # calls this script with NAMESPACE, IMAGE, EVIDENCE_DIR, RUN_LABEL and
 # KUBECONFIG set; the sift workflow also sets COST_CAP_USD (the cap that its
-# guard job checked). It writes setup.json and cost-guard.json; the aw workflow
-# tears everything down.
+# guard job checked). The first argument (or PHASES) is an optional comma list
+# that selects the phases; empty means all. It writes setup.json and
+# cost-guard.json; the aw workflow tears everything down.
 set -euo pipefail
 
 : "${NAMESPACE:?}" "${EVIDENCE_DIR:?}" "${IMAGE:?}" "${COST_CAP_USD:?}"
 start="$(date -u +%FT%TZ)"
 mkdir -p "$EVIDENCE_DIR"
+
+# 0. The phases to run: the first argument, else PHASES, else all. An unknown
+#    name stops the script here, before any cluster call.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASES="${1:-${PHASES:-}}"
+selected="$(python3 -B "$here/phases.py" select --phases "$PHASES")"
+python3 -B "$here/phases.py" acceptance --phases "$PHASES" --evidence-dir "$EVIDENCE_DIR"
 
 # 1. The operator makes the ServiceAccount sift. Give it the pull secret, then
 #    delete a Pod that may have been made before the patch.
@@ -56,10 +64,9 @@ jq -n --arg start "$start" --arg end "$end" --argjson nodes "$nodes" --arg image
 
 # 4. The phases, in order. Stop at the first failure so that no paid time is
 #    spent after it; the remaining phases get a fail result "not run".
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 inputs="$here/../../production/cost-inputs.single-node.json"
 failed=""
-for phase in $(python3 -B "$here/phases.py" list); do
+for phase in $selected; do
   if [[ -n "$failed" ]]; then
     python3 -B "$here/phases.py" fail "$phase" --evidence-dir "$EVIDENCE_DIR" --reason "not run: phase $failed failed"
     continue

@@ -20,6 +20,10 @@ on:
         description: When true, only the cost guard runs. No paid resource is created.
         type: boolean
         default: true
+      phases:
+        description: Comma-separated phases to run (install_one_namespace, load_30m, load_24h, faults, comparison, retention, deleted_pod_logs). Empty runs all. A partial run cannot make a receipt.
+        type: string
+        default: ""
 
 permissions: {}
 concurrency:
@@ -35,6 +39,7 @@ jobs:
       contents: read
     outputs:
       cap_usd: ${{ steps.cap.outputs.cap_usd }}
+      phases: ${{ steps.phases.outputs.phases }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,6 +60,21 @@ jobs:
         run: |
           set -euo pipefail
           echo "cap_usd=$(python3 -B -c 'import sys; print(float(sys.argv[1]))' "$CAP")" >> "$GITHUB_OUTPUT"
+      - name: phases
+        id: phases
+        env:
+          PHASES: ${{ inputs.phases }}
+        run: |
+          set -euo pipefail
+          selected="$(python3 -B scripts/single_node/acceptance/phases.py select --phases "$PHASES")"
+          joined="$(printf '%s\n' "$selected" | paste -sd, -)"
+          echo "phases=$joined" >> "$GITHUB_OUTPUT"
+          full="$(python3 -B scripts/single_node/acceptance/phases.py select --phases "" | paste -sd, -)"
+          if [[ "$joined" == "$full" ]]; then
+            echo "Phases: $joined (full)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Phases: $joined (partial)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   resolve:
     needs: guard
@@ -186,6 +206,6 @@ jobs:
       namespace: sift-single-node
       lane: ""
       overlay: k8s/overlays/gke-single-node
-      test-command: COST_CAP_USD=${{ needs.guard.outputs.cap_usd }} bash scripts/single_node/acceptance/run.sh
+      test-command: COST_CAP_USD=${{ needs.guard.outputs.cap_usd }} bash scripts/single_node/acceptance/run.sh ${{ needs.guard.outputs.phases }}
       ttl-minutes: 310
       queue-minutes: 30
