@@ -213,7 +213,8 @@ sift serve --role all --data-dir ./sift-data
 
 Check it with `curl -fsS http://127.0.0.1:7380/readyz`. `install.sh` installs
 the newest `sift@X.Y.Z` GitHub release into `~/.local/bin`. Pin one with
-`SIFT_VERSION=sift@X.Y.Z`. No release is published yet, so until then build
+`SIFT_VERSION=sift@X.Y.Z`. The script stops when the `.sha256` file is missing;
+`SIFT_INSTALL_SKIP_VERIFY=1` installs without the check. No release is published yet, so until then build
 with `cargo build --locked --release -p sift` and run
 `target/release/sift serve --role all --data-dir ./sift-data`.
 
