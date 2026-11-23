@@ -60,11 +60,21 @@ pub fn operator_yaml(namespace: &str) -> Result<String> {
 pub fn operator_yaml_with_image(namespace: &str, image: &str) -> Result<String> {
     validate_namespace(namespace)?;
     validate_image(image)?;
-    Ok(
-        strip_ownership_markers(include_str!("../../../k8s/operator/operator.yaml"))
-            .replace("sift-system", namespace)
-            .replace(DEFAULT_OPERATOR_IMAGE, image),
-    )
+    const OPERATOR_PIECES: [&str; 5] = [
+        include_str!("../../../k8s/operator/namespace/namespace.yaml"),
+        include_str!("../../../k8s/operator/namespaced/serviceaccount.yaml"),
+        include_str!("../../../k8s/operator/cluster/clusterrole.yaml"),
+        include_str!("../../../k8s/operator/cluster/clusterrolebinding.yaml"),
+        include_str!("../../../k8s/operator/namespaced/deployment.yaml"),
+    ];
+    let body = OPERATOR_PIECES
+        .iter()
+        .map(|piece| strip_ownership_markers(piece))
+        .collect::<Vec<_>>()
+        .join("---\n");
+    Ok(body
+        .replace("sift-system", namespace)
+        .replace(DEFAULT_OPERATOR_IMAGE, image))
 }
 
 pub fn collector_yaml(namespace: &str, image: &str) -> Result<String> {

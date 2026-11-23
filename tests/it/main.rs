@@ -22,6 +22,7 @@ mod ignored_tests_doc;
 mod integrity_api;
 mod joint_recovery_http;
 pub use joint_recovery_http::verify_restored_process;
+mod k8s_install_split;
 mod kind_mvp_contract;
 mod kubernetes_auth;
 mod live_backup;

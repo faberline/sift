@@ -52,7 +52,7 @@ trap 'fail_hint "$MODE"' ERR
 # is the tripwire and this sync is the fix.
 SIFT_IMAGE_PINS=(
   k8s/collector/daemonset.yaml
-  k8s/operator/operator.yaml
+  k8s/operator/namespaced/deployment.yaml
 )
 
 install_sift() {

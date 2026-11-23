@@ -1,0 +1,7 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-operator-namespaced" tracker="1606" reason="Namespaced operator objects for the least-privileged apply identity: the ServiceAccount and the operator Deployment."
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+# HANDWRITE-END
