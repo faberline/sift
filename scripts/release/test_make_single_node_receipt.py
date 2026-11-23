@@ -107,6 +107,27 @@ class SingleNodeReceiptTest(unittest.TestCase):
         set_field(self.dir, "setup.json", image="ghcr.io/faberline/sift:latest")
         self.assert_refused("image digest")
 
+    def test_partial_acceptance_is_refused(self) -> None:
+        record = {
+            "mode": "partial",
+            "executed": ["install_one_namespace", "retention", "deleted_pod_logs"],
+            "not_run": ["load_30m", "load_24h", "faults", "comparison"],
+        }
+        (self.dir / "acceptance.json").write_text(json.dumps(record))
+        self.assert_refused("partial")
+
+    def test_full_acceptance_file_is_accepted(self) -> None:
+        record = {
+            "mode": "full",
+            "executed": [
+                "install_one_namespace", "load_30m", "load_24h", "faults",
+                "comparison", "retention", "deleted_pod_logs",
+            ],
+            "not_run": [],
+        }
+        (self.dir / "acceptance.json").write_text(json.dumps(record))
+        self.assertEqual(self.make()["commit"], COMMIT)
+
     def test_cli_writes_output_and_refusal_writes_none(self) -> None:
         base = [
             sys.executable,

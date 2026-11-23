@@ -518,5 +518,65 @@ class CostGuardTests(unittest.TestCase):
             self.assertNotEqual(phases.main(args + ['--cap-usd', '3']), 0)
 
 
+class SelectionTests(unittest.TestCase):
+    THREE = ['install_one_namespace', 'retention', 'deleted_pod_logs']
+
+    def test_default_runs_all(self):
+        self.assertEqual(phases.parse_selection(''), list(phases.PHASES))
+        self.assertEqual(phases.parse_selection(None), list(phases.PHASES))
+        self.assertEqual(phases.parse_selection('  '), list(phases.PHASES))
+
+    def test_three_phases_in_order(self):
+        self.assertEqual(phases.parse_selection('deleted_pod_logs, install_one_namespace,retention'),
+                         self.THREE)
+
+    def test_unknown_phase_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            phases.parse_selection('retention,nope')
+        self.assertIn('nope', str(caught.exception))
+        with self.assertRaises(ValueError):
+            phases.parse_selection('retention,')
+        with self.assertRaises(ValueError):
+            phases.parse_selection('retention,retention')
+
+    def test_select_command(self):
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(phases.main(['select', '--phases', 'retention']), 0)
+        self.assertEqual(out.getvalue().split(), ['retention'])
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(phases.main(['select', '--phases', 'nope']), 2)
+        self.assertIn('nope', err.getvalue())
+
+    def test_acceptance_record(self):
+        full = phases.acceptance_record(list(phases.PHASES))
+        self.assertEqual(full['mode'], 'full')
+        self.assertEqual(full['not_run'], [])
+        partial = phases.acceptance_record(self.THREE)
+        self.assertEqual(partial['mode'], 'partial')
+        self.assertEqual(partial['executed'], self.THREE)
+        self.assertEqual(partial['not_run'], ['load_30m', 'load_24h', 'faults', 'comparison'])
+
+    def test_acceptance_command_writes_file(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(phases.main(['acceptance', '--phases', 'retention',
+                                              '--evidence-dir', tmp]), 0)
+            record = json.loads((Path(tmp) / 'acceptance.json').read_text())
+        self.assertEqual(record['mode'], 'partial')
+        self.assertEqual(record['executed'], ['retention'])
+
+    def test_run_sh_selects_before_any_kubectl(self):
+        text = (Path(__file__).resolve().parent / 'run.sh').read_text()
+        self.assertLess(text.index('phases.py" select'), text.index('kubectl'))
+        self.assertIn('for phase in $selected; do', text)
+        self.assertNotIn('phases.py" list', text)
+        self.assertIn('PHASES="${1:-${PHASES:-}}"', text)
+
+
 if __name__ == '__main__':
     unittest.main()

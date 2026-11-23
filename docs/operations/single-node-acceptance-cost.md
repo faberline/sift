@@ -45,3 +45,17 @@ These are the values that `prepare.py` reads for the budget (`--format json`):
 - `measured_store_bytes_per_item` (assumed 1000; not measured)
 - `node_usd_per_hour` (assumed 0.78; a rough rate, not a quote)
 - `rated_items_per_second` (assumed 50 items per second for a small team)
+
+## Three-phase run (estimate)
+
+This estimate is hand-computed from the same inputs in `scripts/production/cost-inputs.single-node.json`. `cost_model.py` needs the five load phases, so it cannot compute a run of three phases. It is an estimate, not a quote.
+
+Run input: `phases=install_one_namespace,retention,deleted_pod_logs`.
+
+Pool `faberline.dev/pool=sift-server`, 1 node, 1 driver.
+
+Minutes: setup 60 (the budget in `cost-inputs.single-node.json`), install_one_namespace 6, retention 15, deleted_pod_logs 6. Total about 87 min (1.45 h). The three phases alone are 27 min (0.45 h).
+
+Estimated cost: USD 3.06 = TWD 99 (nodes 1.13, driver 0.22, store PVC 0.08, egress 0.12, uptime check 1.00, contingency 0.51). A full run is USD 7.21 = TWD 233 (section above).
+
+The desk asks the owner with this number (faberline/aw#722). A partial run is not a full acceptance: its evidence is marked `partial`, and the receipt script refuses it.
