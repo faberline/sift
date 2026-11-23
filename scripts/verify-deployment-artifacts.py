@@ -50,6 +50,13 @@ FIXTURES = {
     "REPLACE_ME__SIFT_PUBLIC_HOST": "sift.example.invalid",
     "REPLACE_ME__SIFT_PUBLIC_STATIC_IP_NAME": "sift-artifact-ip",
 }
+OPERATOR_PIECES = {
+    "Namespace": "namespace/namespace.yaml",
+    "ServiceAccount": "namespaced/serviceaccount.yaml",
+    "ClusterRole": "cluster/clusterrole.yaml",
+    "ClusterRoleBinding": "cluster/clusterrolebinding.yaml",
+    "Deployment": "namespaced/deployment.yaml",
+}
 
 
 def run(*args, env=None):
@@ -95,23 +102,10 @@ def check_public_tls(manifests, profile):
             "prod: certificate domain differs from the Ingress host")
 
 
-def validate_overlay(text, profile):
-    manifests = objects(text, profile)
-    check_public_tls(manifests, profile)
-    name, namespace, auth = PROFILES[profile]
+def validate_operator(text):
+    manifests = objects(text, "base")
     crd = manifests["CustomResourceDefinition", "sifts.sift.axiom.dev"]
     require(crd["apiVersion"] == "apiextensions.k8s.io/v1", "unexpected Sift CRD API version")
-    instance = manifests["Sift", name]
-    group, version = instance["apiVersion"].split("/")
-    require(group == crd["spec"]["group"], f"{profile}: Sift API group differs from the CRD")
-    schema, = [entry["schema"]["openAPIV3Schema"]["properties"]["spec"]
-               for entry in crd["spec"]["versions"] if entry["name"] == version and entry["served"]]
-    Draft7Validator.check_schema(schema)
-    Draft7Validator(schema).validate(instance["spec"])
-    require(instance["metadata"]["namespace"] == namespace and instance["spec"]["auth"] == auth,
-            f"{profile}: wrong environment settings")
-    require(instance["spec"]["image"] == IMAGE, f"{profile}: wrong instance image digest")
-
     manifests["Namespace", OPERATOR_NAMESPACE]
     account = manifests["ServiceAccount", "sift-operator"]
     deployment = manifests["Deployment", "sift-operator"]
@@ -125,11 +119,28 @@ def validate_overlay(text, profile):
             and binding["roleRef"]["name"] == role["metadata"]["name"]
             and binding["subjects"] == [{"kind": "ServiceAccount", "name": pod["serviceAccountName"],
                                          "namespace": OPERATOR_NAMESPACE}],
-            f"{profile}: operator and RBAC do not agree")
+            "base: operator and RBAC do not agree")
     require(operator["image"] == IMAGE and operator["args"] == ["k8s", "operator", "run"],
-            f"{profile}: wrong operator image digest or entrypoint")
+            "base: wrong operator image digest or entrypoint")
     require(any(rule["apiGroups"] == ["networking.k8s.io"] and "networkpolicies" in rule["resources"]
-                for rule in role["rules"]), f"{profile}: operator cannot manage network policies")
+                for rule in role["rules"]), "base: operator cannot manage network policies")
+    return manifests
+
+
+def validate_overlay(text, profile, crd):
+    manifests = objects(text, profile)
+    check_public_tls(manifests, profile)
+    name, namespace, auth = PROFILES[profile]
+    instance = manifests["Sift", name]
+    group, version = instance["apiVersion"].split("/")
+    require(group == crd["spec"]["group"], f"{profile}: Sift API group differs from the CRD")
+    schema, = [entry["schema"]["openAPIV3Schema"]["properties"]["spec"]
+               for entry in crd["spec"]["versions"] if entry["name"] == version and entry["served"]]
+    Draft7Validator.check_schema(schema)
+    Draft7Validator(schema).validate(instance["spec"])
+    require(instance["metadata"]["namespace"] == namespace and instance["spec"]["auth"] == auth,
+            f"{profile}: wrong environment settings")
+    require(instance["spec"]["image"] == IMAGE, f"{profile}: wrong instance image digest")
 
 
 def check_public_tls_rejects_plain_http():
@@ -180,9 +191,19 @@ def render(directory, sift, version):
     k8s = directory / "k8s"
     shutil.copytree(ROOT / "k8s", k8s)
     run(sift, "k8s", "crd", "render", "--out", k8s / "crd/sift.yaml")
+    operator_render = directory / "operator.yaml"
     run(sift, "k8s", "operator", "render", "--namespace", OPERATOR_NAMESPACE, "--image", IMAGE,
-        "--out", k8s / "operator/operator.yaml")
-    artifacts = {}
+        "--out", operator_render)
+    artifacts = {"operator.yaml": operator_render.read_text()}
+    pieces = {}
+    for item in yaml.safe_load_all(operator_render.read_text()):
+        pieces[item["kind"]] = item
+    require(pieces.keys() == OPERATOR_PIECES.keys(), "operator render does not hold the five operator objects")
+    for kind, relative in OPERATOR_PIECES.items():
+        (k8s / "operator" / relative).write_text(yaml.safe_dump(pieces[kind], sort_keys=False))
+    base_text = run("kubectl", "kustomize", k8s / "base")
+    base = validate_operator(base_text)
+    artifacts["base"] = base_text
     for profile in PROFILES:
         overlay = k8s / "overlays" / profile
         instance = overlay / "sift.yaml"
@@ -197,7 +218,7 @@ def render(directory, sift, version):
             extra.write_text(re.sub(r"REPLACE_ME__[A-Z0-9_]+",
                                     lambda token: FIXTURES.get(token[0], token[0]), extra.read_text()))
         text = run("kubectl", "kustomize", overlay)
-        validate_overlay(text, profile)
+        validate_overlay(text, profile, base["CustomResourceDefinition", "sifts.sift.axiom.dev"])
         artifacts[profile] = text
 
     collector = directory / "collector.yaml"

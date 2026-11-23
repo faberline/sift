@@ -1,0 +1,6 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-operator-namespace" tracker="1606" reason="Optional sift-system Namespace for the privileged apply identity; skip it when the Namespace exists."
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+# HANDWRITE-END

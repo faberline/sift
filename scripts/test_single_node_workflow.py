@@ -88,7 +88,6 @@ class SingleNodeWorkflowTest(unittest.TestCase):
         kustomization = self.read(f"{OVERLAY}/kustomization.yaml")
         for text in [
             "namespace: sift-single-node",
-            "../../crd",
             "../../operator",
             "$patch: delete",
             "imagePullSecrets",
