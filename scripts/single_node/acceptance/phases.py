@@ -113,13 +113,15 @@ def parse_selection(text):
     if text is None or not text.strip():
         return list(PHASES)
     names = [item.strip() for item in text.split(',')]
+    seen = set()
     for name in names:
         if not name:
             raise ValueError('empty phase name in the selection')
         if name not in PHASES:
             raise ValueError(f'unknown phase {name!r}')
-    if len(set(names)) != len(names):
-        raise ValueError('duplicate phase name in the selection')
+        if name in seen:
+            raise ValueError(f'duplicate phase {name!r}')
+        seen.add(name)
     return [phase for phase in PHASES if phase in names]
 
 
