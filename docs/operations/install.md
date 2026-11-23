@@ -96,13 +96,25 @@ Render the template overlay:
 kubectl kustomize k8s/overlays/template
 ```
 
-Apply your copy. The apply installs the CRD (`k8s/crd`), the operator
-(`k8s/operator`) and the instance:
+Apply the parts in this order. Steps 1 and 2 need the privileged identity
+(cluster-scoped objects). Steps 3 and 4 need the namespaced identity. The
+parts are in `k8s/operator`:
 
 <!-- manual: needs a Kubernetes cluster and credentials; CI only renders the manifests -->
 ```sh
+# 1. Privileged identity: CRD, ClusterRole, ClusterRoleBinding.
+kubectl apply -k k8s/operator/cluster
+# 2. Privileged identity, optional: the sift-system Namespace. Skip it when the Namespace exists.
+kubectl apply -k k8s/operator/namespace
+# 3. Namespaced identity: ServiceAccount and operator Deployment.
+kubectl apply -k k8s/operator/namespaced
+# 4. Namespaced identity: the Sift object (your copy of k8s/overlays/template).
 kubectl apply -k k8s/overlays/<your-copy>
 ```
+
+Step 4 must come after step 1, because the `Sift` kind needs the CRD. One
+command still installs all operator parts: `kubectl apply -k k8s/base`. An
+instance overlay no longer installs the operator.
 
 Check the instance:
 

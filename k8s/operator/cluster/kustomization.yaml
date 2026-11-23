@@ -1,0 +1,8 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-operator-cluster" tracker="1606" reason="Cluster-scoped operator objects for the privileged apply identity: the CRD, the ClusterRole and its binding."
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../crd
+  - clusterrole.yaml
+  - clusterrolebinding.yaml
+# HANDWRITE-END
