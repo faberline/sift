@@ -109,6 +109,34 @@ def write_evidence(evidence_dir, result):
     return path
 
 
+def parse_selection(text):
+    if text is None or not text.strip():
+        return list(PHASES)
+    names = [item.strip() for item in text.split(',')]
+    for name in names:
+        if not name:
+            raise ValueError('empty phase name in the selection')
+        if name not in PHASES:
+            raise ValueError(f'unknown phase {name!r}')
+    if len(set(names)) != len(names):
+        raise ValueError('duplicate phase name in the selection')
+    return [phase for phase in PHASES if phase in names]
+
+
+def acceptance_record(selected):
+    return {'mode': 'full' if list(selected) == list(PHASES) else 'partial',
+            'executed': list(selected),
+            'not_run': [phase for phase in PHASES if phase not in selected]}
+
+
+def write_acceptance(evidence_dir, selected):
+    directory = Path(evidence_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / 'acceptance.json'
+    path.write_text(json.dumps(acceptance_record(selected), indent=2) + '\n')
+    return path
+
+
 def guard_figures(cost_inputs, phase, elapsed_seconds):
     # Elapsed time counts from the start of run.sh. The setup phase before it is
     # inside the estimate that the aw workflow's guard job already checks.
@@ -707,10 +735,26 @@ def main(argv=None):
     guard.add_argument('--cap-usd', required=True)
     guard.add_argument('--elapsed-seconds', required=True, type=float)
     guard.add_argument('--evidence-dir', required=True, type=Path)
+    select = sub.add_parser('select')
+    select.add_argument('--phases', default='')
+    acceptance = sub.add_parser('acceptance')
+    acceptance.add_argument('--phases', default='')
+    acceptance.add_argument('--evidence-dir', required=True, type=Path)
     args = parser.parse_args(argv)
 
     if args.command == 'list':
         print('\n'.join(PHASES))
+        return 0
+    if args.command in ('select', 'acceptance'):
+        try:
+            selected = parse_selection(args.phases)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 2
+        if args.command == 'select':
+            print('\n'.join(selected))
+            return 0
+        print(write_acceptance(args.evidence_dir, selected))
         return 0
     if args.command == 'timeout':
         print(phase_timeout_seconds(read_hours(args.cost_inputs)[args.phase]))
