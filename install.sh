@@ -5,6 +5,7 @@ set -eu
 repo="${SIFT_REPO:-faberline/sift}"
 version="${SIFT_VERSION:-latest}"
 install_dir="${SIFT_INSTALL:-$HOME/.local/bin}"
+skip_verify="${SIFT_INSTALL_SKIP_VERIFY:-}"
 
 say() { printf 'sift-install: %s\n' "$*" >&2; }
 die() { say "error: $1"; exit "${2:-1}"; }
@@ -34,10 +35,22 @@ base="https://github.com/$repo/releases/download/$version/$asset"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 curl -fsSL "$base" -o "$tmp/$asset" || die "download failed: $base"
-if curl -fsSL "$base.sha256" -o "$tmp/$asset.sha256" 2>/dev/null; then
+if [ "$skip_verify" = 1 ]; then
+  say "warning: SIFT_INSTALL_SKIP_VERIFY=1, checksum verification skipped"
+else
+  curl -fsSL "$base.sha256" -o "$tmp/$asset.sha256" 2>/dev/null \
+    || die "checksum asset missing: $base.sha256 (set SIFT_INSTALL_SKIP_VERIFY=1 to install without verification)" 4
   expected="$(awk '{print $1}' "$tmp/$asset.sha256")"
-  if command -v shasum >/dev/null 2>&1; then actual="$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')"; else actual="$(sha256sum "$tmp/$asset" | awk '{print $1}')"; fi
+  [ -n "$expected" ] || die "checksum file is empty: $base.sha256" 4
+  if command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
+  else
+    die "missing required tool: shasum or sha256sum" 3
+  fi
   [ "$expected" = "$actual" ] || die "sha256 mismatch"
+  say "sha256 verified"
 fi
 tar -C "$tmp" -xzf "$tmp/$asset"
 bin="$tmp/sift-$target/sift"

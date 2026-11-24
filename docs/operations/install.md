@@ -10,6 +10,12 @@ which script or CI step tests it, or why it is `manual`.
 Set `SIFT_VERSION=sift@X.Y.Z` to pin one release, and `SIFT_INSTALL` to use
 another directory.
 
+`install.sh` checks the archive against its `.sha256` file from the same release.
+A missing `.sha256` file is an error (exit code 4). Set `SIFT_INSTALL_SKIP_VERIFY=1`
+to install without the check; the script then prints a warning. The `.sha256` file
+comes from the same release as the archive, so it detects a damaged download but
+does not prove who published the release.
+
 <!-- manual: downloads a published sift@X.Y.Z release from GitHub; no release is published yet and CI has no network release to install -->
 ```sh
 sh ./install.sh
