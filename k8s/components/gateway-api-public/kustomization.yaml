@@ -1,0 +1,7 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-gateway-api" tracker="1606" reason="Expose the Sift gateway through a shared Gateway API Gateway."
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - httproute.yaml
+  - grpcroute.yaml
+# HANDWRITE-END

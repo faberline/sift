@@ -1,0 +1,21 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-gateway-api" tracker="1606" reason="Expose the Sift gateway through a shared Gateway API Gateway."
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: sift-public-otlp
+spec:
+  parentRefs:
+    - name: REPLACE_ME__SIFT_GATEWAY_NAME
+      namespace: REPLACE_ME__SIFT_GATEWAY_NAMESPACE
+      sectionName: REPLACE_ME__SIFT_GATEWAY_LISTENER
+  hostnames:
+    - REPLACE_ME__SIFT_PUBLIC_HOST
+  rules:
+    - matches:
+        - method: {type: Exact, service: opentelemetry.proto.collector.logs.v1.LogsService, method: Export}
+        - method: {type: Exact, service: opentelemetry.proto.collector.trace.v1.TraceService, method: Export}
+        - method: {type: Exact, service: opentelemetry.proto.collector.metrics.v1.MetricsService, method: Export}
+      backendRefs:
+        - name: sift-gateway
+          port: 4317
+# HANDWRITE-END

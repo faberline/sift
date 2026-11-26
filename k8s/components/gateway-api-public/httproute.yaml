@@ -1,0 +1,48 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-gateway-api" tracker="1606" reason="Expose the Sift gateway through a shared Gateway API Gateway."
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sift-public
+spec:
+  parentRefs:
+    - name: REPLACE_ME__SIFT_GATEWAY_NAME
+      namespace: REPLACE_ME__SIFT_GATEWAY_NAMESPACE
+      sectionName: REPLACE_ME__SIFT_GATEWAY_LISTENER
+  hostnames:
+    - REPLACE_ME__SIFT_PUBLIC_HOST
+  rules:
+    - matches:
+        - path: {type: Exact, value: /v1/logs}
+        - path: {type: Exact, value: /v1/metrics}
+        - path: {type: PathPrefix, value: /v1/traces}
+        - path: {type: Exact, value: /prometheus/api/v1/write}
+      backendRefs:
+        - name: sift-gateway
+          port: 7380
+    - matches:
+        - path: {type: Exact, value: /api/v1/query}
+        - path: {type: Exact, value: /api/v2/query}
+        - path: {type: Exact, value: /api/v1/logs/tail}
+        - path: {type: PathPrefix, value: /api/v1/traces}
+        - path: {type: Exact, value: /api/v1/correlate}
+        - path: {type: Exact, value: /api/v1/services}
+        - path: {type: PathPrefix, value: /api/v1/queries}
+        - path: {type: Exact, value: /prometheus/api/v1/query}
+        - path: {type: Exact, value: /prometheus/api/v1/query_range}
+      backendRefs:
+        - name: sift-gateway
+          port: 7380
+    - matches:
+        - path: {type: PathPrefix, value: /api/v1/saved-queries}
+        - path: {type: PathPrefix, value: /api/v1/error-groups}
+        - path: {type: PathPrefix, value: /api/v1/alert-rules}
+        - path: {type: PathPrefix, value: /api/v1/alerts}
+      backendRefs:
+        - name: sift-gateway
+          port: 7380
+    - matches:
+        - path: {type: Exact, value: /readyz}
+      backendRefs:
+        - name: sift-gateway
+          port: 7380
+# HANDWRITE-END
