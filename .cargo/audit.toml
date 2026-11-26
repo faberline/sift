@@ -1,9 +1,9 @@
 # cargo-audit configuration
 # Docs: https://rustsec.org/advisories/
 #
-# Only the six unmaintained advisories below are allowed (desk decision,
-# faberline/aw#610, option A). Re-check all six by 2027-02-15. Keep this list
-# equal to the `ignore` list in deny.toml.
+# Six unmaintained advisories below, plus RUSTSEC-2026-0600 (desk decision,
+# faberline/aw#610, option A; sift#404). Re-check all seven by 2027-02-15.
+# Keep this list equal to the `ignore` list in deny.toml.
 
 [advisories]
 ignore = [
@@ -13,4 +13,5 @@ ignore = [
     "RUSTSEC-2024-0449", # unsafe-libyaml 0.2.11 unmaintained; serde_yaml 0.9 pulls it in (kube-client, sift, vat dev). Re-check 2027-02-15.
     "RUSTSEC-2025-0141", # bincode 2.0.1 unmaintained; promql-parser 0.11.0 pulls it in (cfgrammar, lrlex, lrpar, lrtable). Re-check 2027-02-15.
     "RUSTSEC-2026-0543", # chrono 0.4.44 unmaintained; arrow-array and parquet 59.2.0, sift and cron pull it in. Re-check 2027-02-15.
+    "RUSTSEC-2026-0600", # kube-client 0.98.0 openssl-tls flaw; sift builds rustls-tls, no openssl package in Cargo.lock; fix needs kube 4.2.1/5.2.0 and a core upgrade. Re-check 2027-02-15.
 ]
