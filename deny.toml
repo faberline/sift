@@ -10,10 +10,10 @@ no-default-features = false
 [advisories]
 db-path = "~/.cargo/advisory-db"
 version = 2
-# Desk decision (faberline/aw#610, option A): six unmaintained advisories, plus
-# RUSTSEC-2026-0600 (kube-client openssl-tls, not compiled in; sift#404).
-# Re-check all seven by 2027-02-15. Keep this list equal to the list in
-# .cargo/audit.toml.
+# Desk decision (faberline/aw#610, option A): six unmaintained advisories.
+# RUSTSEC-2026-0600 is a separate dated ignore (sift#404, SEC1): kube-client
+# openssl-tls is not compiled in. Re-check all seven by 2027-02-15. Keep this
+# list equal to the list in .cargo/audit.toml.
 ignore = [
     { id = "RUSTSEC-2025-0012", reason = "backoff 0.4.0 is unmaintained; kube-runtime 0.98.0 pulls it in and has no replacement yet. expires 2027-02-15." },
     { id = "RUSTSEC-2024-0384", reason = "instant 0.1.13 is unmaintained; backoff pulls it in. expires 2027-02-15." },

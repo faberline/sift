@@ -1,9 +1,11 @@
 # cargo-audit configuration
 # Docs: https://rustsec.org/advisories/
 #
-# Six unmaintained advisories below, plus RUSTSEC-2026-0600 (desk decision,
-# faberline/aw#610, option A; sift#404). Re-check all seven by 2027-02-15.
-# Keep this list equal to the `ignore` list in deny.toml.
+# Six unmaintained advisories below are allowed by the desk decision
+# faberline/aw#610, option A. RUSTSEC-2026-0600 is a separate dated ignore
+# (sift#404, SEC1): the openssl-tls connector is not compiled in.
+# Re-check all seven by 2027-02-15. Keep this list equal to the `ignore`
+# list in deny.toml.
 
 [advisories]
 ignore = [
