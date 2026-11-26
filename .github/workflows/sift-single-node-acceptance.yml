@@ -44,22 +44,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: cost guard
-        env:
-          CAP: ${{ inputs.cost_cap_usd }}
-        run: |
-          set -euo pipefail
-          python3 -B scripts/production/cost_model.py --inputs scripts/production/cost-inputs.single-node.json --format json > "$RUNNER_TEMP/cost.json"
-          hourly=$(jq -r .config_values.estimated_hourly_cost_usd "$RUNNER_TEMP/cost.json")
-          fixed=$(jq -r .config_values.estimated_fixed_cost_usd "$RUNNER_TEMP/cost.json")
-          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$fixed" --hourly-usd "$hourly" --hours-left 5
-      - name: checked cap
-        id: cap
-        env:
-          CAP: ${{ inputs.cost_cap_usd }}
-        run: |
-          set -euo pipefail
-          echo "cap_usd=$(python3 -B -c 'import sys; print(float(sys.argv[1]))' "$CAP")" >> "$GITHUB_OUTPUT"
       - name: phases
         id: phases
         env:
@@ -75,6 +59,24 @@ jobs:
           else
             echo "Phases: $joined (partial)" >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: cost guard
+        env:
+          CAP: ${{ inputs.cost_cap_usd }}
+          PHASES: ${{ steps.phases.outputs.phases }}
+        run: |
+          set -euo pipefail
+          python3 -B scripts/production/cost_model.py --inputs scripts/production/cost-inputs.single-node.json --format json > "$RUNNER_TEMP/cost.json"
+          hourly=$(jq -r .config_values.estimated_hourly_cost_usd "$RUNNER_TEMP/cost.json")
+          fixed=$(jq -r .config_values.estimated_fixed_cost_usd "$RUNNER_TEMP/cost.json")
+          hours_left=$(python3 -B scripts/single_node/acceptance/phases.py hours --phases "$PHASES" --cost-inputs scripts/production/cost-inputs.single-node.json)
+          python3 -B scripts/production/cost_guard.py --cap-usd "$CAP" --spent-usd "$fixed" --hourly-usd "$hourly" --hours-left "$hours_left"
+      - name: checked cap
+        id: cap
+        env:
+          CAP: ${{ inputs.cost_cap_usd }}
+        run: |
+          set -euo pipefail
+          echo "cap_usd=$(python3 -B -c 'import sys; print(float(sys.argv[1]))' "$CAP")" >> "$GITHUB_OUTPUT"
 
   resolve:
     needs: guard
