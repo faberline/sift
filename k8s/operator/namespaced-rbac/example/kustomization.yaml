@@ -1,0 +1,9 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-operator-namespaced-rbac-example" tracker="1606" reason="Example overlay: the cluster admin copies it once for each watched namespace and sets namespace."
+# Example. The cluster admin copies this overlay once for each watched
+# namespace and sets `namespace:` to that namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sift-example
+resources:
+  - ..
+# HANDWRITE-END
