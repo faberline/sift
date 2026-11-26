@@ -83,6 +83,8 @@ must hold:
 - Without `logs.podLabel`, every Pod of the listed namespaces is collected. This
   is the default, as before.
 
+With `logs.agent: disabled` no agent runs, so the labels on this page have no effect.
+
 The `--pod-label` option of `sift collect` needs `--cri-root` and `--follow`.
 The operator always sets both.
 

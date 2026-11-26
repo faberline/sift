@@ -49,10 +49,22 @@ pub(crate) enum InstanceTopology {
     SingleNode,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct InstanceLogs {
     pub namespaces: Vec<String>,
     pub pod_label: Option<String>,
+    /// `false` renders no log agent and no metrics agent.
+    pub agent_enabled: bool,
+}
+
+impl Default for InstanceLogs {
+    fn default() -> Self {
+        Self {
+            namespaces: Vec::new(),
+            pod_label: None,
+            agent_enabled: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]

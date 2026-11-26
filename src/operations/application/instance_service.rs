@@ -54,13 +54,16 @@ impl InstanceService {
         if instance.settings.topology == InstanceTopology::SingleNode {
             return vec![ReadinessTarget::new("StatefulSet", format!("{name}-all"))];
         }
-        vec![
+        let mut targets = vec![
             ReadinessTarget::new("StatefulSet", format!("{name}-store")),
             ReadinessTarget::new("StatefulSet", format!("{name}-control")),
             ReadinessTarget::new("Deployment", format!("{name}-gateway")),
             ReadinessTarget::new("Deployment", format!("{name}-query")),
-            ReadinessTarget::new("DaemonSet", format!("{name}-agent")),
-        ]
+        ];
+        if instance.settings.logs.agent_enabled {
+            targets.push(ReadinessTarget::new("DaemonSet", format!("{name}-agent")));
+        }
+        targets
     }
 
     pub(crate) fn status_patch(&self, instance: &InstanceSpec, ready: &ReadyFacts) -> Value {
@@ -69,7 +72,18 @@ impl InstanceService {
         let control_ready = ready.get(&format!("{name}-control")).max(0);
         let gateway_ready = ready.get(&format!("{name}-gateway")).max(0);
         let query_ready = ready.get(&format!("{name}-query")).max(0);
-        let agent_ready = ready.get(&format!("{name}-agent")).max(0);
+        let agent_enabled = instance.settings.logs.agent_enabled;
+        // A disabled agent has no replicas, so its ready count never counts.
+        let agent_ready = if agent_enabled {
+            ready.get(&format!("{name}-agent")).max(0)
+        } else {
+            0
+        };
+        let agent_text = if agent_enabled {
+            format!("agent {agent_ready} ready")
+        } else {
+            "agent disabled".to_string()
+        };
         let single_node = instance.settings.topology == InstanceTopology::SingleNode;
         let all_ready = ready.get(&format!("{name}-all")).max(0);
         let ready_replicas = if single_node {
@@ -106,19 +120,19 @@ impl InstanceService {
             && control_ready >= 3
             && gateway_ready >= 1
             && query_ready >= 1
-            && agent_ready >= 1
+            && (!agent_enabled || agent_ready >= 1)
         {
             (
                 "Ready",
                 format!(
-                    "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, agent {agent_ready} ready"
+                    "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, {agent_text}"
                 ),
             )
         } else {
             (
                 "Pending",
                 format!(
-                    "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, agent {agent_ready} ready"
+                    "store {store_ready}/3, control {control_ready}/3, gateway {gateway_ready}/1, query {query_ready}/1, {agent_text}"
                 ),
             )
         };

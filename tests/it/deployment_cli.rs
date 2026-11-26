@@ -1907,4 +1907,99 @@ fn ha_renders_toleration_and_storage_class() {
     }
 }
 
+fn sift_resource_with_agent(agent: &str) -> Sift {
+    let mut value = serde_json::to_value(sift_resource(3, 3)).expect("encode Sift resource");
+    value["spec"]["logs"] = json!({"agent": agent});
+    serde_json::from_value(value).expect("decode Sift resource with logs.agent")
+}
+
+#[test]
+fn logs_agent_disabled_renders_no_agent_objects_in_ha() {
+    let objects = sift_resource_with_agent("disabled").render();
+
+    assert!(
+        objects.iter().all(|object| object["kind"] != "DaemonSet"),
+        "disabled log and metrics agents render no DaemonSet"
+    );
+    assert!(
+        objects
+            .iter()
+            .all(|object| object["metadata"]["name"] != "events-agent-project"),
+        "disabled agent renders no agent project Role or RoleBinding"
+    );
+    assert!(
+        objects.iter().all(|object| {
+            !(object["kind"] == "NetworkPolicy"
+                && object["metadata"]["name"] == "events-agent-network")
+        }),
+        "disabled agent renders no agent NetworkPolicy"
+    );
+    object(&objects, "Role", "events-backup-project");
+    object(&objects, "StatefulSet", "events-store");
+}
+
+#[test]
+fn logs_agent_disabled_renders_no_agent_objects_in_single_node() {
+    let objects = single_node_resource("off", json!({"logs": {"agent": "disabled"}})).render();
+
+    assert!(
+        objects.iter().all(|object| object["kind"] != "DaemonSet"),
+        "disabled single-node agent renders no DaemonSet"
+    );
+    let policies: Vec<&str> = objects
+        .iter()
+        .filter(|object| object["kind"] == "NetworkPolicy")
+        .filter_map(|object| object["metadata"]["name"].as_str())
+        .collect();
+    assert_eq!(policies, ["events-network", "events-all-network"]);
+}
+
+#[test]
+fn logs_agent_enabled_renders_the_same_as_the_default() {
+    assert_eq!(
+        sift_resource(3, 3).render(),
+        sift_resource_with_agent("enabled").render()
+    );
+    assert_eq!(
+        single_node_resource("off", json!({})).render(),
+        single_node_resource("off", json!({"logs": {"agent": "enabled"}})).render()
+    );
+}
+
+#[test]
+fn logs_agent_disabled_leaves_the_agent_out_of_readiness_and_status() {
+    let sift = sift_resource_with_agent("disabled");
+
+    let targets = sift.readiness_targets();
+    assert_eq!(targets.len(), 4);
+    assert!(targets.iter().all(|target| target.name() != "events-agent"));
+
+    let status = sift.status_patch(&ReadyFacts::new(HashMap::from([
+        ("events-store".to_string(), 3),
+        ("events-control".to_string(), 3),
+        ("events-gateway".to_string(), 1),
+        ("events-query".to_string(), 1),
+    ])));
+    assert_eq!(status["status"]["phase"], "Ready");
+    assert_eq!(status["status"]["readyReplicas"], 8);
+    assert!(status["status"]["message"]
+        .as_str()
+        .expect("status message")
+        .ends_with("agent disabled"));
+}
+
+#[test]
+fn logs_agent_enabled_still_waits_for_the_agent() {
+    let sift = sift_resource(3, 3);
+
+    assert_eq!(sift.readiness_targets().len(), 5);
+    let status = sift.status_patch(&ReadyFacts::new(HashMap::from([
+        ("events-store".to_string(), 3),
+        ("events-control".to_string(), 3),
+        ("events-gateway".to_string(), 1),
+        ("events-query".to_string(), 1),
+    ])));
+    assert_eq!(status["status"]["phase"], "Pending");
+}
+
 // HANDWRITE-END

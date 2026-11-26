@@ -130,6 +130,16 @@ fn crd_schema_lists_log_pod_label() {
 }
 
 #[test]
+fn crd_schema_lists_logs_agent() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let agent = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+        ["properties"]["logs"]["properties"]["agent"];
+    assert_eq!(agent["type"], "string");
+    assert_eq!(agent["enum"], serde_json::json!(["enabled", "disabled"]));
+    assert_eq!(agent["default"], "enabled");
+}
+
+#[test]
 fn crd_schema_lists_log_namespaces() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let namespaces = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]

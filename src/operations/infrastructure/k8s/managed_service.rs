@@ -54,7 +54,8 @@ fn auth_delegator_binding(
 
 /// The single-node instance: one all-role StatefulSet with one volume, its
 /// Service, the instance service account, the network policies and, only for
-/// a `gs://` archive, the Google APIs policy. No peer, role or agent object.
+/// a `gs://` archive, the Google APIs policy. No peer or role object. The log
+/// agent DaemonSet is rendered unless `spec.logs.agent` is `disabled`.
 fn render_single_node(
     cx: &RenderCtx<'_>,
     instance: &InstanceSpec,
@@ -73,7 +74,9 @@ fn render_single_node(
     }
     plan.add_service(single_node_service_plan(cx));
     plan.add_stateful_set(stateful_role_plan(cx, &instance.settings, ALL_COMPONENT));
-    plan.add_daemon_set(agent_daemon_set_plan(cx, &instance.settings));
+    if instance.settings.logs.agent_enabled {
+        plan.add_daemon_set(agent_daemon_set_plan(cx, &instance.settings));
+    }
     for policy in single_node_network_policy_plans(
         cx,
         &instance.settings,
@@ -146,8 +149,11 @@ fn render_children(
         BACKUP_COMPONENT,
     ));
 
-    plan.add_role(agent_project_role_plan(&cx));
-    plan.add_role_binding(agent_project_role_binding_plan(&cx));
+    let agent_enabled = instance.settings.logs.agent_enabled;
+    if agent_enabled {
+        plan.add_role(agent_project_role_plan(&cx));
+        plan.add_role_binding(agent_project_role_binding_plan(&cx));
+    }
     if matches!(instance.settings.auth, AuthMode::Kubernetes) {
         plan.add_role(
             render::RolePlan::new(format!("{name}-backup-project"), "auth").with_rule(
@@ -212,7 +218,9 @@ fn render_children(
         plan.add_service(role_service_plan(&cx, role));
         plan.add_deployment(deployment_role_plan(&cx, &instance.settings, role));
     }
-    plan.add_daemon_set(agent_daemon_set_plan(&cx, &instance.settings));
+    if agent_enabled {
+        plan.add_daemon_set(agent_daemon_set_plan(&cx, &instance.settings));
+    }
     for policy in network_policy_plans(
         &cx,
         &instance.settings,
