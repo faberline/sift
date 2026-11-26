@@ -23,6 +23,9 @@ pub(crate) struct InstanceSettings {
     pub storage: InstanceStorage,
     pub ingest: InstanceIngest,
     pub placement: InstancePlacement,
+    // Read by the render in the next child of #377. Until then it is parsed only.
+    #[allow(dead_code)]
+    pub resources: InstanceResources,
     pub auth: InstanceAuth,
     pub topology: InstanceTopology,
     pub logs: InstanceLogs,
@@ -34,6 +37,27 @@ pub(crate) struct InstanceSettings {
     pub gcp_project_id: String,
     pub gke_cluster_name: String,
     pub gke_location: String,
+}
+
+/// Compute requests and limits of the Sift pods, as the CR sets them.
+// Read by the render in the next child of #377. Until then it is parsed only.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InstanceResources {
+    pub requests: BTreeMap<String, String>,
+    pub limits: BTreeMap<String, String>,
+    /// Role overrides, keyed `all`, `store`, `control`, `gateway` or `query`.
+    /// Only the roles that the CR sets are in the map.
+    pub roles: BTreeMap<String, InstanceRoleResources>,
+}
+
+/// Requests or limits of one role. `None` means the common value applies.
+// Read by the render in the next child of #377. Until then it is parsed only.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InstanceRoleResources {
+    pub requests: Option<BTreeMap<String, String>>,
+    pub limits: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Copy, Debug)]
