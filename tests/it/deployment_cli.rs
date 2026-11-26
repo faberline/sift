@@ -1907,8 +1907,6 @@ fn ha_renders_toleration_and_storage_class() {
     }
 }
 
-// HANDWRITE-END
-
 #[test]
 fn single_node_init_container_is_pinned_and_overridable() {
     const DEFAULT: &str =
@@ -1944,3 +1942,5 @@ fn single_node_init_container_is_pinned_and_overridable() {
         assert_eq!(image, OVERRIDE);
     }
 }
+
+// HANDWRITE-END

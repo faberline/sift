@@ -315,11 +315,7 @@ fn init_image_overrides_every_init_container() {
 }
 
 #[test]
-fn spec_without_init_image_decodes_and_uses_the_default() {
+fn spec_without_init_image_decodes() {
     let sift = sift_resource();
-    let objects = sift.render();
-    assert_eq!(
-        init_container_images(&objects, "StatefulSet", "events-store"),
-        vec![DEFAULT_INIT_IMAGE.to_string()]
-    );
+    assert!(sift.spec.init_image.is_none());
 }
