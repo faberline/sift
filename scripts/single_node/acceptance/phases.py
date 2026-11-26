@@ -14,6 +14,7 @@ GUARD = Path(__file__).resolve().parents[2] / 'production' / 'cost_guard.py'
 GUARD_FILE = 'cost-guard.json'
 TTL_MINUTES = 310
 SETUP_SECONDS_MAX = 1200
+FULL_RUN_HOURS = 5.0
 MAX_LOAD_RATE = 1000
 LOCAL_PORT = 17380
 HEADROOM_SECONDS = 120
@@ -139,20 +140,28 @@ def write_acceptance(evidence_dir, selected):
     return path
 
 
-def guard_figures(cost_inputs, phase, elapsed_seconds):
+def projected_hours(cost_inputs, selected):
+    # A full run keeps the old fixed estimate. A partial run counts setup and its own phases.
+    if list(selected) == list(PHASES):
+        return FULL_RUN_HOURS
+    hours = cost_inputs['phases_hours']
+    return round(hours['setup'] + sum(hours[p] for p in selected), 6)
+
+
+def guard_figures(cost_inputs, phase, elapsed_seconds, selected=PHASES):
     # Elapsed time counts from the start of run.sh. The setup phase before it is
     # inside the estimate that the aw workflow's guard job already checks.
     config = cost_model.estimate(cost_inputs)['config_values']
     hourly_usd = config['estimated_hourly_cost_usd']
     elapsed_hours = elapsed_seconds / 3600
     spent_usd = config['estimated_fixed_cost_usd'] + hourly_usd * elapsed_hours
-    hours_left = sum(cost_inputs['phases_hours'][p] for p in PHASES[PHASES.index(phase):])
+    hours_left = sum(cost_inputs['phases_hours'][p] for p in PHASES[PHASES.index(phase):] if p in selected)
     return {'hourly_usd': hourly_usd, 'spent_usd': spent_usd, 'hours_left': hours_left,
             'elapsed_hours': elapsed_hours}
 
 
-def run_guard(phase, cost_inputs, cap_usd, elapsed_seconds, evidence_dir):
-    figures = guard_figures(cost_inputs, phase, elapsed_seconds)
+def run_guard(phase, cost_inputs, cap_usd, elapsed_seconds, evidence_dir, selected=PHASES):
+    figures = guard_figures(cost_inputs, phase, elapsed_seconds, selected)
     hourly, spent, left = figures['hourly_usd'], figures['spent_usd'], figures['hours_left']
     completed = subprocess.run([sys.executable, '-B', str(GUARD), '--cap-usd', str(cap_usd),
                                 '--spent-usd', repr(spent), '--hourly-usd', repr(hourly),
@@ -737,6 +746,10 @@ def main(argv=None):
     guard.add_argument('--cap-usd', required=True)
     guard.add_argument('--elapsed-seconds', required=True, type=float)
     guard.add_argument('--evidence-dir', required=True, type=Path)
+    guard.add_argument('--phases', default='')
+    hours = sub.add_parser('hours')
+    hours.add_argument('--phases', default='')
+    hours.add_argument('--cost-inputs', required=True, type=Path)
     select = sub.add_parser('select')
     select.add_argument('--phases', default='')
     acceptance = sub.add_parser('acceptance')
@@ -746,6 +759,14 @@ def main(argv=None):
 
     if args.command == 'list':
         print('\n'.join(PHASES))
+        return 0
+    if args.command == 'hours':
+        try:
+            selected = parse_selection(args.phases)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 2
+        print(projected_hours(json.loads(args.cost_inputs.read_text()), selected))
         return 0
     if args.command in ('select', 'acceptance'):
         try:
@@ -768,8 +789,13 @@ def main(argv=None):
     if args.command == 'guard':
         if args.phase not in PHASES:
             parser.error(f'unknown phase {args.phase!r}')
+        try:
+            selected = parse_selection(args.phases)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 2
         cost = json.loads(args.cost_inputs.read_text())
-        code = run_guard(args.phase, cost, args.cap_usd, args.elapsed_seconds, args.evidence_dir)
+        code = run_guard(args.phase, cost, args.cap_usd, args.elapsed_seconds, args.evidence_dir, selected)
         print(Path(args.evidence_dir) / GUARD_FILE)
         return code
 
