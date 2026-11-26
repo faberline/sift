@@ -1,0 +1,12 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-operator-namespace-scoped" tracker="1606" reason="Opt-in namespace-scoped operator bundle: a reduced ClusterRole with no RBAC write, used in place of k8s/operator/cluster."
+# This bundle replaces k8s/operator/cluster in the namespace-scoped mode.
+# The admin applies this bundle, then k8s/operator/namespace (optional),
+# k8s/operator/namespaced, and one copy of k8s/operator/namespaced-rbac/example
+# for each watched namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../crd
+  - clusterrole.yaml
+  - clusterrolebinding.yaml
+# HANDWRITE-END

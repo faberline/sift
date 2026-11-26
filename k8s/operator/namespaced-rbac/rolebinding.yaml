@@ -1,0 +1,14 @@
+# Binds the operator ServiceAccount to the namespace-scoped Role. The subject
+# namespace is written out, so an overlay's `namespace:` does not move it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sift-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sift-operator
+subjects:
+  - kind: ServiceAccount
+    name: sift-operator
+    namespace: sift-system

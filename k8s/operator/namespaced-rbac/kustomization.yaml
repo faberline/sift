@@ -1,0 +1,7 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-operator-namespaced-rbac" tracker="1606" reason="Namespace-scoped Role and RoleBinding for the operator workload rules, one set per watched namespace."
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - role.yaml
+  - rolebinding.yaml
+# HANDWRITE-END
