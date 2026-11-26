@@ -1,0 +1,36 @@
+# Namespace-scoped workload rules for the operator. The overlay sets
+# `metadata.namespace`, so one Role is made for each watched namespace.
+# These rules are copied from k8s/operator/cluster/clusterrole.yaml. They
+# leave out the cluster-scoped rules: clusterrolebindings, clusterroles (bind),
+# the sift.axiom.dev rules, leases and events.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sift-operator
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "configmaps", "persistentvolumeclaims", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  # Kubernetes requires the operator to hold the read verbs it delegates to
+  # each namespace-scoped metrics agent Role.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: ["networking.gke.io"]
+    resources: ["fqdnnetworkpolicies"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]

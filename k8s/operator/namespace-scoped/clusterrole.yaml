@@ -1,0 +1,32 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sift-operator
+# The auth-delegator `bind` rule and the `clusterrolebindings` rule are left
+# out on purpose. They are needed only while the operator creates the
+# auth-delegator ClusterRoleBinding. The sibling issue "operator: skip the
+# auth-delegator ClusterRoleBinding" removes that need. Until it lands, set
+# the skip option, or the operator cannot create that binding in this mode.
+rules:
+  - apiGroups: ["sift.axiom.dev"]
+    resources: ["sifts"]
+    verbs: ["get", "list", "watch", "patch", "update", "delete"]
+  - apiGroups: ["sift.axiom.dev"]
+    resources: ["sifts/status", "sifts/finalizers"]
+    verbs: ["get", "patch", "update"]
+  # The operator delegates this exact project-scoped rule to Sift runtime
+  # service accounts. Kubernetes requires the grantor to hold every delegated
+  # permission, even though the operator does not call this virtual resource.
+  - apiGroups: ["sift.axiom.dev"]
+    resources: ["projects"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+  # Reconcile narration on the CR itself (#2620). `create` writes a new Event,
+  # `patch` updates the EventSeries count when the Recorder's 6-minute dedup
+  # window collapses a repeating event — without `patch`, a repeatedly failing
+  # reconcile would fail to report the repetition.
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
