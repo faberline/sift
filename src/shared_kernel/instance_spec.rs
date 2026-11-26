@@ -14,6 +14,7 @@ pub(crate) struct InstanceSpec {
 #[derive(Clone, Debug)]
 pub(crate) struct InstanceSettings {
     pub image: String,
+    pub init_image: Option<String>,
     pub peer_tls_secret: String,
     pub replicas_per_shard: u32,
     pub voter_count: u32,

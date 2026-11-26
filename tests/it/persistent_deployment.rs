@@ -7,6 +7,22 @@ use service_k8s::ManagedService;
 use sift::operations::Sift;
 
 fn sift_resource() -> Sift {
+    sift_resource_with(json!({}))
+}
+
+/// Builds the test Sift and merges `extra` into its `spec`.
+fn sift_resource_with(extra: Value) -> Sift {
+    let mut spec = json!({
+        "image": "example.invalid/sift:test",
+        "peerTlsSecret": "sift-peer-tls",
+        "dataSize": "10Gi",
+        "auth": "off"
+    });
+    if let (Some(spec), Some(extra)) = (spec.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            spec.insert(key.clone(), value.clone());
+        }
+    }
     serde_json::from_value(json!({
         "apiVersion": "sift.axiom.dev/v1alpha1",
         "kind": "Sift",
@@ -15,14 +31,31 @@ fn sift_resource() -> Sift {
             "namespace": "observability",
             "uid": "sift-owner-uid"
         },
-        "spec": {
-            "image": "example.invalid/sift:test",
-            "peerTlsSecret": "sift-peer-tls",
-            "dataSize": "10Gi",
-            "auth": "off"
-        }
+        "spec": spec
     }))
     .expect("decode Sift resource")
+}
+
+const DEFAULT_INIT_IMAGE: &str =
+    "busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
+const OVERRIDE_INIT_IMAGE: &str = "registry.example.invalid/mirror/busybox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+/// The workloads that run an init container, as (kind, name).
+const INIT_CONTAINER_WORKLOADS: [(&str, &str); 5] = [
+    ("StatefulSet", "events-store"),
+    ("StatefulSet", "events-control"),
+    ("Deployment", "events-gateway"),
+    ("Deployment", "events-query"),
+    ("DaemonSet", "events-agent"),
+];
+
+fn init_container_images(objects: &[Value], kind: &str, name: &str) -> Vec<String> {
+    object(objects, kind, name)["spec"]["template"]["spec"]["initContainers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{kind}/{name} has no initContainers"))
+        .iter()
+        .map(|container| container["image"].as_str().expect("image").to_string())
+        .collect()
 }
 
 fn object<'a>(objects: &'a [Value], kind: &str, name: &str) -> &'a Value {
@@ -255,4 +288,38 @@ fn the_agent_keeps_checkpoints_below_the_common_root() {
     assert!(yaml.contains("/var/lib/sift/agent/checkpoint.json"));
     assert!(yaml.contains("/var/lib/sift/agent/rejected.jsonl"));
     assert!(!yaml.contains("/var/lib/sift-collector"));
+}
+
+#[test]
+fn default_init_containers_pin_busybox_by_digest() {
+    let objects = sift_resource().render();
+    for (kind, name) in INIT_CONTAINER_WORKLOADS {
+        assert_eq!(
+            init_container_images(&objects, kind, name),
+            vec![DEFAULT_INIT_IMAGE.to_string()],
+            "{kind}/{name}"
+        );
+    }
+}
+
+#[test]
+fn init_image_overrides_every_init_container() {
+    let objects = sift_resource_with(json!({"initImage": OVERRIDE_INIT_IMAGE})).render();
+    for (kind, name) in INIT_CONTAINER_WORKLOADS {
+        assert_eq!(
+            init_container_images(&objects, kind, name),
+            vec![OVERRIDE_INIT_IMAGE.to_string()],
+            "{kind}/{name}"
+        );
+    }
+}
+
+#[test]
+fn spec_without_init_image_decodes_and_uses_the_default() {
+    let sift = sift_resource();
+    let objects = sift.render();
+    assert_eq!(
+        init_container_images(&objects, "StatefulSet", "events-store"),
+        vec![DEFAULT_INIT_IMAGE.to_string()]
+    );
 }

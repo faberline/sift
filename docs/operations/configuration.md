@@ -546,6 +546,7 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 |---|---|---|---|---|
 | `spec` | object | no | none | Desired state of one Sift instance. |
 | `spec.image` | string | yes | none | Container image of the Sift instance. |
+| `spec.initImage` | string | no | `busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662` | Image of the init containers that prepare the data root of every role Pod and of the log agent Pod. Set it to a pinned image in your own registry when the cluster admits only pinned images or has no Docker Hub access. Must be at least one character. |
 | `spec.peerTlsSecret` | string | yes | none | Secret with the peer mTLS certificate, key and CA. |
 | `spec.replicasPerShard` | integer | no | none | Replicas per shard. Fixed at 3 in this phase. |
 | `spec.topology` | string | no | `ha` | Instance topology: `ha` or `singleNode`. |
@@ -587,6 +588,8 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.backup.destination` | string | yes | none | Shared backup destination URI: `file://`, `s3://` or `gs://`. |
 | `spec.backup.retentionSecs` | integer | no | none | Seconds to keep backup objects. |
 | `spec.backup.adminTokenSecret` | string | no | none | Secret with the admin token of the backup job. |
+
+The operator renders two kinds of images: the Sift image from `spec.image` and the init image, which is pinned by digest unless `spec.initImage` is set.
 
 ### Status
 

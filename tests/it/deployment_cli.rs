@@ -1908,3 +1908,39 @@ fn ha_renders_toleration_and_storage_class() {
 }
 
 // HANDWRITE-END
+
+#[test]
+fn single_node_init_container_is_pinned_and_overridable() {
+    const DEFAULT: &str =
+        "busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
+    const OVERRIDE: &str = "registry.example.invalid/mirror/busybox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    let init_images = |objects: &[Value]| -> Vec<String> {
+        let stateful_set = objects
+            .iter()
+            .find(|object| object["kind"] == "StatefulSet")
+            .expect("single-node StatefulSet");
+        let containers = stateful_set["spec"]["template"]["spec"]["initContainers"]
+            .as_array()
+            .expect("init containers");
+        assert!(!containers.is_empty(), "no init container");
+        containers
+            .iter()
+            .map(|container| container["image"].as_str().expect("image").to_string())
+            .collect()
+    };
+
+    let objects = single_node_resource("off", json!({})).render();
+    for image in init_images(&objects) {
+        assert!(
+            image.starts_with("busybox:1.36.1") && image.contains("@sha256:"),
+            "unpinned init image {image}"
+        );
+        assert_eq!(image, DEFAULT);
+    }
+
+    let objects = single_node_resource("off", json!({"initImage": OVERRIDE})).render();
+    for image in init_images(&objects) {
+        assert_eq!(image, OVERRIDE);
+    }
+}

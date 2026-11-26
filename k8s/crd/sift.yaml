@@ -23,6 +23,7 @@ spec:
               required: [image, peerTlsSecret, gcpProjectId, gkeClusterName, gkeLocation]
               properties:
                 image: { type: string }
+                initImage: { type: string, minLength: 1 }
                 peerTlsSecret: { type: string, minLength: 1 }
                 # Phase one uses one fixed three-voter Raft group per shard.
                 # Live membership changes are intentionally not admitted.

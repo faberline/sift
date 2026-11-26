@@ -75,10 +75,19 @@ pub(super) fn container_security_context() -> Value {
     })
 }
 
-fn data_init_container() -> Value {
+/// Default image of the init containers. It is pinned by digest, the same digest as `k8s/collector/daemonset.yaml`.
+pub(super) const DEFAULT_INIT_IMAGE: &str =
+    "busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
+
+/// Image of the init containers: `spec.initImage` when set, else the pinned default.
+pub(super) fn init_image(spec: &SiftSpec) -> &str {
+    spec.init_image.as_deref().unwrap_or(DEFAULT_INIT_IMAGE)
+}
+
+fn data_init_container(spec: &SiftSpec) -> Value {
     json!({
         "name": "prepare-data-root",
-        "image": "busybox:1.36.1",
+        "image": init_image(spec),
         "command": ["sh", "-ec"],
         "args": ["chown 65532:65532 /var/lib/sift && chmod 0700 /var/lib/sift && test \"$(stat -c '%u:%g:%a' /var/lib/sift)\" = '65532:65532:700'"],
         "volumeMounts": [{"name":"data", "mountPath":"/var/lib/sift"}],
@@ -312,7 +321,7 @@ fn role_pod_plan(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> render::Pod
         serde_json::to_value(&spec.placement.node_selector).expect("node selector is JSON"),
     )
     .with_automount_service_account_token(matches!(spec.auth, AuthMode::Kubernetes))
-    .with_init_containers(vec![data_init_container()])
+    .with_init_containers(vec![data_init_container(spec)])
     .with_volumes(volumes)
     .with_tolerations(tolerations_json(spec));
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {

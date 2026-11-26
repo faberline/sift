@@ -18,6 +18,7 @@ impl From<&Sift> for InstanceSpec {
             generation: sift.metadata.generation.unwrap_or(0),
             settings: InstanceSettings {
                 image: spec.image.clone(),
+                init_image: spec.init_image.clone(),
                 peer_tls_secret: spec.peer_tls_secret.clone(),
                 replicas_per_shard: spec.replicas_per_shard,
                 voter_count: spec.voter_count,

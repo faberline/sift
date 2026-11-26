@@ -37,6 +37,10 @@
                   "image": {
                     "type": "string"
                   },
+                  "initImage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "peerTlsSecret": {
                     "type": "string",
                     "minLength": 1
