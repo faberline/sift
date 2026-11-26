@@ -71,7 +71,7 @@ for phase in $selected; do
     python3 -B "$here/phases.py" fail "$phase" --evidence-dir "$EVIDENCE_DIR" --reason "not run: phase $failed failed"
     continue
   fi
-  if ! python3 -B "$here/phases.py" guard "$phase" --cost-inputs "$inputs" --cap-usd "$COST_CAP_USD" --elapsed-seconds "$SECONDS" --evidence-dir "$EVIDENCE_DIR"; then
+  if ! python3 -B "$here/phases.py" guard "$phase" --cost-inputs "$inputs" --phases "$PHASES" --cap-usd "$COST_CAP_USD" --elapsed-seconds "$SECONDS" --evidence-dir "$EVIDENCE_DIR"; then
     python3 -B "$here/phases.py" fail "$phase" --evidence-dir "$EVIDENCE_DIR" --reason "cost guard refused before phase $phase; see cost-guard.json"
     failed="$phase"
     continue
