@@ -41,6 +41,8 @@ pub struct SiftSpec {
     #[serde(default)]
     pub placement: PlacementSpec,
     #[serde(default)]
+    pub resources: ResourcesSpec,
+    #[serde(default)]
     pub auth: AuthMode,
     #[serde(default)]
     pub topology: Topology,
@@ -120,6 +122,40 @@ pub struct MetricsSpec {
     /// Kubernetes namespaces whose Pods the metrics agent scrapes.
     /// Empty means the namespace of the Sift instance only.
     pub namespaces: Vec<String>,
+}
+
+/// Compute resources of the Sift pods. `requests` and `limits` set the common
+/// values for every role. Keys are `cpu` and `memory`. An empty `requests`
+/// means the default `cpu: 100m`, `memory: 256Mi`. An empty `limits` means no
+/// limits.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ResourcesSpec {
+    /// Common CPU and memory requests of every role.
+    pub requests: BTreeMap<String, String>,
+    /// Common CPU and memory limits of every role.
+    pub limits: BTreeMap<String, String>,
+    /// Values for every role, replacing the common value of each key set here.
+    pub all: Option<RoleResourcesSpec>,
+    /// Values for the store role.
+    pub store: Option<RoleResourcesSpec>,
+    /// Values for the control role.
+    pub control: Option<RoleResourcesSpec>,
+    /// Values for the gateway role.
+    pub gateway: Option<RoleResourcesSpec>,
+    /// Values for the query role.
+    pub query: Option<RoleResourcesSpec>,
+}
+
+/// Compute resources of one role. A set map, even an empty one, replaces the
+/// common value of that map.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RoleResourcesSpec {
+    /// Requests of this role. Set, even empty, replaces the common requests.
+    pub requests: Option<BTreeMap<String, String>>,
+    /// Limits of this role. Set, even empty, replaces the common limits.
+    pub limits: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -338,5 +374,26 @@ mod tests {
     fn retention_days_is_read() {
         let spec = spec_with(r#""retentionDays":30"#).unwrap();
         assert_eq!(spec.retention_days, 30);
+    }
+
+    #[test]
+    fn resources_default_is_empty() {
+        let spec = spec_with("").unwrap();
+        assert!(spec.resources.requests.is_empty());
+        assert!(spec.resources.limits.is_empty());
+        assert!(spec.resources.store.is_none());
+    }
+
+    #[test]
+    fn resources_are_read() {
+        let spec = spec_with(
+            r#""resources":{"requests":{"cpu":"2","memory":"10Gi"},"limits":{"memory":"12Gi"},"store":{"limits":{"memory":"16Gi"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.resources.requests["memory"], "10Gi");
+        assert_eq!(spec.resources.limits["memory"], "12Gi");
+        let store = spec.resources.store.as_ref().unwrap();
+        assert_eq!(store.limits.as_ref().unwrap()["memory"], "16Gi");
+        assert!(store.requests.is_none());
     }
 }

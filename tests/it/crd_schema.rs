@@ -130,6 +130,28 @@ fn crd_schema_lists_log_pod_label() {
 }
 
 #[test]
+fn crd_schema_lists_resources() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let resources = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+        ["spec"]["properties"]["resources"];
+    let memory = &resources["properties"]["requests"]["properties"]["memory"];
+    assert_eq!(memory["type"], "string");
+    assert_eq!(memory["maxLength"], 32);
+    assert!(
+        memory["pattern"]
+            .as_str()
+            .is_some_and(|pattern| !pattern.is_empty()),
+        "resources memory needs a pattern: {memory}"
+    );
+    let roles = resources["properties"]
+        .as_object()
+        .expect("resources properties");
+    for role in ["all", "store", "control", "gateway", "query"] {
+        assert!(roles.contains_key(role), "resources lacks role {role}");
+    }
+}
+
+#[test]
 fn crd_schema_lists_logs_agent() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let agent = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]

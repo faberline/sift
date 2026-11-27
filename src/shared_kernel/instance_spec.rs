@@ -23,6 +23,8 @@ pub(crate) struct InstanceSettings {
     pub storage: InstanceStorage,
     pub ingest: InstanceIngest,
     pub placement: InstancePlacement,
+    #[allow(dead_code)] // read by the render of the next change
+    pub resources: InstanceResources,
     pub auth: InstanceAuth,
     pub topology: InstanceTopology,
     pub logs: InstanceLogs,
@@ -109,6 +111,24 @@ pub(crate) struct InstanceIngest {
 pub(crate) struct InstancePlacement {
     pub node_selector: BTreeMap<String, String>,
     pub tolerations: Vec<InstanceToleration>,
+}
+
+/// Compute resources of the instance. `roles` holds only the roles that the
+/// CR sets, keyed `all`, `store`, `control`, `gateway` or `query`.
+#[derive(Clone, Debug, Default)]
+#[allow(dead_code)] // read by the render of the next change
+pub(crate) struct InstanceResources {
+    pub requests: BTreeMap<String, String>,
+    pub limits: BTreeMap<String, String>,
+    pub roles: BTreeMap<String, InstanceRoleResources>,
+}
+
+/// Per-role overrides. `None` keeps the common value of that map.
+#[derive(Clone, Debug, Default)]
+#[allow(dead_code)] // read by the render of the next change
+pub(crate) struct InstanceRoleResources {
+    pub requests: Option<BTreeMap<String, String>>,
+    pub limits: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default)]
