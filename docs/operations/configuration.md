@@ -576,6 +576,48 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.placement` | object | no | none | Pod placement. |
 | `spec.placement.nodeSelector` | object | no | none | Node labels that the pods must match. |
 | `spec.placement.tolerations` | array | no | none | Tolerations of the role Pods (store, control, query, gateway and the single Pod). Each item has `key`, `operator` (`Exists` or `Equal`), `value`, `effect` (`NoSchedule`, `PreferNoSchedule` or `NoExecute`) and `tolerationSeconds`. The log and metrics agents do not use it. |
+| `spec.resources` | object | no | none | CPU and memory requests and limits of the role Pods. Keys are `cpu` and `memory`. |
+| `spec.resources.requests` | object | no | none | Requests of every role. Empty means the default `cpu: 100m` and `memory: 256Mi`. |
+| `spec.resources.requests.cpu` | string | no | none | CPU request of every role. |
+| `spec.resources.requests.memory` | string | no | none | Memory request of every role. |
+| `spec.resources.limits` | object | no | none | Limits of every role. Empty means no limits. |
+| `spec.resources.limits.cpu` | string | no | none | CPU limit of every role. |
+| `spec.resources.limits.memory` | string | no | none | Memory limit of every role. |
+| `spec.resources.all` | object | no | none | Override for the `all` role. A set `requests` or `limits` replaces the common value. |
+| `spec.resources.all.requests` | object | no | none | Requests of the `all` role. Replaces the common requests when set. |
+| `spec.resources.all.requests.cpu` | string | no | none | CPU request of the `all` role. |
+| `spec.resources.all.requests.memory` | string | no | none | Memory request of the `all` role. |
+| `spec.resources.all.limits` | object | no | none | Limits of the `all` role. Replaces the common limits when set. |
+| `spec.resources.all.limits.cpu` | string | no | none | CPU limit of the `all` role. |
+| `spec.resources.all.limits.memory` | string | no | none | Memory limit of the `all` role. |
+| `spec.resources.store` | object | no | none | Override for the `store` role. A set `requests` or `limits` replaces the common value. |
+| `spec.resources.store.requests` | object | no | none | Requests of the `store` role. Replaces the common requests when set. |
+| `spec.resources.store.requests.cpu` | string | no | none | CPU request of the `store` role. |
+| `spec.resources.store.requests.memory` | string | no | none | Memory request of the `store` role. |
+| `spec.resources.store.limits` | object | no | none | Limits of the `store` role. Replaces the common limits when set. |
+| `spec.resources.store.limits.cpu` | string | no | none | CPU limit of the `store` role. |
+| `spec.resources.store.limits.memory` | string | no | none | Memory limit of the `store` role. |
+| `spec.resources.control` | object | no | none | Override for the `control` role. A set `requests` or `limits` replaces the common value. |
+| `spec.resources.control.requests` | object | no | none | Requests of the `control` role. Replaces the common requests when set. |
+| `spec.resources.control.requests.cpu` | string | no | none | CPU request of the `control` role. |
+| `spec.resources.control.requests.memory` | string | no | none | Memory request of the `control` role. |
+| `spec.resources.control.limits` | object | no | none | Limits of the `control` role. Replaces the common limits when set. |
+| `spec.resources.control.limits.cpu` | string | no | none | CPU limit of the `control` role. |
+| `spec.resources.control.limits.memory` | string | no | none | Memory limit of the `control` role. |
+| `spec.resources.gateway` | object | no | none | Override for the `gateway` role. A set `requests` or `limits` replaces the common value. |
+| `spec.resources.gateway.requests` | object | no | none | Requests of the `gateway` role. Replaces the common requests when set. |
+| `spec.resources.gateway.requests.cpu` | string | no | none | CPU request of the `gateway` role. |
+| `spec.resources.gateway.requests.memory` | string | no | none | Memory request of the `gateway` role. |
+| `spec.resources.gateway.limits` | object | no | none | Limits of the `gateway` role. Replaces the common limits when set. |
+| `spec.resources.gateway.limits.cpu` | string | no | none | CPU limit of the `gateway` role. |
+| `spec.resources.gateway.limits.memory` | string | no | none | Memory limit of the `gateway` role. |
+| `spec.resources.query` | object | no | none | Override for the `query` role. A set `requests` or `limits` replaces the common value. |
+| `spec.resources.query.requests` | object | no | none | Requests of the `query` role. Replaces the common requests when set. |
+| `spec.resources.query.requests.cpu` | string | no | none | CPU request of the `query` role. |
+| `spec.resources.query.requests.memory` | string | no | none | Memory request of the `query` role. |
+| `spec.resources.query.limits` | object | no | none | Limits of the `query` role. Replaces the common limits when set. |
+| `spec.resources.query.limits.cpu` | string | no | none | CPU limit of the `query` role. |
+| `spec.resources.query.limits.memory` | string | no | none | Memory limit of the `query` role. |
 | `spec.auth` | string | no | none | Authentication mode: `off`, `required` or `kubernetes`. Sets `SIFT_AUTH`. |
 | `spec.tokensSecret` | string | no | none | Secret with the token registry for `SIFT_AUTH=required`. |
 | `spec.alerting` | object | no | none | Alert webhook settings. |

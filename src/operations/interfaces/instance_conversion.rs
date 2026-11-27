@@ -1,16 +1,37 @@
 //! Convert the already-defaulted CRD into plain instance settings.
 
+use std::collections::BTreeMap;
+
 use crate::operations::interfaces::crd::sift_spec::{AuthMode, LogsAgent, Sift, Topology};
 use crate::shared_kernel::instance_spec::{
     InstanceAlerting, InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap,
-    InstanceIngest, InstanceLogs, InstanceMetrics, InstancePlacement, InstanceSettings,
-    InstanceSpec, InstanceStorage, InstanceToleration, InstanceTopology,
+    InstanceIngest, InstanceLogs, InstanceMetrics, InstancePlacement, InstanceResources,
+    InstanceRoleResources, InstanceSettings, InstanceSpec, InstanceStorage, InstanceToleration,
+    InstanceTopology,
 };
 use kube::ResourceExt;
 
 impl From<&Sift> for InstanceSpec {
     fn from(sift: &Sift) -> Self {
         let spec = &sift.spec;
+        let mut roles = BTreeMap::new();
+        for (name, role) in [
+            ("all", &spec.resources.all),
+            ("store", &spec.resources.store),
+            ("control", &spec.resources.control),
+            ("gateway", &spec.resources.gateway),
+            ("query", &spec.resources.query),
+        ] {
+            if let Some(role) = role {
+                roles.insert(
+                    name.to_string(),
+                    InstanceRoleResources {
+                        requests: role.requests.clone(),
+                        limits: role.limits.clone(),
+                    },
+                );
+            }
+        }
         Self {
             name: sift.name_any(),
             namespace: sift.namespace().unwrap_or_else(|| "default".to_string()),
@@ -54,6 +75,11 @@ impl From<&Sift> for InstanceSpec {
                             toleration_seconds: toleration.toleration_seconds,
                         })
                         .collect(),
+                },
+                resources: InstanceResources {
+                    requests: spec.resources.requests.clone(),
+                    limits: spec.resources.limits.clone(),
+                    roles,
                 },
                 auth: match spec.auth {
                     AuthMode::Off => InstanceAuth::Off,
