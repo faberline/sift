@@ -39,6 +39,14 @@ fn sift_resource_with(extra: Value) -> Sift {
 /// The workloads that run the data-root init container: only the log agent.
 const INIT_CONTAINER_WORKLOADS: [(&str, &str); 1] = [("DaemonSet", "events-agent")];
 
+/// The role pods, which have no init container.
+const ROLE_WORKLOADS: [(&str, &str); 4] = [
+    ("StatefulSet", "events-store"),
+    ("StatefulSet", "events-control"),
+    ("Deployment", "events-gateway"),
+    ("Deployment", "events-query"),
+];
+
 const DEFAULT_INIT_IMAGE: &str =
     "busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
 const OVERRIDE_INIT_IMAGE: &str = "registry.example.invalid/mirror/busybox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -54,17 +62,12 @@ fn default_init_containers_pin_busybox_by_digest() {
             "{kind} {name} must pin the init image by digest"
         );
     }
-    for (kind, name) in [
-        ("StatefulSet", "events-store"),
-        ("StatefulSet", "events-control"),
-        ("Deployment", "events-gateway"),
-        ("Deployment", "events-query"),
-    ] {
+    for (kind, name) in ROLE_WORKLOADS {
         assert!(
             object(&objects, kind, name)["spec"]["template"]["spec"]
                 .get("initContainers")
                 .is_none(),
-            "{kind} {name} must not run an init container"
+            "{kind} {name} must have no init container"
         );
     }
 }
@@ -121,6 +124,7 @@ fn rendered_role_pods_pass_restricted_pod_security() {
                 "{name} {key}"
             );
         }
+        // A StatefulSet keeps its data in volumeClaimTemplates: no pod volume.
         for volume in pod
             .get("volumes")
             .and_then(Value::as_array)
