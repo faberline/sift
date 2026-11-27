@@ -27,14 +27,12 @@ metadata:
   namespace: default
 spec:
   image: REPLACE_ME__SIFT_IMAGE_DIGEST
-  peerTlsSecret: REPLACE_ME__SIFT_PEER_TLS_SECRET
   topology: singleNode
   storage:
     storeSize: 20Gi
   auth: "off"
-  gcpProjectId: REPLACE_ME__GCP_PROJECT_ID
-  gkeClusterName: REPLACE_ME__GKE_CLUSTER_NAME
-  gkeLocation: REPLACE_ME__GKE_LOCATION
+  logs:
+    agent: disabled
 ```
 
 `20Gi` is an example value, not a recommendation. The fields of the `ha`
@@ -90,8 +88,11 @@ runs only in the HA topology. It renders no Role or RoleBinding. It renders an F
 `alerting.allowedHosts` is set. It renders a ClusterRoleBinding only when
 `auth: kubernetes` is set.
 
-The Pod mounts the `peerTlsSecret` volume, but the single Pod has no peer to
-talk to, so the peer endpoints are not set for the `all` role.
+The `all` role mounts no peer TLS volume and sets no peer endpoint: the single
+Pod has no peer. `spec.peerTlsSecret` is not needed. `spec.gcpProjectId`,
+`spec.gkeClusterName` and `spec.gkeLocation` are needed only while
+`spec.logs.agent` is `enabled` (the default); with `disabled` they are not
+needed.
 
 ## Size the PVC
 

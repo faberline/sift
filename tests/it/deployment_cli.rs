@@ -1529,6 +1529,45 @@ fn single_node_container_env_has_no_peer_or_role_endpoints() {
 }
 
 #[test]
+fn single_node_without_peer_secret_or_gcp_fields_renders_without_peer_volume() {
+    let resource: Sift = serde_json::from_value(json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": {
+            "image": "example.invalid/sift:single-node",
+            "topology": "singleNode",
+            "auth": "off",
+            "dataSize": "1Gi",
+            "logs": { "agent": "disabled" }
+        }
+    }))
+    .expect("decode single-node Sift resource without peer TLS or GCP fields");
+
+    let objects = resource.render();
+    let stateful_set = object(&objects, "StatefulSet", "events-all");
+    let volume_names: Vec<&str> = stateful_set["spec"]["template"]["spec"]["volumes"]
+        .as_array()
+        .map(|volumes| {
+            volumes
+                .iter()
+                .map(|volume| volume["name"].as_str().expect("volume name"))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(!volume_names.contains(&"peer-tls"));
+    assert!(
+        objects.iter().all(|object| object["kind"] != "Secret"),
+        "single-node render with no peer TLS secret must create no Secret"
+    );
+}
+
+#[test]
 fn single_node_with_gcs_archive_renders_the_one_fqdn_policy() {
     let objects = single_node_resource(
         "off",

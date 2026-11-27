@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 pub struct SiftSpec {
     pub image: String,
     /// Secret with tls.crt, tls.key, and ca.crt for the dedicated Raft port.
+    /// Required by the CRD for `topology: ha`; not used by `singleNode`.
+    #[serde(default)]
     pub peer_tls_secret: String,
     #[serde(default = "three")]
     pub replicas_per_shard: u32,
@@ -286,6 +288,31 @@ mod tests {
     #[test]
     fn logs_agent_default_is_enabled() {
         assert_eq!(spec_with("").unwrap().logs.agent, super::LogsAgent::Enabled);
+    }
+
+    fn spec_without_peer(extra: &str) -> Result<SiftSpec, serde_json::Error> {
+        let mut json = String::from(r#"{"image":"example.invalid/sift:test""#);
+        if !extra.is_empty() {
+            json.push(',');
+            json.push_str(extra);
+        }
+        json.push('}');
+        serde_json::from_str(&json)
+    }
+
+    #[test]
+    fn peer_tls_secret_is_optional_for_single_node() {
+        let spec = spec_without_peer(r#""topology":"singleNode""#).unwrap();
+        assert_eq!(spec.topology, Topology::SingleNode);
+        assert_eq!(spec.peer_tls_secret, "");
+    }
+
+    #[test]
+    fn gcp_fields_default_to_empty() {
+        let spec = spec_with("").unwrap();
+        assert_eq!(spec.gcp_project_id, "");
+        assert_eq!(spec.gke_cluster_name, "");
+        assert_eq!(spec.gke_location, "");
     }
 
     #[test]
