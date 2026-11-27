@@ -2041,18 +2041,12 @@ fn logs_agent_enabled_still_waits_for_the_agent() {
 }
 
 #[test]
-fn single_node_init_container_is_pinned_and_overridable() {
+fn single_node_pod_has_no_init_container() {
     let objects = single_node_resource("off", json!({})).render();
     let stateful_set = object(&objects, "StatefulSet", "events-all");
-    let init_containers = stateful_set["spec"]["template"]["spec"]["initContainers"]
-        .as_array()
-        .expect("init containers");
-    assert!(!init_containers.is_empty());
-    for container in init_containers {
-        let image = container["image"].as_str().expect("init image");
-        assert!(image.starts_with("busybox:1.36.1"), "{image}");
-        assert!(image.contains("@sha256:"), "{image}");
-    }
+    assert!(stateful_set["spec"]["template"]["spec"]
+        .get("initContainers")
+        .is_none());
 
     let overridden = single_node_resource(
         "off",
@@ -2060,15 +2054,9 @@ fn single_node_init_container_is_pinned_and_overridable() {
     )
     .render();
     let stateful_set = object(&overridden, "StatefulSet", "events-all");
-    for container in stateful_set["spec"]["template"]["spec"]["initContainers"]
-        .as_array()
-        .expect("init containers")
-    {
-        assert_eq!(
-            container["image"],
-            "registry.example.invalid/mirror/busybox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-        );
-    }
+    assert!(stateful_set["spec"]["template"]["spec"]
+        .get("initContainers")
+        .is_none());
 }
 
 // HANDWRITE-END

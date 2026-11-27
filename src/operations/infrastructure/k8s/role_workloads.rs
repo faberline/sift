@@ -84,28 +84,6 @@ pub(super) fn init_image(spec: &SiftSpec) -> &str {
     spec.init_image.as_deref().unwrap_or(DEFAULT_INIT_IMAGE)
 }
 
-fn data_init_container(spec: &SiftSpec) -> Value {
-    json!({
-        "name": "prepare-data-root",
-        "image": init_image(spec),
-        "command": ["sh", "-ec"],
-        "args": ["chown 65532:65532 /var/lib/sift && chmod 0700 /var/lib/sift && test \"$(stat -c '%u:%g:%a' /var/lib/sift)\" = '65532:65532:700'"],
-        "volumeMounts": [{"name":"data", "mountPath":"/var/lib/sift"}],
-        "securityContext": {
-            "runAsNonRoot": false,
-            "runAsUser": 0,
-            "runAsGroup": 0,
-            "allowPrivilegeEscalation": false,
-            "readOnlyRootFilesystem": true,
-            "capabilities": {"drop":["ALL"], "add":["CHOWN", "FOWNER"]}
-        },
-        "resources": {
-            "requests": {"cpu":"5m", "memory":"8Mi"},
-            "limits": {"cpu":"50m", "memory":"32Mi"}
-        }
-    })
-}
-
 fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
     let auth = match spec.auth {
         AuthMode::Off => "off",
@@ -321,7 +299,6 @@ fn role_pod_plan(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> render::Pod
         serde_json::to_value(&spec.placement.node_selector).expect("node selector is JSON"),
     )
     .with_automount_service_account_token(matches!(spec.auth, AuthMode::Kubernetes))
-    .with_init_containers(vec![data_init_container(spec)])
     .with_volumes(volumes)
     .with_tolerations(tolerations_json(spec));
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {

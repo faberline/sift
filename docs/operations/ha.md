@@ -34,7 +34,7 @@ must commit a write before Sift reports success. Live membership changes and a
 different voter count are refused.
 
 Each pod that owns local state has its own PVC at `/var/lib/sift`. Do not use an
-`emptyDir` for Sift data. The init container sets the owner and mode `0700`.
+`emptyDir` for Sift data. The pod has no init container. Kubernetes makes the volume group-writable for `fsGroup: 65532`, and Sift creates its directories below `/var/lib/sift` with mode `0700`.
 The workload runs as a non-root user. The pod security context uses
 `fsGroupChangePolicy: OnRootMismatch`.
 
