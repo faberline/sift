@@ -13,4 +13,4 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: faberline/aw/.github/workflows/advisories.yml@df440b3884f52569a2facf1eecdb12275ae77c33
+    uses: faberline/aw/.github/workflows/advisories.yml@df50599e6e52e6459d3b40450a02b4333cd5f50c
