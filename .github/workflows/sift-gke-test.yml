@@ -128,9 +128,9 @@ jobs:
       id-token: write
       contents: read
       packages: read
-    uses: faberline/aw/.github/workflows/gke-test.yml@d7955702e3596b7d3b7eafd232644d1159f4b812
+    uses: faberline/aw/.github/workflows/gke-test.yml@df50599e6e52e6459d3b40450a02b4333cd5f50c
     with:
-      aw-ref: d7955702e3596b7d3b7eafd232644d1159f4b812
+      aw-ref: df50599e6e52e6459d3b40450a02b4333cd5f50c
       image: ${{ needs.publish.outputs.image }}
       image-name: sift
       namespace: sift-smoke
