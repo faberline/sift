@@ -219,7 +219,7 @@ jobs:
         run: cargo build --locked -p sift --bins
       - name: cargo llvm-cov
         run: cargo llvm-cov --workspace --locked --json --summary-only --output-path target/coverage.json
-      - uses: faberline/aw/.github/actions/coverage@4340a382c73351cffff85edba7079e4c24adf3db # S8
+      - uses: faberline/aw/.github/actions/coverage@8d6f37d733d402efe7a8b1efee61aa6cc4f81e99 # S8
         with:
           summary: target/coverage.json
 
@@ -361,7 +361,7 @@ jobs:
       - name: architecture check
         run: bash scripts/check-architecture.sh
       - name: install aw
-        run: cargo install --locked --git https://github.com/faberline/aw --rev 440aa413d467c0d850cf976f277441724852217c aw
+        run: cargo install --locked --git https://github.com/faberline/aw --rev 8d6f37d733d402efe7a8b1efee61aa6cc4f81e99 aw
       - name: core-reuse check (S4)
         run: |
           git clone --quiet --filter=blob:none --no-checkout https://github.com/faberline/core "$RUNNER_TEMP/core"
