@@ -24,7 +24,12 @@ pub struct SiftSpec {
     #[serde(default)]
     pub init_image: Option<String>,
     /// Secret with tls.crt, tls.key, and ca.crt for the dedicated Raft port.
-    pub peer_tls_secret: String,
+    /// Set exactly one of this and `peer_tls_secret_provider_class`.
+    #[serde(default)]
+    pub peer_tls_secret: Option<String>,
+    /// SecretProviderClass that provides the peer TLS material. Set exactly one of this and `peer_tls_secret`.
+    #[serde(default)]
+    pub peer_tls_secret_provider_class: Option<String>,
     #[serde(default = "three")]
     pub replicas_per_shard: u32,
     #[serde(default = "three")]
@@ -57,6 +62,8 @@ pub struct SiftSpec {
     #[serde(default)]
     pub tokens_secret: Option<String>,
     #[serde(default)]
+    pub tokens_secret_provider_class: Option<String>,
+    #[serde(default)]
     pub backup: Option<BackupSpec>,
     #[serde(default)]
     pub alerting: AlertingSpec,
@@ -66,6 +73,8 @@ pub struct SiftSpec {
     pub gke_cluster_name: String,
     #[serde(default)]
     pub gke_location: String,
+    #[serde(default = "default_secrets_csi_driver")]
+    pub secrets_csi_driver: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -94,6 +103,8 @@ pub struct BackupSpec {
     pub retention_secs: Option<u64>,
     #[serde(default)]
     pub admin_token_secret: Option<String>,
+    #[serde(default)]
+    pub admin_token_secret_provider_class: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -130,6 +141,7 @@ pub struct MetricsSpec {
 pub struct AlertingSpec {
     /// Secret keys are reference-name.json with an HTTPS URL and optional bearer_token.
     pub webhook_secret: Option<String>,
+    pub webhook_secret_provider_class: Option<String>,
     pub allowed_hosts: Vec<String>,
 }
 
@@ -228,6 +240,10 @@ fn three() -> u32 {
 
 fn default_retention_days() -> u32 {
     180
+}
+
+fn default_secrets_csi_driver() -> String {
+    "secrets-store.csi.k8s.io".to_string()
 }
 
 #[cfg(test)]

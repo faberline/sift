@@ -16,6 +16,8 @@ pub(crate) struct InstanceSettings {
     pub image: String,
     pub init_image: Option<String>,
     pub peer_tls_secret: String,
+    #[allow(dead_code)] // read by the render of #401
+    pub peer_tls_secret_provider_class: Option<String>,
     pub replicas_per_shard: u32,
     pub voter_count: u32,
     pub data_size: Option<String>,
@@ -30,11 +32,15 @@ pub(crate) struct InstanceSettings {
     pub retention_days: u32,
     pub metrics: InstanceMetrics,
     pub tokens_secret: Option<String>,
+    #[allow(dead_code)] // read by the render of #401
+    pub tokens_secret_provider_class: Option<String>,
     pub backup: Option<InstanceBackup>,
     pub alerting: InstanceAlerting,
     pub gcp_project_id: String,
     pub gke_cluster_name: String,
     pub gke_location: String,
+    #[allow(dead_code)] // read by the render of #401
+    pub secrets_csi_driver: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,10 +85,14 @@ pub(crate) struct InstanceBackup {
     pub destination: String,
     pub retention_secs: Option<u64>,
     pub admin_token_secret: Option<String>,
+    #[allow(dead_code)] // read by the render of #401
+    pub admin_token_secret_provider_class: Option<String>,
 }
 #[derive(Clone, Debug)]
 pub(crate) struct InstanceAlerting {
     pub webhook_secret: Option<String>,
+    #[allow(dead_code)] // read by the render of #401
+    pub webhook_secret_provider_class: Option<String>,
     pub allowed_hosts: Vec<String>,
 }
 #[derive(Clone, Debug)]

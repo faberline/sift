@@ -28,10 +28,19 @@
                 "type": "object",
                 "required": [
                   "image",
-                  "peerTlsSecret",
                   "gcpProjectId",
                   "gkeClusterName",
                   "gkeLocation"
+                ],
+                "x-kubernetes-validations": [
+                  {
+                    "rule": "has(self.peerTlsSecret) != has(self.peerTlsSecretProviderClass)",
+                    "message": "set exactly one of peerTlsSecret and peerTlsSecretProviderClass"
+                  },
+                  {
+                    "rule": "!(has(self.tokensSecret) && has(self.tokensSecretProviderClass))",
+                    "message": "set at most one of tokensSecret and tokensSecretProviderClass"
+                  }
                 ],
                 "properties": {
                   "image": {
@@ -42,6 +51,10 @@
                     "minLength": 1
                   },
                   "peerTlsSecret": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "peerTlsSecretProviderClass": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -236,10 +249,23 @@
                   "tokensSecret": {
                     "type": "string"
                   },
+                  "tokensSecretProviderClass": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "secretsCsiDriver": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "secrets-store.csi.k8s.io"
+                  },
                   "alerting": {
                     "type": "object",
                     "properties": {
                       "webhookSecret": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "webhookSecretProviderClass": {
                         "type": "string",
                         "minLength": 1
                       },
@@ -253,7 +279,13 @@
                           "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
                         }
                       }
-                    }
+                    },
+                    "x-kubernetes-validations": [
+                      {
+                        "rule": "!(has(self.webhookSecret) && has(self.webhookSecretProviderClass))",
+                        "message": "set at most one of webhookSecret and webhookSecretProviderClass"
+                      }
+                    ]
                   },
                   "gcpProjectId": {
                     "type": "string",
@@ -286,8 +318,18 @@
                       },
                       "adminTokenSecret": {
                         "type": "string"
+                      },
+                      "adminTokenSecretProviderClass": {
+                        "type": "string",
+                        "minLength": 1
                       }
-                    }
+                    },
+                    "x-kubernetes-validations": [
+                      {
+                        "rule": "!(has(self.adminTokenSecret) && has(self.adminTokenSecretProviderClass))",
+                        "message": "set at most one of adminTokenSecret and adminTokenSecretProviderClass"
+                      }
+                    ]
                   }
                 }
               },

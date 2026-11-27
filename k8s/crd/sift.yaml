@@ -20,11 +20,17 @@ spec:
           properties:
             spec:
               type: object
-              required: [image, peerTlsSecret, gcpProjectId, gkeClusterName, gkeLocation]
+              required: [image, gcpProjectId, gkeClusterName, gkeLocation]
+              x-kubernetes-validations:
+                - rule: "has(self.peerTlsSecret) != has(self.peerTlsSecretProviderClass)"
+                  message: "set exactly one of peerTlsSecret and peerTlsSecretProviderClass"
+                - rule: "!(has(self.tokensSecret) && has(self.tokensSecretProviderClass))"
+                  message: "set at most one of tokensSecret and tokensSecretProviderClass"
               properties:
                 image: { type: string }
                 initImage: { type: string, minLength: 1 }
                 peerTlsSecret: { type: string, minLength: 1 }
+                peerTlsSecretProviderClass: { type: string, minLength: 1 }
                 # Phase one uses one fixed three-voter Raft group per shard.
                 # Live membership changes are intentionally not admitted.
                 replicasPerShard: { type: integer, minimum: 3, maximum: 3 }
@@ -96,15 +102,21 @@ spec:
                       x-kubernetes-list-type: set
                       items: { type: string, minLength: 1, maxLength: 63, pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' }
                 tokensSecret: { type: string }
+                tokensSecretProviderClass: { type: string, minLength: 1 }
+                secretsCsiDriver: { type: string, minLength: 1, default: secrets-store.csi.k8s.io }
                 alerting:
                   type: object
                   properties:
                     webhookSecret: { type: string, minLength: 1 }
+                    webhookSecretProviderClass: { type: string, minLength: 1 }
                     allowedHosts:
                       type: array
                       maxItems: 32
                       x-kubernetes-list-type: set
                       items: { type: string, maxLength: 253, pattern: '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' }
+                  x-kubernetes-validations:
+                    - rule: "!(has(self.webhookSecret) && has(self.webhookSecretProviderClass))"
+                      message: "set at most one of webhookSecret and webhookSecretProviderClass"
                 gcpProjectId: { type: string, minLength: 1 }
                 gkeClusterName: { type: string, minLength: 1 }
                 gkeLocation: { type: string, minLength: 1 }
@@ -116,6 +128,10 @@ spec:
                     destination: { type: string }
                     retentionSecs: { type: integer, minimum: 1 }
                     adminTokenSecret: { type: string }
+                    adminTokenSecretProviderClass: { type: string, minLength: 1 }
+                  x-kubernetes-validations:
+                    - rule: "!(has(self.adminTokenSecret) && has(self.adminTokenSecretProviderClass))"
+                      message: "set at most one of adminTokenSecret and adminTokenSecretProviderClass"
             status:
               type: object
               properties:

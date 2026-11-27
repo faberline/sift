@@ -195,3 +195,84 @@ fn crd_schema_lists_tolerations_and_storage_class() {
         "string"
     );
 }
+
+fn rules_mention(rules: &serde_json::Value, needle: &str) -> bool {
+    rules.as_array().is_some_and(|rules| {
+        rules.iter().any(|rule| {
+            rule["rule"]
+                .as_str()
+                .is_some_and(|text| text.contains(needle))
+        })
+    })
+}
+
+#[test]
+fn crd_schema_lists_secret_provider_classes() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let spec = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+        ["properties"];
+    let class_fields = [
+        (
+            &spec["peerTlsSecretProviderClass"],
+            "peerTlsSecretProviderClass",
+        ),
+        (
+            &spec["tokensSecretProviderClass"],
+            "tokensSecretProviderClass",
+        ),
+        (
+            &spec["alerting"]["properties"]["webhookSecretProviderClass"],
+            "webhookSecretProviderClass",
+        ),
+        (
+            &spec["backup"]["properties"]["adminTokenSecretProviderClass"],
+            "adminTokenSecretProviderClass",
+        ),
+    ];
+    for (field, name) in class_fields {
+        assert_eq!(field["type"], "string", "{name} must be a string");
+        assert_eq!(field["minLength"], 1, "{name} must not be empty");
+    }
+    let csi_driver = &spec["secretsCsiDriver"];
+    assert_eq!(csi_driver["type"], "string");
+    assert_eq!(csi_driver["minLength"], 1);
+    assert_eq!(csi_driver["default"], "secrets-store.csi.k8s.io");
+}
+
+#[test]
+fn crd_schema_secret_pairs_have_exclusion_rules() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let spec = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"];
+
+    let required = spec["required"].as_array().expect("required list");
+    assert!(
+        !required.iter().any(|name| name == "peerTlsSecret"),
+        "peerTlsSecret must not be required: exactly one peer field is required by a rule"
+    );
+    let spec_rules = &spec["x-kubernetes-validations"];
+    assert!(
+        rules_mention(
+            spec_rules,
+            "has(self.peerTlsSecret) != has(self.peerTlsSecretProviderClass)"
+        ),
+        "spec needs the exactly-one peer rule: {spec_rules}"
+    );
+    assert!(
+        rules_mention(spec_rules, "tokensSecretProviderClass"),
+        "spec needs the tokens pair rule: {spec_rules}"
+    );
+    assert!(
+        rules_mention(
+            &spec["properties"]["alerting"]["x-kubernetes-validations"],
+            "webhookSecretProviderClass"
+        ),
+        "alerting needs the webhook pair rule"
+    );
+    assert!(
+        rules_mention(
+            &spec["properties"]["backup"]["x-kubernetes-validations"],
+            "adminTokenSecretProviderClass"
+        ),
+        "backup needs the admin token pair rule"
+    );
+}
