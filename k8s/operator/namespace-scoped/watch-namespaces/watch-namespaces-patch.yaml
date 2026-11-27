@@ -1,0 +1,15 @@
+# The value is a comma list, for example `team-a,team-b`. Blank parts are
+# ignored. An empty value watches cluster-wide.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sift-operator
+  namespace: sift-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: operator
+          env:
+            - name: WATCH_NAMESPACES
+              value: "sift-example"
