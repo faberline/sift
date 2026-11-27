@@ -2,7 +2,9 @@
 # This bundle replaces k8s/operator/cluster in the namespace-scoped mode.
 # The admin applies this bundle, then k8s/operator/namespace (optional),
 # k8s/operator/namespaced, and one copy of k8s/operator/namespaced-rbac/example
-# for each watched namespace.
+# for each watched namespace. To limit the watch to a list of namespaces, the
+# admin applies k8s/operator/namespace-scoped/watch-namespaces (it includes
+# k8s/operator/namespaced) in place of k8s/operator/namespaced.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
