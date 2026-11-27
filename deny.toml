@@ -10,18 +10,13 @@ no-default-features = false
 [advisories]
 db-path = "~/.cargo/advisory-db"
 version = 2
-# Desk decision (faberline/aw#610, option A): six unmaintained advisories.
-# RUSTSEC-2026-0600 is a separate dated ignore (sift#404, SEC1): kube-client
-# openssl-tls is not compiled in. Re-check all seven by 2027-02-15. Keep this
-# list equal to the list in .cargo/audit.toml.
+# Desk decision (faberline/aw#610, option A): three unmaintained advisories
+# remain. Re-check them by 2027-02-15. Keep this list equal to the list in
+# .cargo/audit.toml.
 ignore = [
-    { id = "RUSTSEC-2025-0012", reason = "backoff 0.4.0 is unmaintained; kube-runtime 0.98.0 pulls it in and has no replacement yet. expires 2027-02-15." },
-    { id = "RUSTSEC-2024-0384", reason = "instant 0.1.13 is unmaintained; backoff pulls it in. expires 2027-02-15." },
-    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile 2.2.0 is unmaintained; kube-client 0.98.0 and core peer-tls pull it in. expires 2027-02-15." },
-    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml 0.2.11 is unmaintained; serde_yaml 0.9 pulls it in (kube-client, sift, vat dev). expires 2027-02-15." },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml 0.2.11 is unmaintained; serde_yaml 0.9 pulls it in (sift, vat dev). expires 2027-02-15." },
     { id = "RUSTSEC-2025-0141", reason = "bincode 2.0.1 is unmaintained; promql-parser 0.11.0 pulls it in (cfgrammar, lrlex, lrpar, lrtable). expires 2027-02-15." },
     { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.44 is unmaintained; arrow-array and parquet 59.2.0, sift and cron pull it in. expires 2027-02-15." },
-    { id = "RUSTSEC-2026-0600", reason = "kube-client 0.98.0: the flaw is in the openssl-tls connector only. Sift builds kube with rustls-tls and Cargo.lock has no openssl package, so the code is not compiled in. The fix is kube 4.2.1 or 5.2.0; faberline/core v0.5.2 pins kube 0.98. Upgrade kube together with core. expires 2027-02-15." },
 ]
 
 [licenses]

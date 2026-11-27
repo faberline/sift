@@ -3,7 +3,7 @@
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{tool, tool_router, ErrorData, Json};
-use schemars1::JsonSchema;
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
@@ -30,14 +30,14 @@ impl service_mcp::McpApplication for SiftMcpServer {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[schemars(crate = "schemars1")]
+#[schemars(crate = "schemars")]
 struct QueryToolArgs {
     /// A versioned QueryRequestV1 JSON object.
     request: Value,
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[schemars(crate = "schemars1")]
+#[schemars(crate = "schemars")]
 struct TraceToolArgs {
     /// Authorized Sift project.
     project: String,
@@ -48,14 +48,14 @@ struct TraceToolArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[schemars(crate = "schemars1")]
+#[schemars(crate = "schemars")]
 struct CorrelateToolArgs {
     /// A versioned CorrelationRequestV1 JSON object.
     request: Value,
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[schemars(crate = "schemars1")]
+#[schemars(crate = "schemars")]
 struct ListServicesToolArgs {
     /// Authorized Sift project.
     project: String,
@@ -64,14 +64,14 @@ struct ListServicesToolArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[schemars(crate = "schemars1")]
+#[schemars(crate = "schemars")]
 struct TailLogsToolArgs {
     /// A versioned LogTailRequestV1 JSON object.
     request: Value,
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[schemars(crate = "schemars1")]
+#[schemars(crate = "schemars")]
 struct ControlToolArgs {
     project: String,
     after: Option<String>,
