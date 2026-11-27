@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'production'))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cost_guard  # noqa: E402
 import phases  # noqa: E402
 
 INPUTS = Path(__file__).resolve().parents[2] / 'production' / 'cost-inputs.single-node.json'
@@ -517,6 +518,68 @@ class CostGuardTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / phases.GUARD_FILE).exists())
             self.assertNotEqual(phases.main(args + ['--cap-usd', '3']), 0)
 
+    def test_projected_hours_for_three_phases(self):
+        hours = self.inputs['phases_hours']
+        expected = hours['setup'] + hours['install_one_namespace'] + hours['retention'] + hours['deleted_pod_logs']
+        projected = phases.projected_hours(self.inputs, SelectionTests.THREE)
+        self.assertAlmostEqual(projected, 1.45, places=6)
+        self.assertAlmostEqual(projected, expected, places=6)
+        self.assertAlmostEqual(cost_guard.projected_cost(0, 0.93, projected), 1.3485, places=4)
+        self.assertLess(cost_guard.projected_cost(0, 0.93, projected), 1.55)
+
+    def test_projected_hours_for_all_phases_is_unchanged(self):
+        self.assertEqual(phases.projected_hours(self.inputs, list(phases.PHASES)), 5.0)
+        self.assertAlmostEqual(cost_guard.projected_cost(0, 0.93, 5.0), 4.65, places=4)
+
+    def test_partial_projection_is_below_the_full_one(self):
+        self.assertAlmostEqual(phases.projected_hours(self.inputs, ['retention']), 1.25, places=6)
+        almost_all = ['install_one_namespace', 'load_30m', 'load_24h', 'faults', 'comparison', 'retention']
+        self.assertAlmostEqual(phases.projected_hours(self.inputs, almost_all), 4.85, places=6)
+
+    def test_guard_figures_count_only_selected_phases_left(self):
+        three = SelectionTests.THREE
+        self.assertAlmostEqual(phases.guard_figures(self.inputs, 'install_one_namespace', 0, three)['hours_left'], 0.45, places=6)
+        self.assertAlmostEqual(phases.guard_figures(self.inputs, 'retention', 0, three)['hours_left'], 0.35, places=6)
+        self.assertAlmostEqual(phases.guard_figures(self.inputs, 'deleted_pod_logs', 0, three)['hours_left'], 0.1, places=6)
+        self.assertAlmostEqual(phases.guard_figures(self.inputs, 'install_one_namespace', 0)['hours_left'], 3.95, places=6)
+
+    def test_run_guard_passes_a_partial_run_under_a_small_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(phases.run_guard('install_one_namespace', self.inputs, '1.55', 0, tmp,
+                                              SelectionTests.THREE), 0)
+            entry = self.read_entries(tmp)[-1]
+            self.assertAlmostEqual(entry['hours_left'], 0.45, places=6)
+            self.assertAlmostEqual(entry['projected_usd'], 0.4185, places=3)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotEqual(phases.run_guard('install_one_namespace', self.inputs, '1.55', 0, tmp), 0)
+
+    def test_hours_command(self):
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(phases.main(['hours', '--phases', 'install_one_namespace,retention,deleted_pod_logs',
+                                          '--cost-inputs', str(INPUTS)]), 0)
+        self.assertEqual(out.getvalue().split(), ['1.45'])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(phases.main(['hours', '--phases', '', '--cost-inputs', str(INPUTS)]), 0)
+        self.assertEqual(out.getvalue().split(), ['5.0'])
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(phases.main(['hours', '--phases', 'nope', '--cost-inputs', str(INPUTS)]), 2)
+        self.assertIn('nope', err.getvalue())
+
+    def test_guard_command_with_phases(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ['guard', 'retention', '--cost-inputs', str(INPUTS), '--cap-usd', '1.55',
+                    '--elapsed-seconds', '0', '--evidence-dir', tmp]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(phases.main(args + ['--phases', ','.join(SelectionTests.THREE)]), 0)
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(phases.main(args + ['--phases', 'nope']), 2)
+
 
 class SelectionTests(unittest.TestCase):
     THREE = ['install_one_namespace', 'retention', 'deleted_pod_logs']
@@ -576,6 +639,17 @@ class SelectionTests(unittest.TestCase):
         self.assertIn('for phase in $selected; do', text)
         self.assertNotIn('phases.py" list', text)
         self.assertIn('PHASES="${1:-${PHASES:-}}"', text)
+
+    def test_run_sh_gives_the_selection_to_the_guard(self):
+        text = (Path(__file__).resolve().parent / 'run.sh').read_text()
+        self.assertIn('guard "$phase" --cost-inputs "$inputs" --phases "$PHASES"', text)
+
+    def test_workflow_guard_uses_the_selected_hours(self):
+        text = WORKFLOW.read_text()
+        self.assertNotIn('--hours-left 5', text)
+        self.assertIn('PHASES: ${{ inputs.phases }}', text)
+        self.assertIn('phases.py hours --phases "$PHASES"', text)
+        self.assertIn('--hours-left "$hours_left"', text)
 
 
 if __name__ == '__main__':

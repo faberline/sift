@@ -546,6 +546,7 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 |---|---|---|---|---|
 | `spec` | object | no | none | Desired state of one Sift instance. |
 | `spec.image` | string | yes | none | Container image of the Sift instance. |
+| `spec.initImage` | string | no | `busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662` | Image of the init containers that prepare the data root of every role Pod and of the log agent Pod. Set it to a pinned image in your own registry when the cluster admits only pinned images or has no Docker Hub access. Must be at least one character. |
 | `spec.peerTlsSecret` | string | yes | none | Secret with the peer mTLS certificate, key and CA. |
 | `spec.replicasPerShard` | integer | no | none | Replicas per shard. Fixed at 3 in this phase. |
 | `spec.topology` | string | no | `ha` | Instance topology: `ha` or `singleNode`. |
@@ -553,6 +554,7 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.logs.namespaces` | array | no | none | Namespaces whose Pod logs the log agent collects, as `--namespace a,b`. Empty means the namespace of the instance. |
 | `spec.logs.podLabel` | string | no | none | Collect logs only from Pods that carry this label, as `key=value` (for example `sift.axiom.dev/logs=true`). The operator passes it as `--pod-label` to the log agent. A Pod is collected when it is in a listed namespace and carries the label. Without it, every Pod of the listed namespaces is collected. |
 | `spec.logs.podLabel` (RBAC) | - | - | - | With the field set, the log agent Pod mounts a Kubernetes API token and lists Pods with the label selector in each listed namespace. The operator grants Pod `get` and `list` only in the instance namespace (the Role `<name>-agent-project`); a cluster admin grants `get` and `list` on `pods` in each other listed namespace. The operator creates no cluster-wide role for this. |
+| `spec.logs.agent` | string | no | `enabled` | `enabled` or `disabled`. `disabled` renders no log agent DaemonSet, no metrics agent DaemonSet, no `<name>-agent-project` Role or RoleBinding and no agent NetworkPolicy. Use it when logs, metrics and traces arrive by OTLP and the namespace enforces the `restricted` Pod Security Standard. The status then does not wait for an agent. |
 | `spec.retentionDays` | integer | no | 180 | Days of events Sift keeps and accepts, 1 to 180. The operator passes it as `--retention-days` to the store, control and all-role workloads. |
 | `spec.metrics` | object | no | none | Metrics agent settings. |
 | `spec.metrics.namespaces` | array | no | none | Namespaces whose Pods the metrics agent scrapes, as `--namespace a,b`. Empty means the namespace of the instance. The operator grants Pod read access only in the instance namespace; a cluster admin grants `get` and `list` on `pods` in each other listed namespace. |
@@ -629,6 +631,8 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.backup.destination` | string | yes | none | Shared backup destination URI: `file://`, `s3://` or `gs://`. |
 | `spec.backup.retentionSecs` | integer | no | none | Seconds to keep backup objects. |
 | `spec.backup.adminTokenSecret` | string | no | none | Secret with the admin token of the backup job. |
+
+The operator renders two kinds of images: the Sift image from `spec.image` and the init image, which is pinned by digest unless `spec.initImage` is set.
 
 ### Status
 

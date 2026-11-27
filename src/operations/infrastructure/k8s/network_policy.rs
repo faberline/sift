@@ -129,7 +129,11 @@ pub(super) fn single_node_network_policy_plans(
             kubernetes_api_ports,
         ));
     }
-    vec![default_deny_policy(cx), all, agent]
+    let mut plans = vec![default_deny_policy(cx), all];
+    if spec.logs.agent_enabled {
+        plans.push(agent);
+    }
+    plans
 }
 
 pub(super) fn network_policy_plans(
@@ -284,7 +288,12 @@ pub(super) fn network_policy_plans(
         backup = backup.with_egress(metadata_server_egress());
     }
 
-    vec![default_deny, gateway, query, store, control, agent, backup]
+    let mut plans = vec![default_deny, gateway, query, store, control];
+    if spec.logs.agent_enabled {
+        plans.push(agent);
+    }
+    plans.push(backup);
+    plans
 }
 
 pub(super) fn fqdn_network_policy_plans(

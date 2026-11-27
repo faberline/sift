@@ -16,7 +16,7 @@ and [`llms.txt`](../llms.txt).
 | [domain/contexts.md](domain/contexts.md) | One section per context: what it owns, its services, ports and adapters. |
 | [adr/](adr/0001-ddd-layout.md) | Architecture decisions and the reasons behind them. |
 | [operations/ha.md](operations/ha.md) | High availability: role deployment, peer TLS, backup, and recovery limits. |
-| [operations/public-tls.md](operations/public-tls.md) | Public API over TLS: host, certificate, Ingress and the verify check. |
+| [operations/public-tls.md](operations/public-tls.md) | Public API over TLS: host, certificate, Ingress, the Gateway API variant and the verify check. |
 | [operations/upgrade.md](operations/upgrade.md) | Version compatibility policy, rolling upgrade order and rollback rule. |
 | [operations/runbook.md](operations/runbook.md) | Data-plane runbook: health, metrics, voter loss, restore, collector replay, rejected data. |
 | [operations/install.md](operations/install.md) | The four install paths (install.sh, container image, Compose, Kubernetes) and how each command is tested. |

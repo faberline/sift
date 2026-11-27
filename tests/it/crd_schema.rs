@@ -115,6 +115,18 @@ fn crd_schema_lists_retention_days() {
 }
 
 #[test]
+fn crd_schema_lists_init_image() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let spec = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"];
+    let init_image = &spec["properties"]["initImage"];
+    assert_eq!(init_image["type"], "string");
+    assert_eq!(init_image["minLength"], 1);
+    assert!(init_image.get("default").is_none());
+    let required = spec["required"].as_array().expect("required list");
+    assert!(!required.iter().any(|name| name == "initImage"));
+}
+
+#[test]
 fn crd_schema_lists_log_pod_label() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let pod_label = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
@@ -149,6 +161,16 @@ fn crd_schema_lists_resources() {
             "resources needs the role {role}: {resources}"
         );
     }
+}
+
+#[test]
+fn crd_schema_lists_logs_agent() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let agent = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+        ["properties"]["logs"]["properties"]["agent"];
+    assert_eq!(agent["type"], "string");
+    assert_eq!(agent["enum"], serde_json::json!(["enabled", "disabled"]));
+    assert_eq!(agent["default"], "enabled");
 }
 
 #[test]
