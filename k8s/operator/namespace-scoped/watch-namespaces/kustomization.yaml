@@ -1,0 +1,12 @@
+# HANDWRITE-BEGIN gap="sift-kustomize-operator-namespace-scoped-watch-namespaces" tracker="1606" reason="Opt-in watch limit: sets WATCH_NAMESPACES on the namespace-scoped operator Deployment to a comma list of namespaces."
+# The cluster admin copies this overlay, and edits watch-namespaces-patch.yaml
+# to the namespaces that hold the Sift objects (the same namespaces that get
+# the Role overlay of k8s/operator/namespaced-rbac/example). The admin applies
+# this overlay in place of k8s/operator/namespaced.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../namespaced
+patches:
+  - path: watch-namespaces-patch.yaml
+# HANDWRITE-END

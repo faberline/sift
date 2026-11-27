@@ -147,3 +147,80 @@ fn cluster_wide_default_is_unchanged() {
         vec!["cluster", "namespace", "namespaced"]
     );
 }
+
+/// The `(name, value)` pairs of the env of the container `operator`.
+/// `value` is `None` when the entry has no string `value`.
+fn operator_env(deployment: &Value) -> Vec<(String, Option<String>)> {
+    let containers = deployment["spec"]["template"]["spec"]["containers"]
+        .as_sequence()
+        .expect("containers list");
+    let operator = containers
+        .iter()
+        .find(|container| container["name"].as_str() == Some("operator"))
+        .expect("operator container");
+    operator["env"]
+        .as_sequence()
+        .expect("env list")
+        .iter()
+        .map(|entry| {
+            (
+                entry["name"].as_str().expect("env name").to_string(),
+                entry["value"].as_str().map(str::to_string),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn operator_deployment_sets_the_watch_namespaces() {
+    let patch =
+        document("k8s/operator/namespace-scoped/watch-namespaces/watch-namespaces-patch.yaml");
+    assert_eq!(patch["kind"].as_str(), Some("Deployment"));
+    assert_eq!(patch["metadata"]["name"].as_str(), Some("sift-operator"));
+    assert!(
+        operator_env(&patch).contains(&(
+            "WATCH_NAMESPACES".to_string(),
+            Some("sift-example".to_string())
+        )),
+        "the patch sets WATCH_NAMESPACES to the watched namespaces"
+    );
+
+    let overlay = document("k8s/operator/namespace-scoped/watch-namespaces/kustomization.yaml");
+    assert_eq!(strings_of(&overlay["resources"]), vec!["../../namespaced"]);
+    assert_eq!(
+        overlay["patches"][0]["path"].as_str(),
+        Some("watch-namespaces-patch.yaml")
+    );
+}
+
+#[test]
+fn operator_deployment_defaults_to_cluster_wide_watch() {
+    let env = operator_env(&document("k8s/operator/namespaced/deployment.yaml"));
+    assert!(
+        env.contains(&("WATCH_NAMESPACES".to_string(), Some(String::new()))),
+        "the base sets WATCH_NAMESPACES to an empty value (cluster-wide)"
+    );
+    for name in ["POD_NAMESPACE", "POD_NAME"] {
+        assert!(
+            env.iter().any(|(entry, _)| entry == name),
+            "{name} is missing from the operator env"
+        );
+    }
+}
+
+#[test]
+fn operator_reads_the_watch_namespaces_variable() {
+    let source = read("src/operations/interfaces/operator.rs");
+    assert!(
+        source.contains("\"WATCH_NAMESPACES\""),
+        "the operator names the WATCH_NAMESPACES variable"
+    );
+    assert!(
+        source.contains("run_in_namespaces"),
+        "the operator calls run_in_namespaces"
+    );
+    assert!(
+        !source.contains("service_k8s::run::<"),
+        "the operator no longer calls the cluster-wide run"
+    );
+}
