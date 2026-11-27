@@ -36,13 +36,15 @@ fn sift_resource_with(extra: Value) -> Sift {
     .expect("decode Sift resource")
 }
 
-/// The five workloads that run the data-root init container, with their kinds.
-const INIT_CONTAINER_WORKLOADS: [(&str, &str); 5] = [
+/// The workloads that run the data-root init container: only the log agent.
+const INIT_CONTAINER_WORKLOADS: [(&str, &str); 1] = [("DaemonSet", "events-agent")];
+
+/// The role pods, which have no init container.
+const ROLE_WORKLOADS: [(&str, &str); 4] = [
     ("StatefulSet", "events-store"),
     ("StatefulSet", "events-control"),
     ("Deployment", "events-gateway"),
     ("Deployment", "events-query"),
-    ("DaemonSet", "events-agent"),
 ];
 
 const DEFAULT_INIT_IMAGE: &str =
@@ -58,6 +60,14 @@ fn default_init_containers_pin_busybox_by_digest() {
             object(&objects, kind, name)["spec"]["template"]["spec"]["initContainers"][0]["image"],
             DEFAULT_INIT_IMAGE,
             "{kind} {name} must pin the init image by digest"
+        );
+    }
+    for (kind, name) in ROLE_WORKLOADS {
+        assert!(
+            object(&objects, kind, name)["spec"]["template"]["spec"]
+                .get("initContainers")
+                .is_none(),
+            "{kind} {name} must have no init container"
         );
     }
 }
@@ -86,6 +96,54 @@ fn object<'a>(objects: &'a [Value], kind: &str, name: &str) -> &'a Value {
         .iter()
         .find(|object| object["kind"] == kind && object["metadata"]["name"] == name)
         .unwrap_or_else(|| panic!("missing {kind}/{name}"))
+}
+
+#[test]
+fn rendered_role_pods_pass_restricted_pod_security() {
+    let topology = sift_resource().render();
+    let single_node = sift_resource_with(json!({"topology": "singleNode"})).render();
+    let cases: Vec<(&Vec<Value>, &str, &str)> = vec![
+        (&topology, "StatefulSet", "events-store"),
+        (&topology, "StatefulSet", "events-control"),
+        (&topology, "Deployment", "events-gateway"),
+        (&topology, "Deployment", "events-query"),
+        (&single_node, "StatefulSet", "events-all"),
+    ];
+    for (objects, kind, name) in cases {
+        let pod = &object(objects, kind, name)["spec"]["template"]["spec"];
+        assert_eq!(pod["securityContext"]["runAsNonRoot"], true, "{name}");
+        assert_eq!(
+            pod["securityContext"]["seccompProfile"]["type"], "RuntimeDefault",
+            "{name}"
+        );
+        assert_eq!(pod["securityContext"]["fsGroup"], 65532, "{name}");
+        assert!(pod.get("initContainers").is_none(), "{name}");
+        for key in ["hostNetwork", "hostPID", "hostIPC"] {
+            assert!(
+                pod.get(key).is_none_or(|value| value == &json!(false)),
+                "{name} {key}"
+            );
+        }
+        // A StatefulSet keeps its data in volumeClaimTemplates: no pod volume.
+        for volume in pod
+            .get("volumes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            assert!(volume.get("hostPath").is_none(), "{name}");
+        }
+        let containers = pod["containers"].as_array().expect("containers");
+        assert!(!containers.is_empty(), "{name}");
+        for container in containers {
+            let context = &container["securityContext"];
+            assert_eq!(context["allowPrivilegeEscalation"], false, "{name}");
+            assert_eq!(context["capabilities"]["drop"], json!(["ALL"]), "{name}");
+            assert!(context["capabilities"].get("add").is_none(), "{name}");
+            assert_eq!(context["runAsNonRoot"], true, "{name}");
+            assert_ne!(context["runAsUser"], 0, "{name}");
+        }
+    }
 }
 
 #[test]
@@ -225,13 +283,7 @@ fn every_operator_role_uses_the_common_private_persistent_root() {
             "{name}"
         );
         assert!(!pod.to_string().contains("emptyDir"), "{name}");
-        let init = &pod["initContainers"][0];
-        assert_eq!(init["name"], "prepare-data-root", "{name}");
-        assert_eq!(init["securityContext"]["runAsUser"], 0, "{name}");
-        assert_eq!(init["volumeMounts"][0]["mountPath"], "/var/lib/sift");
-        let script = init["args"][0].as_str().expect("init script");
-        assert!(script.contains("chown 65532:65532 /var/lib/sift"));
-        assert!(script.contains("chmod 0700 /var/lib/sift"));
+        assert!(pod.get("initContainers").is_none(), "{name}");
         let container = &pod["containers"][0];
         assert_eq!(container["volumeMounts"][0]["mountPath"], "/var/lib/sift");
         let expected_args = if matches!(role, "store" | "control") {
