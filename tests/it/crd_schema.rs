@@ -142,6 +142,28 @@ fn crd_schema_lists_log_pod_label() {
 }
 
 #[test]
+fn crd_schema_lists_resources() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let resources = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+        ["spec"]["properties"]["resources"];
+    let memory = &resources["properties"]["requests"]["properties"]["memory"];
+    assert_eq!(memory["type"], "string", "memory: {memory}");
+    assert_eq!(memory["maxLength"], 32, "memory: {memory}");
+    assert!(
+        memory["pattern"]
+            .as_str()
+            .is_some_and(|pattern| !pattern.is_empty()),
+        "memory needs a pattern: {memory}"
+    );
+    for role in ["all", "store", "control", "gateway", "query"] {
+        assert!(
+            resources["properties"][role].is_object(),
+            "resources needs the role {role}: {resources}"
+        );
+    }
+}
+
+#[test]
 fn crd_schema_lists_logs_agent() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let agent = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
@@ -194,4 +216,38 @@ fn crd_schema_lists_tolerations_and_storage_class() {
         spec["storage"]["properties"]["storageClass"]["type"],
         "string"
     );
+}
+
+fn crd_spec_schema() -> serde_json::Value {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"].clone()
+}
+
+#[test]
+fn crd_schema_requires_only_the_image() {
+    let spec = crd_spec_schema();
+    assert_eq!(spec["required"], serde_json::json!(["image"]));
+}
+
+#[test]
+fn crd_schema_has_the_conditional_cel_rules() {
+    let spec = crd_spec_schema();
+    let rules = spec["x-kubernetes-validations"]
+        .as_array()
+        .expect("spec must carry x-kubernetes-validations");
+    assert_eq!(rules.len(), 2, "two conditional rules: {rules:?}");
+    assert_eq!(
+        rules[0]["rule"],
+        "(has(self.topology) && self.topology == 'singleNode') || (has(self.peerTlsSecret) && size(self.peerTlsSecret) > 0)"
+    );
+    assert_eq!(
+        rules[1]["rule"],
+        "(has(self.logs) && has(self.logs.agent) && self.logs.agent == 'disabled') || (has(self.gcpProjectId) && has(self.gkeClusterName) && has(self.gkeLocation))"
+    );
+    for rule in rules {
+        assert!(
+            rule["message"].as_str().is_some_and(|m| !m.is_empty()),
+            "each rule needs a message: {rule:?}"
+        );
+    }
 }

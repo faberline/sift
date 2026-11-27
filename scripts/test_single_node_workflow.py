@@ -9,7 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ".github/workflows/sift-single-node-acceptance.yml"
 OVERLAY = "k8s/overlays/gke-single-node"
-AW_PIN = "db865eec66388dd53ec68b0770a44443525daff2"
+AW_PIN = "df50599e6e52e6459d3b40450a02b4333cd5f50c"
 
 
 class SingleNodeWorkflowTest(unittest.TestCase):

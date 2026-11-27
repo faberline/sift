@@ -200,9 +200,9 @@ jobs:
       id-token: write
       contents: read
       packages: read
-    uses: faberline/aw/.github/workflows/gke-test.yml@db865eec66388dd53ec68b0770a44443525daff2
+    uses: faberline/aw/.github/workflows/gke-test.yml@df50599e6e52e6459d3b40450a02b4333cd5f50c
     with:
-      aw-ref: db865eec66388dd53ec68b0770a44443525daff2
+      aw-ref: df50599e6e52e6459d3b40450a02b4333cd5f50c
       image: ${{ needs.publish.outputs.image }}
       image-name: sift
       namespace: sift-single-node
