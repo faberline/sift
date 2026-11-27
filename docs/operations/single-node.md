@@ -75,11 +75,18 @@ For `spec.topology: singleNode` the operator renders:
   `data`, mounted at `/var/lib/sift`, which gets `storageClassName` when
   `spec.storage.storageClass` is set; the container args are
   `serve --role all --data-dir /var/lib/sift`;
-- two NetworkPolicies, `<name>-network` and `<name>-all-network`.
+- three NetworkPolicies, `<name>-network`, `<name>-all-network` and
+  `<name>-agent-network`;
+- one log agent DaemonSet named `<name>-agent`, when `spec.logs.agent` is
+  `enabled` (the default).
 
-It renders no Deployment, no DaemonSet (so no log agent and no metric agent),
-no PodDisruptionBudget and no CronJob (so no backup job). It renders no Role or
-RoleBinding. It renders an FQDNNetworkPolicy only when a `gs://` destination or
+With `spec.logs.agent: disabled`, it renders no log agent DaemonSet and no
+`<name>-agent-network` NetworkPolicy. Only `<name>-network` and
+`<name>-all-network` remain.
+
+It renders no Deployment, no PodDisruptionBudget and no CronJob (so no backup
+job). It renders no metric agent (`<name>-agent-metrics`): the metric agent
+runs only in the HA topology. It renders no Role or RoleBinding. It renders an FQDNNetworkPolicy only when a `gs://` destination or
 `alerting.allowedHosts` is set. It renders a ClusterRoleBinding only when
 `auth: kubernetes` is set.
 

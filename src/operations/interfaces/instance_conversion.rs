@@ -1,6 +1,6 @@
 //! Convert the already-defaulted CRD into plain instance settings.
 
-use crate::operations::interfaces::crd::sift_spec::{AuthMode, Sift, Topology};
+use crate::operations::interfaces::crd::sift_spec::{AuthMode, LogsAgent, Sift, Topology};
 use crate::shared_kernel::instance_spec::{
     InstanceAlerting, InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap,
     InstanceIngest, InstanceLogs, InstanceMetrics, InstancePlacement, InstanceSettings,
@@ -66,6 +66,7 @@ impl From<&Sift> for InstanceSpec {
                 logs: InstanceLogs {
                     namespaces: spec.logs.namespaces.clone(),
                     pod_label: spec.logs.pod_label.clone(),
+                    agent_enabled: !matches!(spec.logs.agent, LogsAgent::Disabled),
                 },
                 retention_days: spec.retention_days,
                 metrics: InstanceMetrics {
@@ -118,6 +119,21 @@ mod tests {
     fn topology_default_reaches_the_instance_settings_as_ha() {
         let settings = InstanceSpec::from(&sift(None)).settings;
         assert_eq!(settings.topology, InstanceTopology::Ha);
+    }
+
+    #[test]
+    fn logs_agent_defaults_to_enabled_and_disabled_converts() {
+        let plain = InstanceSpec::from(&sift(None)).settings;
+        assert!(plain.logs.agent_enabled);
+
+        let spec: SiftSpec = serde_json::from_value(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls",
+            "logs": {"agent": "disabled"}
+        }))
+        .unwrap();
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert!(!settings.logs.agent_enabled);
     }
 
     #[test]

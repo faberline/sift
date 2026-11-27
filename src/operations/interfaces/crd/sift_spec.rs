@@ -93,6 +93,14 @@ pub struct BackupSpec {
     pub admin_token_secret: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LogsAgent {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LogsSpec {
@@ -101,6 +109,9 @@ pub struct LogsSpec {
     pub namespaces: Vec<String>,
     /// Collect logs only from Pods that carry this label (`key=value`). Empty means every Pod of the listed namespaces.
     pub pod_label: Option<String>,
+    /// `enabled` runs the log and metrics agents. `disabled` runs no agent, for
+    /// logs, metrics and traces that arrive by OTLP.
+    pub agent: LogsAgent,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -270,6 +281,11 @@ mod tests {
             spec.logs.pod_label,
             Some("sift.axiom.dev/logs=true".to_string())
         );
+    }
+
+    #[test]
+    fn logs_agent_default_is_enabled() {
+        assert_eq!(spec_with("").unwrap().logs.agent, super::LogsAgent::Enabled);
     }
 
     #[test]
