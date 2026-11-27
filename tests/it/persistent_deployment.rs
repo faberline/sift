@@ -7,6 +7,22 @@ use service_k8s::ManagedService;
 use sift::operations::Sift;
 
 fn sift_resource() -> Sift {
+    sift_resource_with(json!({}))
+}
+
+/// The test Sift resource with the keys of `extra` merged into its spec.
+fn sift_resource_with(extra: Value) -> Sift {
+    let mut spec = json!({
+        "image": "example.invalid/sift:test",
+        "peerTlsSecret": "sift-peer-tls",
+        "dataSize": "10Gi",
+        "auth": "off"
+    });
+    if let (Some(spec), Some(extra)) = (spec.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            spec.insert(key.clone(), value.clone());
+        }
+    }
     serde_json::from_value(json!({
         "apiVersion": "sift.axiom.dev/v1alpha1",
         "kind": "Sift",
@@ -15,14 +31,54 @@ fn sift_resource() -> Sift {
             "namespace": "observability",
             "uid": "sift-owner-uid"
         },
-        "spec": {
-            "image": "example.invalid/sift:test",
-            "peerTlsSecret": "sift-peer-tls",
-            "dataSize": "10Gi",
-            "auth": "off"
-        }
+        "spec": spec
     }))
     .expect("decode Sift resource")
+}
+
+/// The five workloads that run the data-root init container, with their kinds.
+const INIT_CONTAINER_WORKLOADS: [(&str, &str); 5] = [
+    ("StatefulSet", "events-store"),
+    ("StatefulSet", "events-control"),
+    ("Deployment", "events-gateway"),
+    ("Deployment", "events-query"),
+    ("DaemonSet", "events-agent"),
+];
+
+const DEFAULT_INIT_IMAGE: &str =
+    "busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
+const OVERRIDE_INIT_IMAGE: &str = "registry.example.invalid/mirror/busybox@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+#[test]
+fn default_init_containers_pin_busybox_by_digest() {
+    let objects = sift_resource().render();
+
+    for (kind, name) in INIT_CONTAINER_WORKLOADS {
+        assert_eq!(
+            object(&objects, kind, name)["spec"]["template"]["spec"]["initContainers"][0]["image"],
+            DEFAULT_INIT_IMAGE,
+            "{kind} {name} must pin the init image by digest"
+        );
+    }
+}
+
+#[test]
+fn init_image_overrides_every_init_container() {
+    let objects = sift_resource_with(json!({ "initImage": OVERRIDE_INIT_IMAGE })).render();
+
+    for (kind, name) in INIT_CONTAINER_WORKLOADS {
+        assert_eq!(
+            object(&objects, kind, name)["spec"]["template"]["spec"]["initContainers"][0]["image"],
+            OVERRIDE_INIT_IMAGE,
+            "{kind} {name} must use spec.initImage"
+        );
+    }
+}
+
+#[test]
+fn spec_without_init_image_decodes() {
+    let sift = sift_resource();
+    assert!(sift.spec.init_image.is_none());
 }
 
 fn object<'a>(objects: &'a [Value], kind: &str, name: &str) -> &'a Value {

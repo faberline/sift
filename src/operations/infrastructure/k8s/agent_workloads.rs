@@ -6,7 +6,7 @@ use service_k8s::render::{self, RenderCtx};
 
 use crate::operations::domain::instance_names::{AGENT_COMPONENT, HTTP_PORT};
 use crate::operations::infrastructure::k8s::role_workloads::{
-    role_extra_labels, role_name, role_selector_labels, tolerations_json,
+    init_image, role_extra_labels, role_name, role_selector_labels, tolerations_json,
 };
 use crate::shared_kernel::instance_spec::{InstanceAuth as AuthMode, InstanceSettings as SiftSpec};
 
@@ -73,7 +73,7 @@ pub(super) fn agent_daemon_set_plan(cx: &RenderCtx<'_>, spec: &SiftSpec) -> rend
     )
     .with_init_containers(vec![json!({
         "name":"prepare-data-root",
-        "image":"busybox:1.36.1",
+        "image": init_image(spec),
         "command":["sh","-ec"],
         "args":["mkdir -p /var/lib/sift/agent && chown -R 65532:65532 /var/lib/sift && chmod 0700 /var/lib/sift /var/lib/sift/agent"],
         "volumeMounts":[{"name":"data","mountPath":"/var/lib/sift"}],

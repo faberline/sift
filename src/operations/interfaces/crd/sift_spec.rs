@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct SiftSpec {
     pub image: String,
+    /// Image of the init containers that prepare the data root. Empty means the pinned default busybox image.
+    #[serde(default)]
+    pub init_image: Option<String>,
     /// Secret with tls.crt, tls.key, and ca.crt for the dedicated Raft port.
     pub peer_tls_secret: String,
     #[serde(default = "three")]
