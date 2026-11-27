@@ -46,6 +46,8 @@ pub struct SiftSpec {
     #[serde(default)]
     pub placement: PlacementSpec,
     #[serde(default)]
+    pub resources: ResourcesSpec,
+    #[serde(default)]
     pub auth: AuthMode,
     #[serde(default)]
     pub topology: Topology,
@@ -125,6 +127,38 @@ pub struct MetricsSpec {
     /// Kubernetes namespaces whose Pods the metrics agent scrapes.
     /// Empty means the namespace of the Sift instance only.
     pub namespaces: Vec<String>,
+}
+
+/// Compute requests and limits of the Sift pods. The keys are `cpu` and `memory`.
+/// Empty `requests` means the default `cpu: 100m`, `memory: 256Mi`.
+/// Empty `limits` means no limits.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ResourcesSpec {
+    /// Requests of every role. Keys are `cpu` and `memory`.
+    pub requests: BTreeMap<String, String>,
+    /// Limits of every role. Keys are `cpu` and `memory`.
+    pub limits: BTreeMap<String, String>,
+    /// Values for the `all` role group. Overrides the common values.
+    pub all: Option<RoleResourcesSpec>,
+    /// Values for the `store` role. Overrides the common values.
+    pub store: Option<RoleResourcesSpec>,
+    /// Values for the `control` role. Overrides the common values.
+    pub control: Option<RoleResourcesSpec>,
+    /// Values for the `gateway` role. Overrides the common values.
+    pub gateway: Option<RoleResourcesSpec>,
+    /// Values for the `query` role. Overrides the common values.
+    pub query: Option<RoleResourcesSpec>,
+}
+
+/// Requests or limits of one role. A set field, even an empty one, replaces the common value.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RoleResourcesSpec {
+    /// Requests of this role. Replaces the common requests when set.
+    pub requests: Option<BTreeMap<String, String>>,
+    /// Limits of this role. Replaces the common limits when set.
+    pub limits: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -327,6 +361,27 @@ mod tests {
     fn metrics_namespaces_are_read() {
         let spec = spec_with(r#""metrics":{"namespaces":["team-a","team-b"]}"#).unwrap();
         assert_eq!(spec.metrics.namespaces, ["team-a", "team-b"]);
+    }
+
+    #[test]
+    fn resources_default_is_empty() {
+        let spec = spec_with("").unwrap();
+        assert!(spec.resources.requests.is_empty());
+        assert!(spec.resources.limits.is_empty());
+        assert!(spec.resources.store.is_none());
+    }
+
+    #[test]
+    fn resources_are_read() {
+        let spec = spec_with(
+            r#""resources":{"requests":{"cpu":"2","memory":"10Gi"},"limits":{"memory":"12Gi"},"store":{"limits":{"memory":"16Gi"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.resources.requests["memory"], "10Gi");
+        assert_eq!(spec.resources.limits["memory"], "12Gi");
+        let store = spec.resources.store.unwrap();
+        assert_eq!(store.limits.as_ref().unwrap()["memory"], "16Gi");
+        assert!(store.requests.is_none());
     }
 
     #[test]
