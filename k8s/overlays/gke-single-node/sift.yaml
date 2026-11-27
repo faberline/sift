@@ -1,23 +1,13 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: sift-peer-tls
-type: Opaque
-stringData:
-  unused: single-node-has-no-peer
----
 apiVersion: sift.axiom.dev/v1alpha1
 kind: Sift
 metadata:
   name: sift
 spec:
   image: sift
-  peerTlsSecret: sift-peer-tls
   topology: singleNode
   auth: "off"
-  gcpProjectId: not-used
-  gkeClusterName: not-used
-  gkeLocation: not-used
+  logs:
+    agent: disabled
   placement:
     nodeSelector:
       faberline.dev/pool: sift-server

@@ -217,3 +217,37 @@ fn crd_schema_lists_tolerations_and_storage_class() {
         "string"
     );
 }
+
+fn crd_spec_schema() -> serde_json::Value {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"].clone()
+}
+
+#[test]
+fn crd_schema_requires_only_the_image() {
+    let spec = crd_spec_schema();
+    assert_eq!(spec["required"], serde_json::json!(["image"]));
+}
+
+#[test]
+fn crd_schema_has_the_conditional_cel_rules() {
+    let spec = crd_spec_schema();
+    let rules = spec["x-kubernetes-validations"]
+        .as_array()
+        .expect("spec must carry x-kubernetes-validations");
+    assert_eq!(rules.len(), 2, "two conditional rules: {rules:?}");
+    assert_eq!(
+        rules[0]["rule"],
+        "(has(self.topology) && self.topology == 'singleNode') || (has(self.peerTlsSecret) && size(self.peerTlsSecret) > 0)"
+    );
+    assert_eq!(
+        rules[1]["rule"],
+        "(has(self.logs) && has(self.logs.agent) && self.logs.agent == 'disabled') || (has(self.gcpProjectId) && has(self.gkeClusterName) && has(self.gkeLocation))"
+    );
+    for rule in rules {
+        assert!(
+            rule["message"].as_str().is_some_and(|m| !m.is_empty()),
+            "each rule needs a message: {rule:?}"
+        );
+    }
+}
