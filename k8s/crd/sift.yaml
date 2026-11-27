@@ -20,7 +20,12 @@ spec:
           properties:
             spec:
               type: object
-              required: [image, peerTlsSecret, gcpProjectId, gkeClusterName, gkeLocation]
+              required: [image]
+              x-kubernetes-validations:
+                - rule: "(has(self.topology) && self.topology == 'singleNode') || (has(self.peerTlsSecret) && size(self.peerTlsSecret) > 0)"
+                  message: "spec.peerTlsSecret is required when spec.topology is ha"
+                - rule: "(has(self.logs) && has(self.logs.agent) && self.logs.agent == 'disabled') || (has(self.gcpProjectId) && has(self.gkeClusterName) && has(self.gkeLocation))"
+                  message: "spec.gcpProjectId, spec.gkeClusterName and spec.gkeLocation are required while the log agent is enabled (spec.logs.agent)"
               properties:
                 image: { type: string }
                 initImage: { type: string, minLength: 1 }
