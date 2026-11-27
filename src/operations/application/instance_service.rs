@@ -13,19 +13,57 @@ use service_k8s::{ReadinessTarget, ReadyFacts};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// The operator environment variable that says the auth-delegator
+/// `ClusterRoleBinding` is created by hand, so the operator must not render it.
+pub(crate) const PRECREATED_AUTH_DELEGATOR_ENV: &str = "SIFT_OPERATOR_PRECREATED_AUTH_DELEGATOR";
+
+/// True only for the exact value `true`. Any other value keeps the default.
+pub(crate) fn precreated_auth_delegator_from(value: Option<&str>) -> bool {
+    value == Some("true")
+}
+
 pub(crate) struct InstanceService {
     renderer: Arc<dyn InstanceRenderer<Client = kube::Client, Error = anyhow::Error>>,
+    precreated_auth_delegator: bool,
 }
 
 impl InstanceService {
     pub(crate) fn new(
         renderer: Arc<dyn InstanceRenderer<Client = kube::Client, Error = anyhow::Error>>,
     ) -> Self {
-        Self { renderer }
+        Self {
+            renderer,
+            precreated_auth_delegator: false,
+        }
+    }
+
+    pub(crate) fn with_precreated_auth_delegator(mut self, on: bool) -> Self {
+        self.precreated_auth_delegator = on;
+        self
+    }
+
+    /// Removes the auth-delegator binding of `instance` from `children` when
+    /// the binding is precreated.
+    fn without_auth_delegator(&self, instance: &InstanceSpec, children: Vec<Value>) -> Vec<Value> {
+        if !self.precreated_auth_delegator {
+            return children;
+        }
+        let binding_name = format!(
+            "sift.{}.{}.auth-delegator",
+            instance.namespace, instance.name
+        );
+        children
+            .into_iter()
+            .filter(|child| {
+                !(child["kind"] == "ClusterRoleBinding"
+                    && child["metadata"]["name"] == binding_name)
+            })
+            .collect()
     }
 
     pub(crate) fn render(&self, instance: &InstanceSpec) -> Vec<Value> {
-        self.renderer.render(instance, &[], &[])
+        let children = self.renderer.render(instance, &[], &[]);
+        self.without_auth_delegator(instance, children)
     }
 
     pub(crate) async fn reconcile_plan(
@@ -36,6 +74,7 @@ impl InstanceService {
         // The metrics agent lists Kubernetes Pods in every auth mode.
         let (api_cidrs, api_ports) = self.renderer.discover_api_endpoint(client.clone()).await?;
         let children = self.renderer.render(instance, &api_cidrs, &api_ports);
+        let children = self.without_auth_delegator(instance, children);
         // Only a GCS destination or an alerting host list renders an FQDN policy.
         if children
             .iter()
@@ -242,10 +281,16 @@ impl InstanceService {
             .collect()
     }
 
+    // With the precreated mode the operator lists no cluster-scoped child. A
+    // Sift object that the operator made before the mode was switched on keeps
+    // its old cluster-children finalizer and its old binding; the admin removes both.
     pub(crate) fn cluster_scoped_children(
         &self,
         instance: &InstanceSpec,
     ) -> Vec<service_k8s::service::ClusterScopedChild> {
+        if self.precreated_auth_delegator {
+            return Vec::new();
+        }
         let Some(uid) = instance.uid.as_deref() else {
             return Vec::new();
         };
