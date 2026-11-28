@@ -1375,6 +1375,36 @@ fn metrics_namespace_list_adds_no_role_or_binding() {
     assert_eq!(listed_access, default_access);
 }
 
+fn sift_resource_with_spec(extra: Value) -> Sift {
+    let mut value = json!({
+        "apiVersion": "sift.axiom.dev/v1alpha1",
+        "kind": "Sift",
+        "metadata": {
+            "name": "events",
+            "namespace": "observability",
+            "uid": "sift-owner-uid",
+            "generation": 7
+        },
+        "spec": {
+            "image": "example.invalid/sift:gke-test",
+            "peerTlsSecret": "sift-peer-tls",
+            "replicasPerShard": 3,
+            "voterCount": 3,
+            "dataSize": "1Gi",
+            "auth": "kubernetes"
+        }
+    });
+    value["spec"]
+        .as_object_mut()
+        .expect("spec is an object")
+        .extend(extra.as_object().expect("extra is an object").clone());
+    serde_json::from_value(value).expect("decode Sift resource with extra spec")
+}
+
+fn container_resources<'a>(objects: &'a [Value], kind: &str, name: &str) -> &'a Value {
+    &object(objects, kind, name)["spec"]["template"]["spec"]["containers"][0]["resources"]
+}
+
 fn single_node_resource(auth: &str, extra: Value) -> Sift {
     let mut spec = json!({
         "image": "example.invalid/sift:gke-test",
@@ -2054,6 +2084,86 @@ fn single_node_pod_has_no_init_container() {
     )
     .render();
     let stateful_set = object(&overridden, "StatefulSet", "events-all");
+    assert!(stateful_set["spec"]["template"]["spec"]
+        .get("initContainers")
+        .is_none());
+}
+
+#[test]
+fn role_resources_default_is_unchanged() {
+    let default = json!({"requests":{"cpu":"100m","memory":"256Mi"}});
+
+    let objects = single_node_resource("off", json!({})).render();
+    assert_eq!(
+        container_resources(&objects, "StatefulSet", "events-all"),
+        &default
+    );
+
+    let objects = sift_resource(3, 3).render();
+    assert_eq!(
+        container_resources(&objects, "Deployment", "events-gateway"),
+        &default
+    );
+    assert_eq!(
+        container_resources(&objects, "StatefulSet", "events-store"),
+        &default
+    );
+}
+
+#[test]
+fn single_node_resources_are_rendered() {
+    let objects = single_node_resource(
+        "off",
+        json!({"resources": {"requests": {"cpu": "2", "memory": "10Gi"}, "limits": {"memory": "12Gi"}}}),
+    )
+    .render();
+    assert_eq!(
+        container_resources(&objects, "StatefulSet", "events-all"),
+        &json!({"requests":{"cpu":"2","memory":"10Gi"},"limits":{"memory":"12Gi"}})
+    );
+}
+
+#[test]
+fn ha_role_resources_override_the_common_value() {
+    let objects = sift_resource_with_spec(json!({"resources": {
+        "requests": {"memory": "1Gi"},
+        "limits": {"memory": "2Gi"},
+        "store": {"limits": {"memory": "16Gi"}}
+    }}))
+    .render();
+    assert_eq!(
+        container_resources(&objects, "StatefulSet", "events-store"),
+        &json!({"requests":{"memory":"1Gi"},"limits":{"memory":"16Gi"}})
+    );
+    assert_eq!(
+        container_resources(&objects, "Deployment", "events-gateway"),
+        &json!({"requests":{"memory":"1Gi"},"limits":{"memory":"2Gi"}})
+    );
+
+    let objects = sift_resource_with_spec(json!({"resources": {
+        "requests": {"memory": "1Gi"},
+        "control": {"requests": {}}
+    }}))
+    .render();
+    assert_eq!(
+        container_resources(&objects, "StatefulSet", "events-control"),
+        &json!({"requests":{}})
+    );
+}
+
+#[test]
+fn resources_do_not_reach_the_agent_or_init_containers() {
+    let objects =
+        single_node_resource("off", json!({"resources": {"limits": {"memory": "2Gi"}}})).render();
+    assert_eq!(
+        container_resources(&objects, "DaemonSet", "events-agent"),
+        &json!({"requests":{"cpu":"25m","memory":"64Mi"},"limits":{"cpu":"500m","memory":"256Mi"}})
+    );
+    let agent = object(&objects, "DaemonSet", "events-agent");
+    let init = &agent["spec"]["template"]["spec"]["initContainers"][0];
+    assert_eq!(init["name"], "prepare-data-root");
+    assert!(init.get("resources").is_none());
+    let stateful_set = object(&objects, "StatefulSet", "events-all");
     assert!(stateful_set["spec"]["template"]["spec"]
         .get("initContainers")
         .is_none());

@@ -24,8 +24,6 @@ pub(crate) struct InstanceSettings {
     pub storage: InstanceStorage,
     pub ingest: InstanceIngest,
     pub placement: InstancePlacement,
-    // Read by the render in the next child of #377. Until then it is parsed only.
-    #[allow(dead_code)]
     pub resources: InstanceResources,
     pub auth: InstanceAuth,
     pub topology: InstanceTopology,
@@ -41,8 +39,6 @@ pub(crate) struct InstanceSettings {
 }
 
 /// Compute requests and limits of the Sift pods, as the CR sets them.
-// Read by the render in the next child of #377. Until then it is parsed only.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub(crate) struct InstanceResources {
     pub requests: BTreeMap<String, String>,
@@ -53,8 +49,6 @@ pub(crate) struct InstanceResources {
 }
 
 /// Requests or limits of one role. `None` means the common value applies.
-// Read by the render in the next child of #377. Until then it is parsed only.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub(crate) struct InstanceRoleResources {
     pub requests: Option<BTreeMap<String, String>>,
