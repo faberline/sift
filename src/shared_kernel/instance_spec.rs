@@ -31,6 +31,9 @@ pub(crate) struct InstanceSettings {
     pub retention_days: u32,
     pub metrics: InstanceMetrics,
     pub tokens_secret: Option<String>,
+    // Read by the render in the next child of #432. Until then it is parsed only.
+    #[allow(dead_code)]
+    pub image_pull_secrets: Vec<String>,
     pub backup: Option<InstanceBackup>,
     pub alerting: InstanceAlerting,
     pub gcp_project_id: String,
