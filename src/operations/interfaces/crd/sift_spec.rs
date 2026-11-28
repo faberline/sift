@@ -60,6 +60,9 @@ pub struct SiftSpec {
     pub metrics: MetricsSpec,
     #[serde(default)]
     pub tokens_secret: Option<String>,
+    /// Names of Secrets in the instance namespace that the kubelet uses to pull the images of every pod the operator makes. Empty means no pull secret.
+    #[serde(default)]
+    pub image_pull_secrets: Vec<String>,
     #[serde(default)]
     pub backup: Option<BackupSpec>,
     #[serde(default)]
@@ -291,6 +294,17 @@ mod tests {
         }
         json.push('}');
         serde_json::from_str(&json)
+    }
+
+    #[test]
+    fn image_pull_secrets_default_is_empty() {
+        assert!(spec_with("").unwrap().image_pull_secrets.is_empty());
+    }
+
+    #[test]
+    fn image_pull_secrets_are_read() {
+        let spec = spec_with(r#""imagePullSecrets":["ghcr-pull","other"]"#).unwrap();
+        assert_eq!(spec.image_pull_secrets, ["ghcr-pull", "other"]);
     }
 
     #[test]

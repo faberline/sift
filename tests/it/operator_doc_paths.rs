@@ -33,3 +33,19 @@ fn operator_docs_define_the_work_directory_variable() {
         );
     }
 }
+
+#[test]
+fn resources_field_is_documented() {
+    for path in ["docs/operations/configuration.md", "docs/single-node-v1.md"] {
+        let text = read(path);
+        assert!(
+            text.contains("spec.resources"),
+            "{path} does not mention spec.resources"
+        );
+    }
+    let reference = read("docs/operations/configuration.md");
+    assert!(
+        reference.contains("The log and metrics agents do not use it."),
+        "the reference does not say that the agents ignore spec.resources"
+    );
+}

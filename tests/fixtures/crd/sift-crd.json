@@ -47,6 +47,15 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "imagePullSecrets": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    }
+                  },
                   "peerTlsSecret": {
                     "type": "string",
                     "minLength": 1

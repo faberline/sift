@@ -100,6 +100,7 @@ impl From<&Sift> for InstanceSpec {
                     namespaces: spec.metrics.namespaces.clone(),
                 },
                 tokens_secret: spec.tokens_secret.clone(),
+                image_pull_secrets: spec.image_pull_secrets.clone(),
                 alerting: InstanceAlerting {
                     webhook_secret: spec.alerting.webhook_secret.clone(),
                     allowed_hosts: spec.alerting.allowed_hosts.clone(),
@@ -235,5 +236,17 @@ mod tests {
         assert_eq!(settings.placement.tolerations.len(), 1);
         assert_eq!(settings.placement.tolerations[0].key, Some("k".to_string()));
         assert_eq!(settings.storage.storage_class, "dynamic-rwo");
+    }
+
+    #[test]
+    fn image_pull_secrets_reach_the_instance_settings() {
+        let spec: SiftSpec = serde_json::from_value(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls",
+            "imagePullSecrets": ["ghcr-pull"]
+        }))
+        .unwrap();
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(settings.image_pull_secrets, ["ghcr-pull"]);
     }
 }

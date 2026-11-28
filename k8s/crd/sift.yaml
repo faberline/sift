@@ -29,6 +29,7 @@ spec:
               properties:
                 image: { type: string }
                 initImage: { type: string, minLength: 1 }
+                imagePullSecrets: { type: array, maxItems: 16, items: { type: string, minLength: 1, maxLength: 253 } }
                 peerTlsSecret: { type: string, minLength: 1 }
                 # Phase one uses one fixed three-voter Raft group per shard.
                 # Live membership changes are intentionally not admitted.

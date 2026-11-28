@@ -127,6 +127,16 @@ fn crd_schema_lists_init_image() {
 }
 
 #[test]
+fn crd_schema_lists_image_pull_secrets() {
+    let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
+    let pull_secrets = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+        ["spec"]["properties"]["imagePullSecrets"];
+    assert_eq!(pull_secrets["type"], "array", "{pull_secrets}");
+    assert_eq!(pull_secrets["items"]["type"], "string", "{pull_secrets}");
+    assert_eq!(pull_secrets["maxItems"], 16, "{pull_secrets}");
+}
+
+#[test]
 fn crd_schema_lists_log_pod_label() {
     let value = crd_value(&std::fs::read_to_string(CRD_FILE).unwrap());
     let pod_label = &value["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]

@@ -553,6 +553,7 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec` | object | no | none | Desired state of one Sift instance. |
 | `spec.image` | string | yes | none | Container image of the Sift instance. |
 | `spec.initImage` | string | no | `busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662` | Image of the init containers that prepare the data root of every role Pod and of the log agent Pod. Set it to a pinned image in your own registry when the cluster admits only pinned images or has no Docker Hub access. Must be at least one character. |
+| `spec.imagePullSecrets` | list of strings | no | empty | Names of Secrets in the instance namespace, of type `kubernetes.io/dockerconfigjson`. The operator adds them as `imagePullSecrets` to every pod template it makes. Empty adds nothing. |
 | `spec.peerTlsSecret` | string | ha only | none | Secret with the peer mTLS certificate, key and CA. Not used by `singleNode`. |
 | `spec.replicasPerShard` | integer | no | none | Replicas per shard. Fixed at 3 in this phase. |
 | `spec.topology` | string | no | `ha` | Instance topology: `ha` or `singleNode`. |
@@ -582,7 +583,7 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.placement` | object | no | none | Pod placement. |
 | `spec.placement.nodeSelector` | object | no | none | Node labels that the pods must match. |
 | `spec.placement.tolerations` | array | no | none | Tolerations of the role Pods (store, control, query, gateway and the single Pod). Each item has `key`, `operator` (`Exists` or `Equal`), `value`, `effect` (`NoSchedule`, `PreferNoSchedule` or `NoExecute`) and `tolerationSeconds`. The log and metrics agents do not use it. |
-| `spec.resources` | object | no | none | CPU and memory requests and limits of the role Pods. Keys are `cpu` and `memory`. |
+| `spec.resources` | object | no | none | CPU and memory requests and limits of the role containers. Keys are `cpu` and `memory`. The default is `requests` of `cpu: 100m` and `memory: 256Mi` and no limits. A role value replaces the common value. The log and metrics agents do not use it. |
 | `spec.resources.requests` | object | no | none | Requests of every role. Empty means the default `cpu: 100m` and `memory: 256Mi`. |
 | `spec.resources.requests.cpu` | string | no | none | CPU request of every role. |
 | `spec.resources.requests.memory` | string | no | none | Memory request of every role. |
