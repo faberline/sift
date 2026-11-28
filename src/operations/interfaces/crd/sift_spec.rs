@@ -256,6 +256,8 @@ pub struct SiftStatus {
     pub backpressure: String,
     pub last_data_error: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<service_k8s::Condition>,
 }
 
 fn three() -> u32 {

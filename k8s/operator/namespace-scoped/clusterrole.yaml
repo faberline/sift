@@ -2,11 +2,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: sift-operator
-# The auth-delegator `bind` rule and the `clusterrolebindings` rule are left
-# out on purpose. They are needed only while the operator creates the
+# The auth-delegator `bind` rule and any write on `clusterrolebindings` are
+# left out on purpose. They are needed only while the operator creates the
 # auth-delegator ClusterRoleBinding. The sibling issue "operator: skip the
 # auth-delegator ClusterRoleBinding" removes that need. Until it lands, set
 # the skip option, or the operator cannot create that binding in this mode.
+# The read rule at the end of `rules` is the only RBAC rule.
 rules:
   - apiGroups: ["sift.axiom.dev"]
     resources: ["sifts"]
@@ -30,3 +31,7 @@ rules:
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # Read only: the operator reports the AuthDelegatorBinding condition when the pre-created binding is missing.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings"]
+    verbs: ["get"]

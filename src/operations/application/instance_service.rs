@@ -88,6 +88,15 @@ impl InstanceService {
         ))
     }
 
+    // TDD stub: returns no fact until the condition is implemented.
+    pub(crate) fn conditions(
+        &self,
+        _instance: &InstanceSpec,
+        _context: &Value,
+    ) -> Vec<service_k8s::ConditionFact> {
+        Vec::new()
+    }
+
     pub(crate) fn readiness_targets(&self, instance: &InstanceSpec) -> Vec<ReadinessTarget> {
         let name = instance.name.clone();
         if instance.settings.topology == InstanceTopology::SingleNode {
