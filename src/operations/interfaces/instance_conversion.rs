@@ -100,6 +100,7 @@ impl From<&Sift> for InstanceSpec {
                     namespaces: spec.metrics.namespaces.clone(),
                 },
                 tokens_secret: spec.tokens_secret.clone(),
+                image_pull_secrets: spec.image_pull_secrets.clone(),
                 alerting: InstanceAlerting {
                     webhook_secret: spec.alerting.webhook_secret.clone(),
                     allowed_hosts: spec.alerting.allowed_hosts.clone(),

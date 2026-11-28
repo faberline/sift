@@ -60,6 +60,9 @@ pub struct SiftSpec {
     pub metrics: MetricsSpec,
     #[serde(default)]
     pub tokens_secret: Option<String>,
+    /// Names of Secrets in the instance namespace that the kubelet uses to pull the images of every pod the operator makes. Empty means no pull secret.
+    #[serde(default)]
+    pub image_pull_secrets: Vec<String>,
     #[serde(default)]
     pub backup: Option<BackupSpec>,
     #[serde(default)]
