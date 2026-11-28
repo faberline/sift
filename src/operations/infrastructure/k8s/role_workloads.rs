@@ -218,6 +218,25 @@ fn role_support_volumes(spec: &SiftSpec, role: &str) -> (Vec<Value>, Vec<Value>)
     (volumes, mounts)
 }
 
+fn role_resources_json(spec: &SiftSpec, role: &str) -> Value {
+    let overrides = spec.resources.roles.get(role);
+    let requests = match overrides.and_then(|role| role.requests.as_ref()) {
+        Some(set) => serde_json::to_value(set).expect("resource map is JSON"),
+        None if !spec.resources.requests.is_empty() => {
+            serde_json::to_value(&spec.resources.requests).expect("resource map is JSON")
+        }
+        None => json!({"cpu":"100m","memory":"256Mi"}),
+    };
+    let limits = overrides
+        .and_then(|role| role.limits.as_ref())
+        .unwrap_or(&spec.resources.limits);
+    let mut resources = json!({ "requests": requests });
+    if !limits.is_empty() {
+        resources["limits"] = serde_json::to_value(limits).expect("resource map is JSON");
+    }
+    resources
+}
+
 fn role_container_plan(
     cx: &RenderCtx<'_>,
     spec: &SiftSpec,
@@ -247,7 +266,7 @@ fn role_container_plan(
     container.env = role_env(cx, spec, role);
     container.volume_mounts = mounts;
     container.security_context = Some(container_security_context());
-    container.resources = Some(json!({"requests":{"cpu":"100m","memory":"256Mi"}}));
+    container.resources = Some(role_resources_json(spec, role));
     container.readiness_probe = Some(
         json!({"httpGet":{"path":"/readyz","port":"http"},"periodSeconds":5,"timeoutSeconds":3,"failureThreshold":60}),
     );
