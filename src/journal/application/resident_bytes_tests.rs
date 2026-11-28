@@ -6,12 +6,14 @@ use crate::shared_kernel::stored_event::StoredEvent;
 use crate::SignalKind;
 
 fn stored(cursor: u64, pad: usize) -> StoredEvent {
-    let mut event = crate::EventEnvelope::for_project(
+    let mut event = crate::EventEnvelope::for_project_at(
         "p",
         "prod",
         format!("e{cursor}"),
         SignalKind::Log,
         serde_json::json!({"message": "x".repeat(pad)}),
+        chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0)
+            .expect("fixed time stamp"),
     );
     event.resource =
         std::collections::BTreeMap::from([("service.name".to_string(), "svc".to_string())]);
@@ -105,4 +107,15 @@ fn evicted_event_leaves_the_cursor_map() {
     assert!(state
         .recent_cursors_by_event_id
         .contains_key(&("p".to_string(), "e4".to_string())));
+}
+
+#[test]
+fn stored_event_has_a_fixed_time_stamp() {
+    let first = stored(7, 1000);
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let second = stored(7, 1000);
+    assert_eq!(first.event.observed_at, "2023-11-14T22:13:20+00:00");
+    assert_eq!(first.event.occurred_at, "2023-11-14T22:13:20+00:00");
+    assert_eq!(first.acknowledged_at, "2023-11-14T22:13:20+00:00");
+    assert_eq!(resident_event_bytes(&first), resident_event_bytes(&second));
 }
