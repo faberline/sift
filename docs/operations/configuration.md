@@ -554,7 +554,9 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.image` | string | yes | none | Container image of the Sift instance. |
 | `spec.initImage` | string | no | `busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662` | Image of the init containers that prepare the data root of every role Pod and of the log agent Pod. Set it to a pinned image in your own registry when the cluster admits only pinned images or has no Docker Hub access. Must be at least one character. |
 | `spec.imagePullSecrets` | list of strings | no | empty | Names of Secrets in the instance namespace, of type `kubernetes.io/dockerconfigjson`. The operator adds them as `imagePullSecrets` to every pod template it makes. Empty adds nothing. |
-| `spec.peerTlsSecret` | string | ha only | none | Secret with the peer mTLS certificate, key and CA. Not used by `singleNode`. |
+| `spec.peerTlsSecret` | string | no | none | Secret with the peer mTLS certificate, key and CA. Required with `spec.topology` `ha` unless `spec.peerTlsSecretProviderClass` is set. Set at most one of the two. Not used by `singleNode`. |
+| `spec.peerTlsSecretProviderClass` | string | no | none | Name of a `SecretProviderClass` in the namespace of the instance that provides the peer mTLS certificate, key and CA through the Secrets Store CSI driver. Required with `spec.topology` `ha` unless `spec.peerTlsSecret` is set. Set at most one of the two. Must be at least one character. |
+| `spec.secretsCsiDriver` | string | no | `secrets-store.csi.k8s.io` | Name of the CSI driver that serves the `SecretProviderClass` objects of this instance. Must be at least one character. |
 | `spec.replicasPerShard` | integer | no | none | Replicas per shard. Fixed at 3 in this phase. |
 | `spec.topology` | string | no | `ha` | Instance topology: `ha` or `singleNode`. |
 | `spec.logs` | object | no | none | Log agent settings. |
@@ -627,8 +629,10 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.resources.query.limits.memory` | string | no | none | Memory limit of the `query` role. |
 | `spec.auth` | string | no | none | Authentication mode: `off`, `required` or `kubernetes`. Sets `SIFT_AUTH`. |
 | `spec.tokensSecret` | string | no | none | Secret with the token registry for `SIFT_AUTH=required`. |
+| `spec.tokensSecretProviderClass` | string | no | none | `SecretProviderClass` that provides the token registry for `SIFT_AUTH=required`. Set at most one of this and `spec.tokensSecret`. Must be at least one character. |
 | `spec.alerting` | object | no | none | Alert webhook settings. |
 | `spec.alerting.webhookSecret` | string | no | none | Secret with the webhook secret files. |
+| `spec.alerting.webhookSecretProviderClass` | string | no | none | `SecretProviderClass` that provides the webhook secret files. Set at most one of this and `spec.alerting.webhookSecret`. Must be at least one character. |
 | `spec.alerting.allowedHosts` | array | no | none | Hosts that alert webhooks may call. Sets `SIFT_WEBHOOK_ALLOWED_HOSTS`. |
 | `spec.gcpProjectId` | string | when logs.agent is enabled | none | GCP project of the GKE cluster. Used in the Kubernetes resource identity. Not needed when `spec.logs.agent` is `disabled`. |
 | `spec.gkeClusterName` | string | when logs.agent is enabled | none | GKE cluster name. Used in the Kubernetes resource identity. Not needed when `spec.logs.agent` is `disabled`. |
@@ -638,6 +642,7 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.backup.destination` | string | yes | none | Shared backup destination URI: `file://`, `s3://` or `gs://`. |
 | `spec.backup.retentionSecs` | integer | no | none | Seconds to keep backup objects. |
 | `spec.backup.adminTokenSecret` | string | no | none | Secret with the admin token of the backup job. |
+| `spec.backup.adminTokenSecretProviderClass` | string | no | none | `SecretProviderClass` that provides the admin token of the backup job. Set at most one of this and `spec.backup.adminTokenSecret`. Must be at least one character. |
 
 The operator renders two kinds of images: the Sift image from `spec.image` and the init image, which is pinned by digest unless `spec.initImage` is set.
 
