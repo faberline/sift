@@ -236,4 +236,16 @@ mod tests {
         assert_eq!(settings.placement.tolerations[0].key, Some("k".to_string()));
         assert_eq!(settings.storage.storage_class, "dynamic-rwo");
     }
+
+    #[test]
+    fn image_pull_secrets_reach_the_instance_settings() {
+        let spec: SiftSpec = serde_json::from_value(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls",
+            "imagePullSecrets": ["ghcr-pull"]
+        }))
+        .unwrap();
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(settings.image_pull_secrets, ["ghcr-pull"]);
+    }
 }

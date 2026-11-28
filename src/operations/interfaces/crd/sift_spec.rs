@@ -292,6 +292,17 @@ mod tests {
     }
 
     #[test]
+    fn image_pull_secrets_default_is_empty() {
+        assert!(spec_with("").unwrap().image_pull_secrets.is_empty());
+    }
+
+    #[test]
+    fn image_pull_secrets_are_read() {
+        let spec = spec_with(r#""imagePullSecrets":["ghcr-pull","other"]"#).unwrap();
+        assert_eq!(spec.image_pull_secrets, ["ghcr-pull", "other"]);
+    }
+
+    #[test]
     fn peer_tls_secret_is_optional_for_single_node() {
         let spec = spec_without_peer(r#""topology":"singleNode""#).unwrap();
         assert_eq!(spec.topology, Topology::SingleNode);
