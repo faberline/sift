@@ -59,6 +59,65 @@ must cover every pod name below both headless Services:
 
 Sift refuses replicated startup when mutual TLS is off or any file is absent.
 
+### cert-manager Certificate
+
+This example issues the three keys into the Secret that `spec.peerTlsSecret`
+names. Set `spec.secretName` to the same name. Its `dnsNames` are the six pod
+names from the block above, in the namespace of the instance. `usages` holds
+both `server auth` and `client auth`, because the peer link uses mutual TLS.
+A CA issuer (an `Issuer` of type `ca`) makes the Secret hold `ca.crt` next to
+`tls.crt` and `tls.key`. The `Issuer` is not part of this example; create it
+in the same namespace.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sift-peer-tls
+  namespace: observability
+spec:
+  secretName: sift-peer-tls
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - sift-store-0.sift-store-headless.observability.svc
+    - sift-store-1.sift-store-headless.observability.svc
+    - sift-store-2.sift-store-headless.observability.svc
+    - sift-control-0.sift-control-headless.observability.svc
+    - sift-control-1.sift-control-headless.observability.svc
+    - sift-control-2.sift-control-headless.observability.svc
+  issuerRef:
+    name: sift-peer-ca
+    kind: Issuer
+```
+
+### Rotation
+
+A running pod reloads the peer TLS files without a restart. The reload is
+`spawn_peer_tls_reload` in `src/app/peer_tls_reload.rs`. A replicated process
+starts it from `src/app/service_state.rs`. The process reads `tls.crt`,
+`tls.key` and `ca.crt` every 30 seconds (`PEER_TLS_RELOAD_INTERVAL`). It
+reloads the transport only when the content of one of the files changed.
+A file that cannot be read, or a reload that fails, keeps the previous
+certificate and logs a warning. The process tries again only when the content
+changes. The test `peer_tls_rotation_keeps_requests_ok_and_uses_the_new_certificate`
+in `src/app/peer_tls_reload/tests.rs` proves that requests keep working and
+that the new certificate is used.
+
+The kubelet refreshes a mounted Secret on its own schedule. A new certificate
+therefore reaches a pod some time after cert-manager renews it.
+
+Sift does not prove that a `SecretProviderClass` (CSI) volume rotates. The
+reload reads the same three files from the mount. The CSI driver must refresh
+the mount. For the Secrets Store CSI driver, the cluster admin turns on its
+rotation feature.
+
 ## Kubernetes delegated authentication
 
 Set `spec.auth: kubernetes` to use TokenReview and SubjectAccessReview. The

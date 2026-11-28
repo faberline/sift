@@ -646,6 +646,43 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 
 The operator renders two kinds of images: the Sift image from `spec.image` and the init image, which is pinned by digest unless `spec.initImage` is set.
 
+### SecretProviderClass example (GKE)
+
+For the GKE add-on, set `spec.secretsCsiDriver` to `secrets-store-gke.csi.k8s.io`.
+The default driver is `secrets-store.csi.k8s.io`. Set at most one of a `Secret`
+field and its `...SecretProviderClass` field. The pairs are `peerTlsSecret`,
+`tokensSecret`, `alerting.webhookSecret` and `backup.adminTokenSecret`. The
+`SecretProviderClass` must be in the namespace of the instance. For peer TLS,
+the mounted files must be named `tls.crt`, `tls.key` and `ca.crt`.
+
+```yaml
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: sift-peer-tls
+  namespace: observability
+spec:
+  provider: gke
+  parameters:
+    secrets: |
+      - resourceName: "projects/EXAMPLE_PROJECT/secrets/sift-peer-tls-crt/versions/latest"
+        path: "tls.crt"
+      - resourceName: "projects/EXAMPLE_PROJECT/secrets/sift-peer-tls-key/versions/latest"
+        path: "tls.key"
+      - resourceName: "projects/EXAMPLE_PROJECT/secrets/sift-peer-tls-ca/versions/latest"
+        path: "ca.crt"
+```
+
+The matching `Sift` fragment is:
+
+```yaml
+spec:
+  secretsCsiDriver: secrets-store-gke.csi.k8s.io
+  peerTlsSecretProviderClass: sift-peer-tls
+```
+
+`EXAMPLE_PROJECT` is a placeholder. Replace it in your own cluster only.
+
 ### Status
 
 | Field | Type | Required | Default | Meaning |
