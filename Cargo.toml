@@ -10,7 +10,7 @@ description = "Sift — one SRE product for logs, metrics, and traces"
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-service-k8s = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
+service-k8s = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
 axum = { version = "0.8", features = ["ws"] }
 arrow-array = "59.2.0"
 arrow-schema = "59.2.0"
@@ -20,15 +20,15 @@ http-body = "=1.0.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "string", "env"] }
 crc32fast = "1"
-cli-std = { git = "https://github.com/faberline/core", tag = "v0.5.4", default-features = false, features = ["online", "k8s"] }
-openapi-codegen = { git = "https://github.com/faberline/core", tag = "v0.5.4", version = "0.5" }
+cli-std = { git = "https://github.com/faberline/core", tag = "v0.5.5", default-features = false, features = ["online", "k8s"] }
+openapi-codegen = { git = "https://github.com/faberline/core", tag = "v0.5.5", version = "0.5" }
 opentelemetry-proto = { version = "0.32", default-features = false, features = ["gen-tonic", "logs", "metrics", "trace"] }
 parquet = { version = "59.2.0", default-features = false, features = ["arrow", "snap"] }
 flate2 = "1"
 hex = "0.4"
 k8s-openapi = { version = "0.29", features = ["v1_35"] }
 kube = { version = "5.2", features = ["runtime", "derive", "client"] }
-index-text = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
+index-text = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
 prost = "0.13"
 prost14 = { package = "prost", version = "0.14" }
 promql-parser = "=0.11.0"
@@ -38,28 +38,28 @@ rmcp = { version = "3.1.4", features = ["server", "transport-io", "transport-str
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_yaml = "0.9"
-service-auth = { git = "https://github.com/faberline/core", tag = "v0.5.4", features = ["k8s"] }
-service-backup = { git = "https://github.com/faberline/core", tag = "v0.5.4", features = ["http-client"] }
-service-collector = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-service-executor = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-storage-durable = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-storage-object = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-storage-segment = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-service-http = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-service-mcp = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-metrics-prometheus = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-metrics-remote-write = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-service-observability = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-service-projection = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-server-lifecycle = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-raft-runtime = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
-peer-tls = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
+service-auth = { git = "https://github.com/faberline/core", tag = "v0.5.5", features = ["k8s"] }
+service-backup = { git = "https://github.com/faberline/core", tag = "v0.5.5", features = ["http-client"] }
+service-collector = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+service-executor = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+storage-durable = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+storage-object = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+storage-segment = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+service-http = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+service-mcp = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+metrics-prometheus = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+metrics-remote-write = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+service-observability = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+service-projection = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+server-lifecycle = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+raft-runtime = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
+peer-tls = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
 schemars = "1.2"
 sha2 = "0.10"
 tokio = { version = "1.40", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { version = "0.14", features = ["gzip"] }
-transport-otlp = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
+transport-otlp = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
 tower = "0.5"
 tracing = "0.1"
 thiserror = "2.0"
@@ -74,7 +74,7 @@ proptest = "1"
 vat = { git = "https://github.com/faberline/vat", rev = "1ba31b2f2ddc49bad1d85a03f889a164227667c9", default-features = false, features = ["emulator"] }
 
 [build-dependencies]
-build-stamp = { git = "https://github.com/faberline/core", tag = "v0.5.4" }
+build-stamp = { git = "https://github.com/faberline/core", tag = "v0.5.5" }
 
 [lints.clippy]
 mod_module_files = "deny"
