@@ -662,4 +662,5 @@ The operator renders two kinds of images: the Sift image from `spec.image` and t
 | `status.backpressure` | string | no | none | Backpressure state of ingest. |
 | `status.lastDataError` | string | no | none | Last data error. |
 | `status.message` | string | no | none | Human-readable status message. |
+| `status.conditions` | array | no | none | Conditions of the instance. `AuthDelegatorBinding` is set only when `SIFT_OPERATOR_PRECREATED_AUTH_DELEGATOR=true` and `auth: kubernetes`: `False` with `PrecreatedBindingMissing` when the pre-created ClusterRoleBinding is missing, `True` with `PrecreatedBindingFound` when it exists. |
 
