@@ -582,7 +582,7 @@ The `Sift` resource has a `spec` (desired state) and a `status` (observed state,
 | `spec.placement` | object | no | none | Pod placement. |
 | `spec.placement.nodeSelector` | object | no | none | Node labels that the pods must match. |
 | `spec.placement.tolerations` | array | no | none | Tolerations of the role Pods (store, control, query, gateway and the single Pod). Each item has `key`, `operator` (`Exists` or `Equal`), `value`, `effect` (`NoSchedule`, `PreferNoSchedule` or `NoExecute`) and `tolerationSeconds`. The log and metrics agents do not use it. |
-| `spec.resources` | object | no | none | CPU and memory requests and limits of the role Pods. Keys are `cpu` and `memory`. |
+| `spec.resources` | object | no | none | CPU and memory requests and limits of the role containers. Keys are `cpu` and `memory`. The default is `requests` of `cpu: 100m` and `memory: 256Mi` and no limits. A role value replaces the common value. The log and metrics agents do not use it. |
 | `spec.resources.requests` | object | no | none | Requests of every role. Empty means the default `cpu: 100m` and `memory: 256Mi`. |
 | `spec.resources.requests.cpu` | string | no | none | CPU request of every role. |
 | `spec.resources.requests.memory` | string | no | none | Memory request of every role. |

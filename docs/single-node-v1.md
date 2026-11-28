@@ -166,6 +166,8 @@ At 1000 items per second the RSS grew from 521433088 bytes at 30 s to 5347778560
 
 Give the Pod at least this memory at 1000 items per second: peak RSS x 1.3 = 9.7 GB. 1.3 is the 30 percent margin. This is the figure of one run on one machine shape. The memory limit of the Pod must be at least this figure.
 
+Set it with `spec.resources`: for example `spec.resources.all.limits.memory` and `spec.resources.all.requests.memory` (field reference: [operations/configuration.md](operations/configuration.md)). The default request is 256Mi and there is no limit.
+
 - Not measured: other rates, a run longer than 600 s, GKE, and the memory of a Pod that runs the log agent.
 - What holds the memory and why it does not go down: [single-node-memory.md](operations/single-node-memory.md).
 
