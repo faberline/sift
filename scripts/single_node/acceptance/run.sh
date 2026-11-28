@@ -19,7 +19,8 @@ selected="$(python3 -B "$here/phases.py" select --phases "$PHASES")"
 python3 -B "$here/phases.py" acceptance --phases "$PHASES" --evidence-dir "$EVIDENCE_DIR"
 
 # 1. The operator makes the ServiceAccount sift. Give it the pull secret, then
-#    delete a Pod that may have been made before the patch.
+#    delete every Pod that the operator made before the patch. A Pod gets the
+#    pull secret of its ServiceAccount only when it is created.
 deadline=$((SECONDS + 300))
 until kubectl -n "$NAMESPACE" get serviceaccount sift >/dev/null 2>&1; do
   if ((SECONDS >= deadline)); then
@@ -31,6 +32,7 @@ done
 kubectl -n "$NAMESPACE" patch serviceaccount sift --type merge \
   -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
 kubectl -n "$NAMESPACE" delete pod sift-all-0 --ignore-not-found
+kubectl -n "$NAMESPACE" delete pod -l app.kubernetes.io/instance=sift,app.kubernetes.io/managed-by=sift-operator --ignore-not-found
 
 # 2. Wait for the Pod to be Ready. Fail fast when the store PVC does not bind.
 deadline=$((SECONDS + 900))

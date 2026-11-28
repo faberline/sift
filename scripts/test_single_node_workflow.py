@@ -97,6 +97,17 @@ class SingleNodeWorkflowTest(unittest.TestCase):
         for name in ["kustomization.yaml", "sift.yaml", "images-config.yaml"]:
             self.assertNotIn("REPLACE_ME", self.read(f"{OVERLAY}/{name}"))
 
+    def test_setup_recreates_every_operator_pod_after_the_pull_secret_patch(self):
+        script = self.read("scripts/single_node/acceptance/run.sh")
+        patch = script.index("patch serviceaccount sift")
+        tail = script[patch:]
+        self.assertIn("delete pod sift-all-0", tail)
+        self.assertIn(
+            "delete pod -l app.kubernetes.io/instance=sift,"
+            "app.kubernetes.io/managed-by=sift-operator",
+            tail,
+        )
+
     def test_store_size_matches_cost_model(self):
         result = subprocess.run(
             [

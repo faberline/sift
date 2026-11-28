@@ -1523,6 +1523,40 @@ fn single_node_renders_one_all_role_statefulset() {
 }
 
 #[test]
+fn every_rendered_pod_template_uses_a_rendered_service_account() {
+    let cases = Vec::from([
+        single_node_resource("off", json!({})).render(),
+        single_node_resource("kubernetes", json!({})).render(),
+        sift_resource(3, 3).render(),
+        sift_resource_with_metrics(&["observability"]).render(),
+    ]);
+    for objects in cases {
+        let accounts: Vec<&str> = objects
+            .iter()
+            .filter(|object| object["kind"] == "ServiceAccount")
+            .filter_map(|object| object["metadata"]["name"].as_str())
+            .collect();
+        let mut pods = 0;
+        for workload in &objects {
+            let kind = workload["kind"].as_str().unwrap_or_default();
+            if !["Deployment", "StatefulSet", "DaemonSet"].contains(&kind) {
+                continue;
+            }
+            pods += 1;
+            let name = &workload["metadata"]["name"];
+            let account = workload["spec"]["template"]["spec"]["serviceAccountName"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name} has no serviceAccountName"));
+            assert!(
+                accounts.contains(&account),
+                "{name} uses {account}, which the operator does not render"
+            );
+        }
+        assert!(pods >= 1, "a case rendered no pod template");
+    }
+}
+
+#[test]
 fn single_node_container_env_has_no_peer_or_role_endpoints() {
     let objects = single_node_resource("off", json!({})).render();
     let stateful_set = object(&objects, "StatefulSet", "events-all");
