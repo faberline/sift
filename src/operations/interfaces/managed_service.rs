@@ -25,6 +25,17 @@ impl ManagedService for Sift {
         }
     }
 
+    fn conditions(&self, _ready: &ReadyFacts, context: &Value) -> Vec<service_k8s::ConditionFact> {
+        InstanceService::default().conditions(&self.into(), context)
+    }
+
+    fn observed_conditions(&self) -> Vec<service_k8s::Condition> {
+        self.status
+            .as_ref()
+            .map(|status| status.conditions.clone())
+            .unwrap_or_default()
+    }
+
     fn readiness_targets(&self) -> Vec<ReadinessTarget> {
         InstanceService::default().readiness_targets(&self.into())
     }
@@ -47,6 +58,7 @@ mod tests {
     use crate::operations::interfaces::crd::sift_spec::Sift;
     use crate::shared_kernel::instance_spec::InstanceSpec;
     use serde_json::json;
+    use service_k8s::{ConditionStatus, ManagedService};
 
     fn instance() -> InstanceSpec {
         let sift: Sift = serde_json::from_value(json!({
@@ -112,5 +124,82 @@ mod tests {
                 "{value:?} must not turn the mode on"
             );
         }
+    }
+
+    #[test]
+    fn missing_precreated_binding_sets_condition() {
+        let facts = InstanceService::default()
+            .conditions(&instance(), &json!({"authDelegatorBindingFound": false}));
+
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].type_, "AuthDelegatorBinding");
+        assert_eq!(facts[0].status, ConditionStatus::False);
+        assert_eq!(facts[0].reason, "PrecreatedBindingMissing");
+        assert!(
+            facts[0]
+                .message
+                .contains("sift.observability.events.auth-delegator"),
+            "the message names the binding: {:?}",
+            facts[0].message
+        );
+    }
+
+    #[test]
+    fn found_precreated_binding_sets_true_condition() {
+        let facts = InstanceService::default()
+            .conditions(&instance(), &json!({"authDelegatorBindingFound": true}));
+
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].type_, "AuthDelegatorBinding");
+        assert_eq!(facts[0].status, ConditionStatus::True);
+        assert_eq!(facts[0].reason, "PrecreatedBindingFound");
+    }
+
+    #[test]
+    fn no_condition_without_the_precreated_lookup() {
+        let facts = InstanceService::default().conditions(&instance(), &serde_json::Value::Null);
+
+        assert!(facts.is_empty(), "default mode writes no condition");
+    }
+
+    #[test]
+    fn sift_status_keeps_conditions_for_the_projection() {
+        let sift: Sift = serde_json::from_value(json!({
+            "apiVersion": "sift.axiom.dev/v1alpha1",
+            "kind": "Sift",
+            "metadata": {
+                "name": "events",
+                "namespace": "observability",
+                "uid": "sift-owner-uid",
+                "generation": 7
+            },
+            "spec": {
+                "image": "example.invalid/sift:test",
+                "peerTlsSecret": "sift-peer-tls",
+                "replicasPerShard": 3,
+                "voterCount": 3,
+                "dataSize": "1Gi",
+                "auth": "kubernetes"
+            },
+            "status": {
+                "conditions": [{
+                    "type": "AuthDelegatorBinding",
+                    "status": "False",
+                    "reason": "PrecreatedBindingMissing",
+                    "message": "m",
+                    "lastTransitionTime": "2026-01-01T00:00:00Z"
+                }]
+            }
+        }))
+        .expect("decode Sift resource");
+
+        let observed = ManagedService::observed_conditions(&sift);
+
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].type_, "AuthDelegatorBinding");
+        assert_eq!(observed[0].status, "False");
+        assert_eq!(observed[0].reason, "PrecreatedBindingMissing");
+        assert_eq!(observed[0].message, "m");
+        assert_eq!(observed[0].last_transition_time, "2026-01-01T00:00:00Z");
     }
 }

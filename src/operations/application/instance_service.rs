@@ -22,6 +22,14 @@ pub(crate) fn precreated_auth_delegator_from(value: Option<&str>) -> bool {
     value == Some("true")
 }
 
+/// The name of the auth-delegator `ClusterRoleBinding` of `instance`.
+fn auth_delegator_binding_name(instance: &InstanceSpec) -> String {
+    format!(
+        "sift.{}.{}.auth-delegator",
+        instance.namespace, instance.name
+    )
+}
+
 pub(crate) struct InstanceService {
     renderer: Arc<dyn InstanceRenderer<Client = kube::Client, Error = anyhow::Error>>,
     precreated_auth_delegator: bool,
@@ -48,10 +56,7 @@ impl InstanceService {
         if !self.precreated_auth_delegator {
             return children;
         }
-        let binding_name = format!(
-            "sift.{}.{}.auth-delegator",
-            instance.namespace, instance.name
-        );
+        let binding_name = auth_delegator_binding_name(instance);
         children
             .into_iter()
             .filter(|child| {
@@ -75,6 +80,20 @@ impl InstanceService {
         let (api_cidrs, api_ports) = self.renderer.discover_api_endpoint(client.clone()).await?;
         let children = self.renderer.render(instance, &api_cidrs, &api_ports);
         let children = self.without_auth_delegator(instance, children);
+        // Read the pre-created binding only when the operator is not creating it.
+        let context = if self.precreated_auth_delegator
+            && matches!(instance.settings.auth, AuthMode::Kubernetes)
+        {
+            let api =
+                kube::Api::<k8s_openapi::api::rbac::v1::ClusterRoleBinding>::all(client.clone());
+            let found = api
+                .get_opt(&auth_delegator_binding_name(instance))
+                .await?
+                .is_some();
+            json!({ "authDelegatorBindingFound": found })
+        } else {
+            Value::Null
+        };
         // Only a GCS destination or an alerting host list renders an FQDN policy.
         if children
             .iter()
@@ -82,10 +101,38 @@ impl InstanceService {
         {
             self.renderer.ensure_fqdn_support(client).await?;
         }
-        Ok(service_k8s::service::ReconcilePlan::new(
-            children,
-            Value::Null,
-        ))
+        Ok(service_k8s::service::ReconcilePlan::new(children, context))
+    }
+
+    /// Builds the `AuthDelegatorBinding` fact from the plan context. It does
+    /// no I/O: `reconcile_plan` reads the binding and puts the result in `context`.
+    /// When the mode is switched off later, `service-k8s` keeps the old
+    /// condition as it is, because a service that declares no facts keeps the
+    /// earlier conditions.
+    pub(crate) fn conditions(
+        &self,
+        instance: &InstanceSpec,
+        context: &Value,
+    ) -> Vec<service_k8s::ConditionFact> {
+        use service_k8s::{ConditionFact, ConditionStatus};
+        let name = auth_delegator_binding_name(instance);
+        match context["authDelegatorBindingFound"].as_bool() {
+            Some(false) => vec![ConditionFact::new(
+                "AuthDelegatorBinding",
+                ConditionStatus::False,
+                "PrecreatedBindingMissing",
+                format!(
+                    "ClusterRoleBinding {name} (role system:auth-delegator) does not exist; the cluster admin creates it before the Sift is ready"
+                ),
+            )],
+            Some(true) => vec![ConditionFact::new(
+                "AuthDelegatorBinding",
+                ConditionStatus::True,
+                "PrecreatedBindingFound",
+                format!("ClusterRoleBinding {name} exists"),
+            )],
+            None => Vec::new(),
+        }
     }
 
     pub(crate) fn readiness_targets(&self, instance: &InstanceSpec) -> Vec<ReadinessTarget> {

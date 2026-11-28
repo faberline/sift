@@ -58,21 +58,27 @@ fn namespace_scoped_cluster_role_has_no_rbac_write() {
 
     for rule in rules(file) {
         let groups = strings_of(&rule["apiGroups"]);
-        assert!(
-            !groups
-                .iter()
-                .any(|group| group == "rbac.authorization.k8s.io"),
-            "a rule grants RBAC objects cluster-wide: {rule:?}"
+        if !groups
+            .iter()
+            .any(|group| group == "rbac.authorization.k8s.io")
+        {
+            continue;
+        }
+        assert_eq!(groups, ["rbac.authorization.k8s.io"], "rule: {rule:?}");
+        assert_eq!(
+            strings_of(&rule["resources"]),
+            ["clusterrolebindings"],
+            "only the read of clusterrolebindings is allowed: {rule:?}"
+        );
+        assert_eq!(
+            strings_of(&rule["verbs"]),
+            ["get"],
+            "RBAC objects are read only: {rule:?}"
         );
     }
 
     let resources = granted_resources(file);
-    for refused in [
-        "clusterrolebindings",
-        "roles",
-        "rolebindings",
-        "clusterroles",
-    ] {
+    for refused in ["roles", "rolebindings", "clusterroles"] {
         assert!(
             !resources.iter().any(|resource| resource == refused),
             "{refused} must not be granted cluster-wide"
@@ -82,6 +88,17 @@ fn namespace_scoped_cluster_role_has_no_rbac_write() {
         resources.iter().any(|resource| resource == "sifts"),
         "the sift rule is present"
     );
+}
+
+#[test]
+fn namespace_scoped_cluster_role_reads_the_precreated_binding() {
+    let file = "k8s/operator/namespace-scoped/clusterrole.yaml";
+    let found = rules(file).into_iter().any(|rule| {
+        strings_of(&rule["apiGroups"]) == ["rbac.authorization.k8s.io"]
+            && strings_of(&rule["resources"]) == ["clusterrolebindings"]
+            && strings_of(&rule["verbs"]) == ["get"]
+    });
+    assert!(found, "the get rule on clusterrolebindings is missing");
 }
 
 #[test]
