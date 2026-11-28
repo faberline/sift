@@ -527,6 +527,12 @@ Variables are read at run time unless the row says otherwise. A name in backtick
 |---|---|---|---|
 | `SIFT_GOVERNANCE_POLICY_FILE` | `sift serve` (ingest) | none | File with the governance policy. |
 
+### Operator
+
+| Variable | Used by | Default | Meaning |
+|---|---|---|---|
+| `SIFT_OPERATOR_PRECREATED_AUTH_DELEGATOR` | `sift k8s operator run` | none | Only the exact value `true` stops the operator from rendering, creating or pruning the per-instance auth-delegator `ClusterRoleBinding` `sift.<namespace>.<name>.auth-delegator`; an admin creates it. Any other value keeps the default. |
+
 ### Build metadata
 
 | Variable | Used by | Default | Meaning |
