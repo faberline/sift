@@ -2203,4 +2203,78 @@ fn resources_do_not_reach_the_agent_or_init_containers() {
         .is_none());
 }
 
+fn pod_template_specs(objects: &[Value]) -> Vec<(String, &Value)> {
+    objects
+        .iter()
+        .filter_map(|object| {
+            let kind = object["kind"].as_str()?;
+            let name = object["metadata"]["name"].as_str()?;
+            let spec = match kind {
+                "StatefulSet" | "Deployment" | "DaemonSet" => &object["spec"]["template"]["spec"],
+                "CronJob" => &object["spec"]["jobTemplate"]["spec"]["template"]["spec"],
+                _ => return None,
+            };
+            Some((format!("{kind}/{name}"), spec))
+        })
+        .collect()
+}
+
+#[test]
+fn image_pull_secrets_reach_every_single_node_pod_template() {
+    let objects =
+        single_node_resource("off", json!({"imagePullSecrets": ["ghcr-pull", "other"]})).render();
+    let specs = pod_template_specs(&objects);
+    let mut names: Vec<&str> = specs.iter().map(|(name, _)| name.as_str()).collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["DaemonSet/events-agent", "StatefulSet/events-all"]
+    );
+    for (name, spec) in &specs {
+        assert_eq!(
+            spec["imagePullSecrets"],
+            json!([{"name": "ghcr-pull"}, {"name": "other"}]),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn image_pull_secrets_reach_every_ha_pod_template() {
+    let objects = sift_resource_with_spec(json!({
+        "imagePullSecrets": ["ghcr-pull"],
+        "backup": {"schedule": "*/5 * * * *", "destination": "gs://sift-acceptance/backups"}
+    }))
+    .render();
+    let specs = pod_template_specs(&objects);
+    let names: Vec<&str> = specs.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(specs.len(), 7, "pod templates: {names:?}");
+    assert!(names.contains(&"DaemonSet/events-agent-metrics"));
+    assert!(names.contains(&"CronJob/events-backup"));
+    for (name, spec) in &specs {
+        assert_eq!(
+            spec["imagePullSecrets"],
+            json!([{"name": "ghcr-pull"}]),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn image_pull_secrets_empty_or_absent_renders_the_same_as_today() {
+    let absent = single_node_resource("off", json!({})).render();
+    let empty = single_node_resource("off", json!({"imagePullSecrets": []})).render();
+    assert_eq!(absent, empty);
+    for (name, spec) in pod_template_specs(&absent) {
+        assert!(spec.get("imagePullSecrets").is_none(), "{name}");
+    }
+
+    let absent = sift_resource_with_spec(json!({})).render();
+    let empty = sift_resource_with_spec(json!({"imagePullSecrets": []})).render();
+    assert_eq!(absent, empty);
+    for (name, spec) in pod_template_specs(&absent) {
+        assert!(spec.get("imagePullSecrets").is_none(), "{name}");
+    }
+}
+
 // HANDWRITE-END

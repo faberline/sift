@@ -92,6 +92,7 @@ fn render_single_node(
         .render()
         .expect("Sift typed Kubernetes workload plan must be valid");
     apply_storage_class(&mut children, &instance.settings.storage.storage_class);
+    apply_image_pull_secrets(&mut children, &instance.settings.image_pull_secrets);
     children
 }
 
@@ -112,6 +113,29 @@ fn apply_storage_class(children: &mut [Value], class: &str) {
             }
             Some("PersistentVolumeClaim") => {
                 child["spec"]["storageClassName"] = json!(class);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Sets `imagePullSecrets` on every pod template. An empty list changes nothing.
+fn apply_image_pull_secrets(children: &mut [Value], secrets: &[String]) {
+    if secrets.is_empty() {
+        return;
+    }
+    let pull_secrets = json!(secrets
+        .iter()
+        .map(|name| json!({"name": name}))
+        .collect::<Vec<_>>());
+    for child in children.iter_mut() {
+        match child["kind"].as_str() {
+            Some("StatefulSet" | "Deployment" | "DaemonSet") => {
+                child["spec"]["template"]["spec"]["imagePullSecrets"] = pull_secrets.clone();
+            }
+            Some("CronJob") => {
+                child["spec"]["jobTemplate"]["spec"]["template"]["spec"]["imagePullSecrets"] =
+                    pull_secrets.clone();
             }
             _ => {}
         }
@@ -241,6 +265,7 @@ fn render_children(
         .expect("Sift typed Kubernetes workload plan must be valid");
     super::metrics_agent::append_metrics_agent(&mut children, &cx, &instance.settings);
     apply_storage_class(&mut children, &instance.settings.storage.storage_class);
+    apply_image_pull_secrets(&mut children, &instance.settings.image_pull_secrets);
     children
 }
 
