@@ -58,7 +58,10 @@ fn namespace_scoped_cluster_role_has_no_rbac_write() {
 
     for rule in rules(file) {
         let groups = strings_of(&rule["apiGroups"]);
-        if !groups.iter().any(|group| group == "rbac.authorization.k8s.io") {
+        if !groups
+            .iter()
+            .any(|group| group == "rbac.authorization.k8s.io")
+        {
             continue;
         }
         assert_eq!(groups, ["rbac.authorization.k8s.io"], "rule: {rule:?}");

@@ -84,9 +84,8 @@ impl InstanceService {
         let context = if self.precreated_auth_delegator
             && matches!(instance.settings.auth, AuthMode::Kubernetes)
         {
-            let api = kube::Api::<k8s_openapi::api::rbac::v1::ClusterRoleBinding>::all(
-                client.clone(),
-            );
+            let api =
+                kube::Api::<k8s_openapi::api::rbac::v1::ClusterRoleBinding>::all(client.clone());
             let found = api
                 .get_opt(&auth_delegator_binding_name(instance))
                 .await?
