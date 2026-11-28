@@ -40,8 +40,6 @@ pub(crate) struct InstanceSettings {
     // Read by the render of #402. Until then it is parsed only.
     #[allow(dead_code)] // read by the render of #402
     pub tokens_secret_provider_class: Option<String>,
-    // Read by the render in the next child of #432. Until then it is parsed only.
-    #[allow(dead_code)]
     pub image_pull_secrets: Vec<String>,
     pub backup: Option<InstanceBackup>,
     pub alerting: InstanceAlerting,
