@@ -25,6 +25,17 @@ impl ManagedService for Sift {
         }
     }
 
+    fn conditions(&self, _ready: &ReadyFacts, context: &Value) -> Vec<service_k8s::ConditionFact> {
+        InstanceService::default().conditions(&self.into(), context)
+    }
+
+    fn observed_conditions(&self) -> Vec<service_k8s::Condition> {
+        self.status
+            .as_ref()
+            .map(|status| status.conditions.clone())
+            .unwrap_or_default()
+    }
+
     fn readiness_targets(&self) -> Vec<ReadinessTarget> {
         InstanceService::default().readiness_targets(&self.into())
     }
