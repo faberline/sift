@@ -28,6 +28,7 @@ and [`llms.txt`](../llms.txt).
 | [security/threat-model.md](security/threat-model.md) | Trust boundaries of Sift, the control at each one and the test or CI job that proves it. |
 | [operations/performance.md](operations/performance.md) | Metric workload numbers, machine class, regression threshold and the CI gate. |
 | [adr/0003-core-owned-operations.md](adr/0003-core-owned-operations.md) | Which operations Sift hands to core crates, and what Sift keeps. |
+| [operations/operator-namespace-scoped.md](operations/operator-namespace-scoped.md) | Namespace-scoped operator mode: the bundles to apply, the objects a cluster admin pre-creates, and the watched namespaces. |
 
 The architecture contract itself is [`ddd.toml`](../ddd.toml) at the repository
 root. Run the check with `scripts/check-architecture.sh`; see

@@ -49,3 +49,17 @@ fn resources_field_is_documented() {
         "the reference does not say that the agents ignore spec.resources"
     );
 }
+
+#[test]
+fn namespace_scoped_doc_names_the_condition() {
+    let text = read("docs/operations/operator-namespace-scoped.md");
+    for needle in [
+        "PrecreatedBindingMissing",
+        "SIFT_OPERATOR_PRECREATED_AUTH_DELEGATOR",
+    ] {
+        assert!(
+            text.contains(needle),
+            "docs/operations/operator-namespace-scoped.md does not name {needle}"
+        );
+    }
+}
