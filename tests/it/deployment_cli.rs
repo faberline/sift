@@ -2277,4 +2277,161 @@ fn image_pull_secrets_empty_or_absent_renders_the_same_as_today() {
     }
 }
 
+fn pod_volume<'a>(pod: &'a Value, name: &str) -> Option<&'a Value> {
+    pod["volumes"]
+        .as_array()?
+        .iter()
+        .find(|volume| volume["name"] == name)
+}
+
+fn pod_spec<'a>(objects: &'a [Value], kind: &str, name: &str) -> &'a Value {
+    &object(objects, kind, name)["spec"]["template"]["spec"]
+}
+
+#[test]
+fn peer_tls_provider_class_renders_a_csi_volume_for_store_and_control() {
+    let objects = sift_resource_with_spec(json!({
+        "peerTlsSecret": "",
+        "peerTlsSecretProviderClass": "sift-peer-spc"
+    }))
+    .render();
+    for name in ["events-store", "events-control"] {
+        let pod = pod_spec(&objects, "StatefulSet", name);
+        let volume = pod_volume(pod, "peer-tls").expect(name);
+        assert_eq!(
+            *volume,
+            json!({
+                "name": "peer-tls",
+                "csi": {
+                    "driver": "secrets-store.csi.k8s.io",
+                    "readOnly": true,
+                    "volumeAttributes": {"secretProviderClass": "sift-peer-spc"}
+                }
+            }),
+            "{name}"
+        );
+        assert!(volume.get("secret").is_none(), "{name}");
+        let mounts = pod["containers"][0]["volumeMounts"]
+            .as_array()
+            .expect("volume mounts");
+        assert!(
+            mounts.contains(&json!({
+                "name": "peer-tls",
+                "mountPath": "/var/run/secrets/sift/peer-tls",
+                "readOnly": true
+            })),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn secrets_csi_driver_name_reaches_the_csi_volumes() {
+    let objects = sift_resource_with_spec(json!({
+        "peerTlsSecret": "",
+        "peerTlsSecretProviderClass": "sift-peer-spc",
+        "secretsCsiDriver": "secrets-store-gke.csi.k8s.io",
+        "alerting": {"webhookSecretProviderClass": "sift-hooks-spc"}
+    }))
+    .render();
+    let store = pod_volume(
+        pod_spec(&objects, "StatefulSet", "events-store"),
+        "peer-tls",
+    )
+    .expect("peer-tls volume");
+    assert_eq!(store["csi"]["driver"], "secrets-store-gke.csi.k8s.io");
+    let control = pod_volume(
+        pod_spec(&objects, "StatefulSet", "events-control"),
+        "webhooks",
+    )
+    .expect("webhooks volume");
+    assert_eq!(control["csi"]["driver"], "secrets-store-gke.csi.k8s.io");
+}
+
+#[test]
+fn webhook_provider_class_renders_a_csi_volume_for_control() {
+    let objects = sift_resource_with_spec(json!({
+        "alerting": {"webhookSecretProviderClass": "sift-hooks-spc"}
+    }))
+    .render();
+    let control = pod_spec(&objects, "StatefulSet", "events-control");
+    let volume = pod_volume(control, "webhooks").expect("webhooks volume");
+    assert_eq!(
+        *volume,
+        json!({
+            "name": "webhooks",
+            "csi": {
+                "driver": "secrets-store.csi.k8s.io",
+                "readOnly": true,
+                "volumeAttributes": {"secretProviderClass": "sift-hooks-spc"}
+            }
+        })
+    );
+    let mounts = control["containers"][0]["volumeMounts"]
+        .as_array()
+        .expect("volume mounts");
+    assert!(mounts.contains(&json!({
+        "name": "webhooks",
+        "mountPath": "/var/run/secrets/sift/webhooks",
+        "readOnly": true
+    })));
+    let env = control["containers"][0]["env"].as_array().expect("env");
+    assert!(env.contains(&json!({
+        "name": "SIFT_WEBHOOK_SECRET_DIRECTORY",
+        "value": "/var/run/secrets/sift/webhooks"
+    })));
+    let store = pod_spec(&objects, "StatefulSet", "events-store");
+    assert!(pod_volume(store, "webhooks").is_none());
+}
+
+#[test]
+fn webhook_provider_class_renders_a_csi_volume_for_single_node() {
+    let objects = single_node_resource(
+        "off",
+        json!({"alerting": {"webhookSecretProviderClass": "sift-hooks-spc"}}),
+    )
+    .render();
+    let all = pod_spec(&objects, "StatefulSet", "events-all");
+    let volume = pod_volume(all, "webhooks").expect("webhooks volume");
+    assert_eq!(
+        *volume,
+        json!({
+            "name": "webhooks",
+            "csi": {
+                "driver": "secrets-store.csi.k8s.io",
+                "readOnly": true,
+                "volumeAttributes": {"secretProviderClass": "sift-hooks-spc"}
+            }
+        })
+    );
+    assert!(pod_volume(all, "peer-tls").is_none());
+}
+
+#[test]
+fn secret_fields_render_the_same_secret_volumes_as_before() {
+    let objects = sift_resource_with_spec(json!({"alerting": {"webhookSecret": "hooks"}})).render();
+    for name in ["events-store", "events-control"] {
+        let volume = pod_volume(pod_spec(&objects, "StatefulSet", name), "peer-tls").expect(name);
+        assert_eq!(
+            *volume,
+            json!({"name": "peer-tls", "secret": {"secretName": "sift-peer-tls"}}),
+            "{name}"
+        );
+    }
+    let webhooks = pod_volume(
+        pod_spec(&objects, "StatefulSet", "events-control"),
+        "webhooks",
+    )
+    .expect("webhooks volume");
+    assert_eq!(
+        *webhooks,
+        json!({"name": "webhooks", "secret": {"secretName": "hooks", "defaultMode": 288}})
+    );
+    for (name, spec) in pod_template_specs(&objects) {
+        for volume in spec["volumes"].as_array().into_iter().flatten() {
+            assert!(volume.get("csi").is_none(), "{name}: {volume}");
+        }
+    }
+}
+
 // HANDWRITE-END

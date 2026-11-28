@@ -185,11 +185,23 @@ fn role_env(cx: &RenderCtx<'_>, spec: &SiftSpec, role: &str) -> Vec<Value> {
     env
 }
 
+/// A pod volume read from a Secrets Store CSI `SecretProviderClass`.
+fn csi_secret_volume(name: &str, driver: &str, class: &str) -> Value {
+    json!({"name": name, "csi": {"driver": driver, "readOnly": true, "volumeAttributes": {"secretProviderClass": class}}})
+}
+
 fn role_support_volumes(spec: &SiftSpec, role: &str) -> (Vec<Value>, Vec<Value>) {
     let mut volumes = Vec::new();
     let mut mounts = Vec::new();
     if matches!(role, CONTROL_COMPONENT | ALL_COMPONENT) {
-        if let Some(secret) = &spec.alerting.webhook_secret {
+        if let Some(class) = &spec.alerting.webhook_secret_provider_class {
+            volumes.push(csi_secret_volume(
+                "webhooks",
+                &spec.secrets_csi_driver,
+                class,
+            ));
+            mounts.push(json!({"name":"webhooks","mountPath":"/var/run/secrets/sift/webhooks","readOnly":true}));
+        } else if let Some(secret) = &spec.alerting.webhook_secret {
             volumes
                 .push(json!({"name":"webhooks","secret":{"secretName":secret,"defaultMode":288}}));
             mounts.push(json!({"name":"webhooks","mountPath":"/var/run/secrets/sift/webhooks","readOnly":true}));
@@ -200,9 +212,12 @@ fn role_support_volumes(spec: &SiftSpec, role: &str) -> (Vec<Value>, Vec<Value>)
         }
     }
     if matches!(role, STORE_COMPONENT | CONTROL_COMPONENT) {
-        volumes.push(json!({
-            "name":"peer-tls", "secret":{"secretName":spec.peer_tls_secret}
-        }));
+        volumes.push(match &spec.peer_tls_secret_provider_class {
+            Some(class) => csi_secret_volume("peer-tls", &spec.secrets_csi_driver, class),
+            None => json!({
+                "name":"peer-tls", "secret":{"secretName":spec.peer_tls_secret}
+            }),
+        });
         mounts.push(json!({
             "name":"peer-tls", "mountPath":"/var/run/secrets/sift/peer-tls", "readOnly":true
         }));

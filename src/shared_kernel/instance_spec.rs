@@ -16,11 +16,7 @@ pub(crate) struct InstanceSettings {
     pub image: String,
     pub init_image: Option<String>,
     pub peer_tls_secret: String,
-    // Read by the render of #401. Until then it is parsed only.
-    #[allow(dead_code)] // read by the render of #401
     pub peer_tls_secret_provider_class: Option<String>,
-    // Read by the render of #401. Until then it is parsed only.
-    #[allow(dead_code)] // read by the render of #401
     pub secrets_csi_driver: String,
     pub replicas_per_shard: u32,
     pub voter_count: u32,
@@ -113,7 +109,6 @@ pub(crate) struct InstanceBackup {
 #[derive(Clone, Debug)]
 pub(crate) struct InstanceAlerting {
     pub webhook_secret: Option<String>,
-    #[allow(dead_code)] // read by the render of #402
     pub webhook_secret_provider_class: Option<String>,
     pub allowed_hosts: Vec<String>,
 }
