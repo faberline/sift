@@ -245,10 +245,14 @@ fn crd_schema_has_the_conditional_cel_rules() {
     let rules = spec["x-kubernetes-validations"]
         .as_array()
         .expect("spec must carry x-kubernetes-validations");
-    assert_eq!(rules.len(), 2, "two conditional rules: {rules:?}");
+    assert_eq!(rules.len(), 3, "three rules: {rules:?}");
     assert_eq!(
         rules[0]["rule"],
-        "(has(self.topology) && self.topology == 'singleNode') || (has(self.peerTlsSecret) && size(self.peerTlsSecret) > 0)"
+        "(has(self.topology) && self.topology == 'singleNode') ? !(has(self.peerTlsSecret) && has(self.peerTlsSecretProviderClass)) : (has(self.peerTlsSecret) != has(self.peerTlsSecretProviderClass))"
+    );
+    assert_eq!(
+        rules[2]["rule"],
+        "!(has(self.tokensSecret) && has(self.tokensSecretProviderClass))"
     );
     assert_eq!(
         rules[1]["rule"],
@@ -260,4 +264,85 @@ fn crd_schema_has_the_conditional_cel_rules() {
             "each rule needs a message: {rule:?}"
         );
     }
+}
+
+fn crd_object_schema(path: &[&str]) -> serde_json::Value {
+    let mut node = crd_spec_schema();
+    for key in path {
+        node = node[*key].clone();
+    }
+    node
+}
+
+#[test]
+fn crd_schema_lists_secret_provider_classes() {
+    let spec = crd_spec_schema();
+    for name in ["peerTlsSecretProviderClass", "tokensSecretProviderClass"] {
+        let field = &spec["properties"][name];
+        assert_eq!(field["type"], "string", "{name}: {field}");
+        assert_eq!(field["minLength"], 1, "{name}: {field}");
+    }
+    let alerting = &spec["properties"]["alerting"]["properties"]["webhookSecretProviderClass"];
+    assert_eq!(
+        alerting["type"], "string",
+        "webhookSecretProviderClass: {alerting}"
+    );
+    assert_eq!(
+        alerting["minLength"], 1,
+        "webhookSecretProviderClass: {alerting}"
+    );
+    let backup = &spec["properties"]["backup"]["properties"]["adminTokenSecretProviderClass"];
+    assert_eq!(
+        backup["type"], "string",
+        "adminTokenSecretProviderClass: {backup}"
+    );
+    assert_eq!(
+        backup["minLength"], 1,
+        "adminTokenSecretProviderClass: {backup}"
+    );
+    let csi = &spec["properties"]["secretsCsiDriver"];
+    assert_eq!(csi["minLength"], 1, "secretsCsiDriver: {csi}");
+    assert_eq!(
+        csi["default"], "secrets-store.csi.k8s.io",
+        "secretsCsiDriver: {csi}"
+    );
+}
+
+#[test]
+fn crd_schema_secret_pairs_have_exclusion_rules() {
+    let spec = crd_spec_schema();
+    assert_eq!(spec["required"], serde_json::json!(["image"]));
+    let rules = spec["x-kubernetes-validations"]
+        .as_array()
+        .expect("spec rules");
+    let has_rule = |needle: &str| {
+        rules
+            .iter()
+            .any(|rule| rule["rule"].as_str().is_some_and(|r| r.contains(needle)))
+    };
+    assert!(has_rule(
+        "has(self.peerTlsSecret) != has(self.peerTlsSecretProviderClass)"
+    ));
+    assert!(has_rule("self.topology == 'singleNode'"));
+    assert!(has_rule("tokensSecretProviderClass"));
+    assert!(has_rule("gcpProjectId"), "the gcp rule must stay");
+
+    let alerting = crd_object_schema(&["properties", "alerting"]);
+    assert!(
+        alerting["x-kubernetes-validations"]
+            .as_array()
+            .is_some_and(|rules| rules.iter().any(|rule| rule["rule"]
+                .as_str()
+                .is_some_and(|r| r.contains("webhookSecretProviderClass")))),
+        "alerting needs the webhook pair rule: {alerting}"
+    );
+    let backup = crd_object_schema(&["properties", "backup"]);
+    assert!(
+        backup["x-kubernetes-validations"]
+            .as_array()
+            .is_some_and(|rules| rules.iter().any(|rule| rule["rule"]
+                .as_str()
+                .is_some_and(|r| r.contains("adminTokenSecretProviderClass")))),
+        "backup needs the admin token pair rule: {backup}"
+    );
 }

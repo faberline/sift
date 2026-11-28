@@ -31,12 +31,16 @@
                 ],
                 "x-kubernetes-validations": [
                   {
-                    "rule": "(has(self.topology) && self.topology == 'singleNode') || (has(self.peerTlsSecret) && size(self.peerTlsSecret) > 0)",
-                    "message": "spec.peerTlsSecret is required when spec.topology is ha"
+                    "rule": "(has(self.topology) && self.topology == 'singleNode') ? !(has(self.peerTlsSecret) && has(self.peerTlsSecretProviderClass)) : (has(self.peerTlsSecret) != has(self.peerTlsSecretProviderClass))",
+                    "message": "set exactly one of spec.peerTlsSecret and spec.peerTlsSecretProviderClass when spec.topology is ha; set at most one when it is singleNode"
                   },
                   {
                     "rule": "(has(self.logs) && has(self.logs.agent) && self.logs.agent == 'disabled') || (has(self.gcpProjectId) && has(self.gkeClusterName) && has(self.gkeLocation))",
                     "message": "spec.gcpProjectId, spec.gkeClusterName and spec.gkeLocation are required while the log agent is enabled (spec.logs.agent)"
+                  },
+                  {
+                    "rule": "!(has(self.tokensSecret) && has(self.tokensSecretProviderClass))",
+                    "message": "set at most one of spec.tokensSecret and spec.tokensSecretProviderClass"
                   }
                 ],
                 "properties": {
@@ -59,6 +63,15 @@
                   "peerTlsSecret": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "peerTlsSecretProviderClass": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "secretsCsiDriver": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "secrets-store.csi.k8s.io"
                   },
                   "replicasPerShard": {
                     "type": "integer",
@@ -461,10 +474,24 @@
                   "tokensSecret": {
                     "type": "string"
                   },
+                  "tokensSecretProviderClass": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "alerting": {
                     "type": "object",
+                    "x-kubernetes-validations": [
+                      {
+                        "rule": "!(has(self.webhookSecret) && has(self.webhookSecretProviderClass))",
+                        "message": "set at most one of webhookSecret and webhookSecretProviderClass"
+                      }
+                    ],
                     "properties": {
                       "webhookSecret": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "webhookSecretProviderClass": {
                         "type": "string",
                         "minLength": 1
                       },
@@ -498,6 +525,12 @@
                       "schedule",
                       "destination"
                     ],
+                    "x-kubernetes-validations": [
+                      {
+                        "rule": "!(has(self.adminTokenSecret) && has(self.adminTokenSecretProviderClass))",
+                        "message": "set at most one of adminTokenSecret and adminTokenSecretProviderClass"
+                      }
+                    ],
                     "properties": {
                       "schedule": {
                         "type": "string"
@@ -511,6 +544,10 @@
                       },
                       "adminTokenSecret": {
                         "type": "string"
+                      },
+                      "adminTokenSecretProviderClass": {
+                        "type": "string",
+                        "minLength": 1
                       }
                     }
                   }

@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::operations::interfaces::crd::sift_spec::{AuthMode, LogsAgent, Sift, Topology};
+use crate::operations::interfaces::crd::sift_spec::{
+    AuthMode, LogsAgent, Sift, SiftSpec, Topology,
+};
 use crate::shared_kernel::instance_spec::{
     InstanceAlerting, InstanceArchive, InstanceAuth, InstanceBackup, InstanceBootstrap,
     InstanceIngest, InstanceLogs, InstanceMetrics, InstancePlacement, InstanceResources,
@@ -41,6 +43,8 @@ impl From<&Sift> for InstanceSpec {
                 image: spec.image.clone(),
                 init_image: spec.init_image.clone(),
                 peer_tls_secret: spec.peer_tls_secret.clone(),
+                peer_tls_secret_provider_class: spec.peer_tls_secret_provider_class.clone(),
+                secrets_csi_driver: spec.secrets_csi_driver.clone(),
                 replicas_per_shard: spec.replicas_per_shard,
                 voter_count: spec.voter_count,
                 data_size: spec.data_size.clone(),
@@ -100,9 +104,14 @@ impl From<&Sift> for InstanceSpec {
                     namespaces: spec.metrics.namespaces.clone(),
                 },
                 tokens_secret: spec.tokens_secret.clone(),
+                tokens_secret_provider_class: spec.tokens_secret_provider_class.clone(),
                 image_pull_secrets: spec.image_pull_secrets.clone(),
                 alerting: InstanceAlerting {
                     webhook_secret: spec.alerting.webhook_secret.clone(),
+                    webhook_secret_provider_class: spec
+                        .alerting
+                        .webhook_secret_provider_class
+                        .clone(),
                     allowed_hosts: spec.alerting.allowed_hosts.clone(),
                 },
                 backup: spec.backup.as_ref().map(|v| InstanceBackup {
@@ -110,6 +119,7 @@ impl From<&Sift> for InstanceSpec {
                     destination: v.destination.clone(),
                     retention_secs: v.retention_secs,
                     admin_token_secret: v.admin_token_secret.clone(),
+                    admin_token_secret_provider_class: v.admin_token_secret_provider_class.clone(),
                 }),
                 gcp_project_id: spec.gcp_project_id.clone(),
                 gke_cluster_name: spec.gke_cluster_name.clone(),
@@ -117,6 +127,40 @@ impl From<&Sift> for InstanceSpec {
             },
         }
     }
+}
+
+/// Checks the pairs of Secret fields. The CRD rules check the same pairs at admission.
+#[allow(dead_code)] // the CEL rule of the CRD is the admission check; no caller yet
+pub(crate) fn validate_secret_sources(spec: &SiftSpec) -> Result<(), String> {
+    let peer_secret = !spec.peer_tls_secret.is_empty();
+    let peer_class = spec.peer_tls_secret_provider_class.is_some();
+    if peer_secret && peer_class {
+        return Err(
+            "spec.peerTlsSecret and spec.peerTlsSecretProviderClass are both set; set at most one"
+                .into(),
+        );
+    }
+    if !peer_secret && !peer_class && !matches!(spec.topology, Topology::SingleNode) {
+        return Err("neither spec.peerTlsSecret nor spec.peerTlsSecretProviderClass is set; set exactly one when spec.topology is ha".into());
+    }
+    if spec.tokens_secret.is_some() && spec.tokens_secret_provider_class.is_some() {
+        return Err(
+            "spec.tokensSecret and spec.tokensSecretProviderClass are both set; set at most one"
+                .into(),
+        );
+    }
+    if spec.alerting.webhook_secret.is_some()
+        && spec.alerting.webhook_secret_provider_class.is_some()
+    {
+        return Err("spec.alerting.webhookSecret and spec.alerting.webhookSecretProviderClass are both set; set at most one".into());
+    }
+    if let Some(backup) = &spec.backup {
+        if backup.admin_token_secret.is_some() && backup.admin_token_secret_provider_class.is_some()
+        {
+            return Err("spec.backup.adminTokenSecret and spec.backup.adminTokenSecretProviderClass are both set; set at most one".into());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -248,5 +292,135 @@ mod tests {
         .unwrap();
         let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
         assert_eq!(settings.image_pull_secrets, ["ghcr-pull"]);
+    }
+
+    fn spec_of(value: serde_json::Value) -> SiftSpec {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn provider_class_only_peer_spec_is_accepted() {
+        let spec = spec_of(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecretProviderClass": "sift-peer-spc"
+        }));
+        assert_eq!(super::validate_secret_sources(&spec), Ok(()));
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(
+            settings.peer_tls_secret_provider_class.as_deref(),
+            Some("sift-peer-spc")
+        );
+        assert_eq!(settings.secrets_csi_driver, "secrets-store.csi.k8s.io");
+    }
+
+    #[test]
+    fn existing_peer_secret_spec_still_converts() {
+        let spec = spec_of(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "sift-peer-tls"
+        }));
+        assert_eq!(super::validate_secret_sources(&spec), Ok(()));
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(settings.peer_tls_secret, "sift-peer-tls");
+    }
+
+    #[test]
+    fn peer_secret_and_provider_class_together_are_refused() {
+        for topology in [None, Some("singleNode")] {
+            let mut value = serde_json::json!({
+                "image": "example.invalid/sift:test",
+                "peerTlsSecret": "sift-peer-tls",
+                "peerTlsSecretProviderClass": "sift-peer-spc"
+            });
+            if let Some(topology) = topology {
+                value["topology"] = serde_json::json!(topology);
+            }
+            let spec = spec_of(value);
+            let err = super::validate_secret_sources(&spec).unwrap_err();
+            assert!(
+                err.contains("peerTlsSecret") && err.contains("peerTlsSecretProviderClass"),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn neither_peer_field_is_refused_for_ha() {
+        let spec = spec_of(serde_json::json!({"image": "example.invalid/sift:test"}));
+        let err = super::validate_secret_sources(&spec).unwrap_err();
+        assert!(
+            err.contains("peerTlsSecret") && err.contains("peerTlsSecretProviderClass"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn single_node_without_peer_field_is_accepted() {
+        let bare = spec_of(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "topology": "singleNode"
+        }));
+        assert_eq!(super::validate_secret_sources(&bare), Ok(()));
+        let class_only = spec_of(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "topology": "singleNode",
+            "peerTlsSecretProviderClass": "p"
+        }));
+        assert_eq!(super::validate_secret_sources(&class_only), Ok(()));
+    }
+
+    #[test]
+    fn tokens_alerting_and_backup_pairs_are_refused_when_both_set() {
+        let cases = [
+            (
+                serde_json::json!({
+                    "image": "example.invalid/sift:test",
+                    "peerTlsSecret": "t",
+                    "tokensSecret": "a",
+                    "tokensSecretProviderClass": "b"
+                }),
+                "tokensSecret",
+                "tokensSecretProviderClass",
+            ),
+            (
+                serde_json::json!({
+                    "image": "example.invalid/sift:test",
+                    "peerTlsSecret": "t",
+                    "alerting": {"webhookSecret": "a", "webhookSecretProviderClass": "b"}
+                }),
+                "webhookSecret",
+                "webhookSecretProviderClass",
+            ),
+            (
+                serde_json::json!({
+                    "image": "example.invalid/sift:test",
+                    "peerTlsSecret": "t",
+                    "backup": {
+                        "schedule": "0 * * * *",
+                        "destination": "gs://bucket/path",
+                        "adminTokenSecret": "a",
+                        "adminTokenSecretProviderClass": "b"
+                    }
+                }),
+                "adminTokenSecret",
+                "adminTokenSecretProviderClass",
+            ),
+        ];
+        for (value, first, second) in cases {
+            let spec = spec_of(value);
+            let err = super::validate_secret_sources(&spec).unwrap_err();
+            assert!(err.contains(first) && err.contains(second), "{err}");
+        }
+    }
+
+    #[test]
+    fn secrets_csi_driver_can_be_set() {
+        let spec = spec_of(serde_json::json!({
+            "image": "example.invalid/sift:test",
+            "peerTlsSecret": "t",
+            "secretsCsiDriver": "secrets-store-gke.csi.k8s.io"
+        }));
+        let settings = InstanceSpec::from(&Sift::new("events", spec)).settings;
+        assert_eq!(settings.secrets_csi_driver, "secrets-store-gke.csi.k8s.io");
     }
 }

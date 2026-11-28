@@ -24,9 +24,15 @@ pub struct SiftSpec {
     #[serde(default)]
     pub init_image: Option<String>,
     /// Secret with tls.crt, tls.key, and ca.crt for the dedicated Raft port.
-    /// Required for `topology: ha`; `singleNode` does not use it.
+    /// Required for `topology: ha`; `singleNode` does not use it. Set at most one of this and `peer_tls_secret_provider_class`.
     #[serde(default)]
     pub peer_tls_secret: String,
+    /// Name of a `SecretProviderClass` that provides the peer mTLS files. Set at most one of this and `peer_tls_secret`.
+    #[serde(default)]
+    pub peer_tls_secret_provider_class: Option<String>,
+    /// Name of the CSI driver that serves the `SecretProviderClass` objects of this instance.
+    #[serde(default = "default_secrets_csi_driver")]
+    pub secrets_csi_driver: String,
     #[serde(default = "three")]
     pub replicas_per_shard: u32,
     #[serde(default = "three")]
@@ -60,6 +66,9 @@ pub struct SiftSpec {
     pub metrics: MetricsSpec,
     #[serde(default)]
     pub tokens_secret: Option<String>,
+    /// `SecretProviderClass` that provides the token registry. Set at most one of this and `tokens_secret`.
+    #[serde(default)]
+    pub tokens_secret_provider_class: Option<String>,
     /// Names of Secrets in the instance namespace that the kubelet uses to pull the images of every pod the operator makes. Empty means no pull secret.
     #[serde(default)]
     pub image_pull_secrets: Vec<String>,
@@ -101,6 +110,9 @@ pub struct BackupSpec {
     pub retention_secs: Option<u64>,
     #[serde(default)]
     pub admin_token_secret: Option<String>,
+    /// `SecretProviderClass` that provides the admin token of the backup job. Set at most one of this and `admin_token_secret`.
+    #[serde(default)]
+    pub admin_token_secret_provider_class: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -169,6 +181,8 @@ pub struct RoleResourcesSpec {
 pub struct AlertingSpec {
     /// Secret keys are reference-name.json with an HTTPS URL and optional bearer_token.
     pub webhook_secret: Option<String>,
+    /// `SecretProviderClass` that provides the webhook secret files. Set at most one of this and `webhook_secret`.
+    pub webhook_secret_provider_class: Option<String>,
     pub allowed_hosts: Vec<String>,
 }
 
@@ -265,6 +279,10 @@ pub struct SiftStatus {
 
 fn three() -> u32 {
     3
+}
+
+fn default_secrets_csi_driver() -> String {
+    "secrets-store.csi.k8s.io".to_string()
 }
 
 fn default_retention_days() -> u32 {
